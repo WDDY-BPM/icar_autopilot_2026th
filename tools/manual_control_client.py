@@ -74,7 +74,7 @@ class TakeoverConsole:
             command = "".join(mapping[k] for k in ("w", "s", "a", "d")
                               if k in self.keys)
             self.send(command or "PING")
-            time.sleep(0.1)
+            time.sleep(0.05)
 
     def receive_loop(self):
         stream = self.sock.makefile("rb")

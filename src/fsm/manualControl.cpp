@@ -121,10 +121,6 @@ bool ManualControlThread::isManualControl() {
 }
 
 void ManualControlThread::applyManualControl(float *speed, uint16_t *steering) {
-    cout << "[Manual] Applying manual control - Forward:" << manualControl.forward
-         << ", Backward:" << manualControl.backward
-         << ", Left:" << manualControl.left
-         << ", Right:" << manualControl.right << endl;
 
     if (manualControl.emergencyStop) {
         *speed = 0;
@@ -226,9 +222,12 @@ void ManualControlThread::handleClientConnection() {
     // Send images and state
     while (running && connected) {
         // Send vehicle state (higher frequency for state)
-        std::lock_guard<std::mutex> lock(mtxState);
-        std::string state = "STATE:" + std::to_string(vehicleState.speed) +
-                          "," + std::to_string(vehicleState.steering) + "\n";
+        std::string state;
+        {
+            std::lock_guard<std::mutex> lock(mtxState);
+            state = "STATE:" + std::to_string(vehicleState.speed) +
+                    "," + std::to_string(vehicleState.steering) + "\n";
+        }
 
         // 发送状态数据（带错误检查）
         int stateSent = send(clientSocket, state.c_str(), state.length(), 0);
@@ -237,33 +236,28 @@ void ManualControlThread::handleClientConnection() {
             break;
         }
 
-        // Send image if available (every frame)
+        // Copy the newest frame under the lock, then encode/send without
+        // blocking the vehicle control thread.
+        cv::Mat frameToSend;
         if (hasImage) {
             std::lock_guard<std::mutex> imgLock(mtxImg);
-            if (!image.empty()) {
-                try {
-                    // 降低编码负载和无线网络带宽
-                    cv::Mat streamFrame;
-                    cv::resize(image, streamFrame, cv::Size(640, 360));
-                    std::vector<uchar> buf;
-                    std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, 40};
-                    cv::imencode(".jpg", streamFrame, buf, params);
-
-
-                    std::string header = "IMAGE:" + std::to_string(buf.size()) + "\n";
-
-                    // 发送图像头
-                    send(clientSocket, header.c_str(), header.length(), 0);
-                    // 发送图像数据
-                    send(clientSocket, buf.data(), buf.size(), 0);
-                } catch (const cv::Exception& e) {
-                    cerr << "[Manual] Image encode error: " << e.what() << endl;
-                }
-            }
+            if (!image.empty())
+                frameToSend = image.clone();
             hasImage = false;
         }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(66));  // 约15 FPS
+        if (!frameToSend.empty()) {
+            try {
+                std::vector<uchar> buf;
+                std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, 50};
+                cv::imencode(".jpg", frameToSend, buf, params);
+                std::string header = "IMAGE:" + std::to_string(buf.size()) + "\n";
+                send(clientSocket, header.c_str(), header.length(), 0);
+                send(clientSocket, buf.data(), buf.size(), 0);
+            } catch (const cv::Exception& e) {
+                cerr << "[Manual] Image encode error: " << e.what() << endl;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(33));  // 约30 FPS
     }
 }
 
