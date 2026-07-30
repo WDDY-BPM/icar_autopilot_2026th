@@ -1,0 +1,37 @@
+diff --git a/src/fsm/manualControl.cpp b/src/fsm/manualControl.cpp
+--- a/src/fsm/manualControl.cpp
++++ b/src/fsm/manualControl.cpp
+@@
+ #include "utils/tools.hpp"
+ #include <unistd.h>
++#include <signal.h>
+@@
+ void ManualControlThread::start() {
++    // Do not terminate icar if a port probe connects and immediately closes.
++    signal(SIGPIPE, SIG_IGN);
+     running = true;
+@@
+         connected = false;
++        // Communication loss is always a hard stop.
++        manualControl.forward = false;
++        manualControl.backward = false;
++        manualControl.left = false;
++        manualControl.right = false;
++        manualControl.emergencyStop = true;
++        controlChanged = true;
+         if (clientSocket >= 0) {
+diff --git a/include/icar.hpp b/include/icar.hpp
+--- a/include/icar.hpp
++++ b/include/icar.hpp
+@@
+-        if (!fsmFactory.busy->isInManualTakeover() && fsmFactory.manual->isConnected())
+-        {
+-            cout << "[Icar] Remote connected, starting manual takeover" << endl;
+-            fsmFactory.busy->startManualTakeover();
+-        }
++        // A monitoring connection alone must never start takeover.
++        // FsmBusy starts it only after construction-zone detection.
+@@
+-            else if (fsmFactory.manual->isManualControl())
++            else if (fsmFactory.manual->isConnected() &&
++                     fsmFactory.manual->isManualControl())
