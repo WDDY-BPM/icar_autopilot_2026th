@@ -56,6 +56,7 @@ private:
         float speed;
         float steering;
         bool emergency;
+        bool manual;
     } vehicleState;
 
     // Manual control
@@ -84,7 +85,7 @@ public:
     void start();
     void stop();
     void sendImage(cv::Mat &img);
-    void updateVehicleState(float speed, float steering);
+    void updateVehicleState(float speed, float steering, bool manual);
     bool isManualControl();
     void applyManualControl(float *speed, uint16_t *steering);
     bool checkForReturnKey();

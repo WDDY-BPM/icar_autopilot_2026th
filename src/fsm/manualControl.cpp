@@ -23,12 +23,17 @@
 #include "fsm/manualControl.hpp"
 #include "utils/tools.hpp"
 #include <unistd.h>
+#include <signal.h>
 
 ManualControlThread::ManualControlThread() {
     serverSocket = -1;
     clientSocket = -1;
     running = false;
     connected = false;
+    vehicleState.speed = 0.0f;
+    vehicleState.steering = PWMSERVOMID;
+    vehicleState.emergency = false;
+    vehicleState.manual = false;
 }
 
 ManualControlThread::~ManualControlThread() {
@@ -36,6 +41,7 @@ ManualControlThread::~ManualControlThread() {
 }
 
 void ManualControlThread::start() {
+    signal(SIGPIPE, SIG_IGN);
     running = true;
     lastContact = std::chrono::steady_clock::now();
 
@@ -108,11 +114,12 @@ void ManualControlThread::sendImage(cv::Mat &img) {
     }
 }
 
-void ManualControlThread::updateVehicleState(float speed, float steering) {
+void ManualControlThread::updateVehicleState(float speed, float steering, bool manual) {
     std::lock_guard<std::mutex> lock(mtxState);
     vehicleState.speed = speed;
     vehicleState.steering = steering;
     vehicleState.emergency = false;
+    vehicleState.manual = manual;
 }
 
 bool ManualControlThread::isManualControl() {
@@ -190,6 +197,11 @@ void ManualControlThread::run() {
         handleClientConnection();
 
         connected = false;
+        manualControl.forward = false;
+        manualControl.backward = false;
+        manualControl.left = false;
+        manualControl.right = false;
+        manualControl.emergencyStop = true;
         if (clientSocket >= 0) {
             close(clientSocket);
             clientSocket = -1;
@@ -226,7 +238,8 @@ void ManualControlThread::handleClientConnection() {
         {
             std::lock_guard<std::mutex> lock(mtxState);
             state = "STATE:" + std::to_string(vehicleState.speed) +
-                    "," + std::to_string(vehicleState.steering) + "\n";
+                    "," + std::to_string(vehicleState.steering) +
+                    "," + (vehicleState.manual ? "MANUAL" : "AUTO") + "\n";
         }
 
         // 发送状态数据（带错误检查）
@@ -283,11 +296,6 @@ void ManualControlThread::receiveCommands() {
             lineBuf.erase(0, pos + 1);
 
             processCommand(cmd);
-
-            if (manualControl.returnAuto) {
-                printf("[Manual] Return to auto command received\n");
-                goto done;
-            }
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(10));

@@ -20,6 +20,7 @@ class TakeoverConsole:
         self.sock.settimeout(1)
         self.alive = True
         self.keys = set()
+        self.manual_mode = False
         self.frames = queue.Queue(maxsize=1)
         self.root = tk.Tk()
         self.root.title("小车第一视角接管 - %s:%d" % (host, port))
@@ -51,7 +52,8 @@ class TakeoverConsole:
                 self.link_lost()
 
     def key_down(self, event):
-        self.keys.add(event.keysym.lower())
+        if self.manual_mode:
+            self.keys.add(event.keysym.lower())
 
     def key_up(self, event):
         self.keys.discard(event.keysym.lower())
@@ -62,6 +64,8 @@ class TakeoverConsole:
         self.status.set("急停")
 
     def return_auto(self, _event=None):
+        if not self.manual_mode:
+            return
         self.keys.clear()
         self.send("STOP")
         if messagebox.askyesno("切回自动", "确认小车已安全驶出施工路况？"):
@@ -73,7 +77,7 @@ class TakeoverConsole:
         while self.alive:
             command = "".join(mapping[k] for k in ("w", "s", "a", "d")
                               if k in self.keys)
-            self.send(command or "PING")
+            self.send(command if self.manual_mode and command else "PING")
             time.sleep(0.05)
 
     def receive_loop(self):
@@ -85,9 +89,16 @@ class TakeoverConsole:
                     raise ConnectionError
                 text = line.decode("ascii", errors="replace").strip()
                 if text.startswith("STATE:"):
-                    speed, servo = text[6:].split(",", 1)
-                    self.status.set("手动接管　速度 %.2f m/s　舵机 %.0f" %
-                                    (float(speed), float(servo)))
+                    fields = text[6:].split(",")
+                    speed, servo = fields[0], fields[1]
+                    mode = fields[2] if len(fields) > 2 else "MANUAL"
+                    was_manual = self.manual_mode
+                    self.manual_mode = mode == "MANUAL"
+                    if was_manual != self.manual_mode:
+                        self.keys.clear()
+                    mode_text = "手动接管" if self.manual_mode else "自动驾驶（仅监看）"
+                    self.status.set("%s　速度 %.2f m/s　舵机 %.0f" %
+                                    (mode_text, float(speed), float(servo)))
                 elif text.startswith("IMAGE:"):
                     size = int(text[6:])
                     raw = stream.read(size)

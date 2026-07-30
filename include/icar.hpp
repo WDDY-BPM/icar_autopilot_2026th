@@ -161,8 +161,6 @@ private:
             fsmFactory.busy->resetLap();
             fsmFactory.station->resetLap();
             fsmFactory.obstacle->resetLap();
-            if (!fsmFactory.manual->isManualControl())
-                fsmFactory.manual->disconnectClient(); // 清理上一圈的远程连接残留，避免isConnected误判
             params->alertCountdown = 0;                // 复位蜂鸣器报警
             params->alertDecelCount = 0;               // 复位报警减速
             params->busyAlertCountdown = 0;            // 复位施工区蜂鸣
@@ -176,27 +174,23 @@ private:
             params->mode = FsmMode::NORMAL;
 
         // 处理手动接管（优先执行，跳过所有FSM检测）
-        if (!fsmFactory.busy->isInManualTakeover() && fsmFactory.manual->isConnected())
-        {
-            cout << "[Icar] Remote connected, starting manual takeover" << endl;
-            fsmFactory.busy->startManualTakeover();
-        }
+        // Monitoring connection does not trigger takeover.
+
         params->manualTakeover = fsmFactory.busy->isInManualTakeover();
         if (params->manualTakeover)
         {
             cout << "[Icar] Manual takeover active." << endl;
-            fsmFactory.manual->updateVehicleState(params->ctrl.speed, params->ctrl.servo);
 
             // 检查是否返回自动模式
             if (fsmFactory.manual->checkForReturnKey())
             {
                 fsmFactory.busy->endManualTakeover();
-                fsmFactory.manual->disconnectClient(); // 断开TCP连接，恢复自动控制
                 params->ctrl.stop = false;
                 params->mode = FsmMode::NORMAL;   // 恢复自动模式
                 params->takeoverJustEnded = true; // 通知各FSM手动接管刚结束
             }
-            else if (fsmFactory.manual->isManualControl())
+            else if (fsmFactory.manual->isConnected() &&
+                     fsmFactory.manual->isManualControl())
             {
                 fsmFactory.manual->applyManualControl(&params->ctrl.speed, &params->ctrl.servo);
                 params->ctrl.stop = false;
@@ -534,16 +528,18 @@ public:
         // 同步手动接管状态（runFsm中endManualTakeover可能改变了状态，但params->manualTakeover未更新）
         params->manualTakeover = fsmFactory.busy->isInManualTakeover();
 
-        // 手动接管期间发送彩色图像
-        if (params->manualTakeover && fsmFactory.manual->isConnected())
+        // Always publish first-person video and current control mode.
+        fsmFactory.manual->updateVehicleState(
+            params->ctrl.speed, params->ctrl.servo, params->manualTakeover);
+        if (fsmFactory.manual->isConnected())
             fsmFactory.manual->sendImage(img);
 
         //[06] 控制中心计算（手动接管时跳过）
         if (!params->manualTakeover)
             center->fitting(params);
 
-        //[07] 车辆运动控制（手动接管或远程连接时跳过，保持远程控制值）
-        if (!fsmFactory.busy->isInManualTakeover() && !fsmFactory.manual->isConnected())
+        //[07] 车辆运动控制（仅手动接管时跳过）
+        if (!fsmFactory.busy->isInManualTakeover())
         {
             motion->poseControl(params);
             motion->speedControl(params);
