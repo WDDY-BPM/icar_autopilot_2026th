@@ -347,17 +347,8 @@ public:
     {
         switch (serialStr.buffFinish[1])
         {
-        case USB_ADDR_KEY: // 接收按键信息
-            if (running)
-            {
-                running = false;
-                killAll = true;
-            }
-            else
-            {
-                keypress = true;
-                running = true;
-            }
+        case USB_ADDR_KEY: // Legacy single-button event; never controls receiver lifetime.
+            keypress = true;
             break;
         case 6: // 接收按键信息
             if (serialStr.buffFinish[3] == 1)

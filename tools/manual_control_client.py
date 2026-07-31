@@ -23,6 +23,7 @@ class TakeoverConsole:
         self.alive = True
         self.keys = set()
         self.manual_mode = False
+        self.estop_latched = False
         self.frames = queue.Queue(maxsize=1)
         self.status_updates = queue.Queue()
         self.root = tk.Tk()
@@ -111,6 +112,7 @@ class TakeoverConsole:
                         self.keys.clear()
                     mode_text = "手动接管" if self.manual_mode else "自动驾驶（仅监看）"
                     estop = len(fields) > 3 and fields[3] == "ESTOP"
+                    self.estop_latched = estop
                     if estop:
                         mode_text = "锁存急停（按 C 确认解除）"
                     self.set_status("%s　速度 %.2f m/s　舵机 %.0f" %
@@ -166,7 +168,13 @@ class TakeoverConsole:
         if self.alive:
             self.alive = False
             self.keys.clear()
-            self.set_status("连接中断：车端将自动停车")
+            if self.estop_latched:
+                message = "连接中断：车辆保持锁存急停"
+            elif self.manual_mode:
+                message = "接管连接中断：车端将在 500 ms 内停车"
+            else:
+                message = "监控连接中断：自动驾驶继续运行"
+            self.set_status(message)
 
     def close(self):
         if self.alive:

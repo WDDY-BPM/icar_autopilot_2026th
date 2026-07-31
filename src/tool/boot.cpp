@@ -30,6 +30,7 @@
 #include <limits.h>
 #include <chrono>
 #include <csignal>
+#include <cerrno>
 
 using namespace std;
 int launchCmd(const std::string &workdir, const std::string &cmd, bool wait);
@@ -63,6 +64,18 @@ static bool icarProcessExists()
     return std::system("pgrep -x icar >/dev/null 2>&1") == 0;
 }
 
+static void terminateTrackedChild(pid_t &pid)
+{
+    if (pid <= 0)
+        return;
+    const pid_t child = pid;
+    kill(child, SIGKILL);
+    while (waitpid(child, nullptr, 0) < 0 && errno == EINTR)
+    {
+    }
+    pid = -1;
+}
+
 int main(int argc, char const *argv[])
 {
     Server server;
@@ -94,8 +107,8 @@ int main(int argc, char const *argv[])
         if (server.uart.killAll.exchange(false))
         {
             server.uart.carControl(0, 1500);
+            terminateTrackedChild(appPid);
             std::system("killall -9 icar collection img2video calibration camera detection main");
-            appPid = -1;
             clientWasSeen = false;
             printf("Kill all app!\n");
         }
@@ -105,8 +118,8 @@ int main(int argc, char const *argv[])
             {
                 server.transmit("Keypress");
                 server.handleWatchdogTimeout();
+                terminateTrackedChild(appPid);
                 std::system("pkill -x icar");
-                appPid = -1;
                 clientWasSeen = false;
                 printf("App was killed!\n");
             }
@@ -120,9 +133,7 @@ int main(int argc, char const *argv[])
                 }
                 else
                 {
-                    kill(appPid, SIGKILL);
-                    waitpid(appPid, nullptr, 0);
-                    appPid = -1;
+                    terminateTrackedChild(appPid);
                     server.uart.carControl(0, 1500);
                     printf("Unconnected app was stopped; press again to restart.\n");
                 }
@@ -148,6 +159,7 @@ int main(int argc, char const *argv[])
         else if (server.uart.exitBoot.exchange(false))
         {
             server.uart.carControl(0, 1500);
+            terminateTrackedChild(appPid);
             std::system("killall -9 icar collection img2video calibration camera detection main");
             break;
         }
