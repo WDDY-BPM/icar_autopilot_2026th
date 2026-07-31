@@ -25,6 +25,9 @@
 #include <unistd.h>
 #include <signal.h>
 #include <cerrno>
+#include <cstdlib>
+#include <cstring>
+#include <algorithm>
 
 namespace {
 bool sendAll(int socketFd, const void *data, size_t length)
@@ -53,6 +56,10 @@ ManualControlThread::ManualControlThread() {
     vehicleState.steering = PWMSERVOMID;
     vehicleState.emergency = false;
     vehicleState.manual = false;
+    const char *token = std::getenv("ICAR_MANUAL_TOKEN");
+    const char *source = std::getenv("ICAR_MANUAL_ALLOWED_IP");
+    authToken = token ? token : "";
+    allowedIp = source ? source : "";
 }
 
 ManualControlThread::~ManualControlThread() {
@@ -61,6 +68,10 @@ ManualControlThread::~ManualControlThread() {
 
 void ManualControlThread::start() {
     signal(SIGPIPE, SIG_IGN);
+    if (authToken.empty()) {
+        std::cerr << "[Manual] ICAR_MANUAL_TOKEN is not set; takeover service disabled\n";
+        return;
+    }
     running = true;
     lastContact = std::chrono::steady_clock::now();
 
@@ -205,6 +216,13 @@ void ManualControlThread::run() {
             continue;
         }
 
+        if (!authenticateClient()) {
+            close(clientSocket);
+            clientSocket = -1;
+            continue;
+        }
+
+        resetManualControl(true);
         connected = true;
         lastContact = std::chrono::steady_clock::now();  // 重置超时计时（防止旧连接的lastContact导致立即超时）
         // 禁用Nagle算法，降低控制延迟
@@ -228,14 +246,58 @@ void ManualControlThread::run() {
     }
 }
 
-void ManualControlThread::handleClientConnection() {
-    // Reset manual control
+bool ManualControlThread::authenticateClient() {
+    char peer[INET_ADDRSTRLEN] = {};
+    inet_ntop(AF_INET, &clientAddr.sin_addr, peer, sizeof(peer));
+    if (!allowedIp.empty() && allowedIp != peer) {
+        std::cerr << "[Manual] Rejected source " << peer << "\n";
+        return false;
+    }
+
+    timeval timeout{3, 0};
+    setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    std::string line;
+    bool complete = false;
+    char byte = 0;
+    while (line.size() <= 512 && recv(clientSocket, &byte, 1, 0) == 1) {
+        if (byte == '\n') {
+            complete = true;
+            break;
+        }
+        if (byte != '\r')
+            line.push_back(byte);
+    }
+    timeout = {0, 0};
+    setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+    const std::string supplied = complete && line.rfind("AUTH:", 0) == 0 ? line.substr(5) : "";
+    unsigned char difference = static_cast<unsigned char>(supplied.size() ^ authToken.size());
+    const size_t compared = std::max(supplied.size(), authToken.size());
+    for (size_t i = 0; i < compared; ++i) {
+        const unsigned char lhs = i < supplied.size() ? supplied[i] : 0;
+        const unsigned char rhs = i < authToken.size() ? authToken[i] : 0;
+        difference |= lhs ^ rhs;
+    }
+    if (difference != 0) {
+        std::cerr << "[Manual] Authentication failed for " << peer << "\n";
+        return false;
+    }
+    return true;
+}
+
+void ManualControlThread::resetManualControl(bool emergency) {
     manualControl.forward = false;
     manualControl.backward = false;
     manualControl.left = false;
     manualControl.right = false;
-    manualControl.emergencyStop = false;
+    manualControl.emergencyStop = emergency;
     manualControl.returnAuto = false;
+    controlChanged = true;
+}
+void ManualControlThread::handleClientConnection() {
+
+    resetManualControl(false);
+
 
     // Start receiving commands thread
     std::thread cmdThread(&ManualControlThread::receiveCommands, this);
@@ -334,6 +396,16 @@ done:
 }
 
 void ManualControlThread::processCommand(const std::string &cmd) {
+    bool manualMode = false;
+    {
+        std::lock_guard<std::mutex> lock(mtxState);
+        manualMode = vehicleState.manual;
+    }
+    if (cmd != "PING\n" && cmd != "STOP\n" && !manualMode) {
+        resetManualControl(true);
+        std::cerr << "[Manual] Ignored motion command while vehicle is in AUTO\n";
+        return;
+    }
     // 处理特殊命令
     if (cmd == "RETURN\n") {
         manualControl.returnAuto = true;

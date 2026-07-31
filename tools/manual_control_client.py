@@ -2,6 +2,7 @@
 """First-person remote takeover console for the construction zone."""
 
 import argparse
+import os
 import queue
 import socket
 import threading
@@ -15,8 +16,9 @@ from PIL import Image, ImageTk
 
 
 class TakeoverConsole:
-    def __init__(self, host, port):
+    def __init__(self, host, port, token):
         self.sock = socket.create_connection((host, port), timeout=5)
+        self.sock.sendall(("AUTH:" + token + "\n").encode("utf-8"))
         self.sock.settimeout(1)
         self.alive = True
         self.keys = set()
@@ -176,8 +178,12 @@ def main():
     parser = argparse.ArgumentParser(description="小车第一视角人工接管客户端")
     parser.add_argument("host", help="小车 IP 地址")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--token", default=os.getenv("ICAR_MANUAL_TOKEN"),
+                        help="pre-shared token (defaults to ICAR_MANUAL_TOKEN)")
     args = parser.parse_args()
-    TakeoverConsole(args.host, args.port).run()
+    if not args.token:
+        parser.error("provide --token or set ICAR_MANUAL_TOKEN")
+    TakeoverConsole(args.host, args.port, args.token).run()
 
 
 if __name__ == "__main__":

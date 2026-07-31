@@ -22,7 +22,7 @@ private:
     static constexpr size_t FRAME_MAX = 12;
 
     int socketId{-1};
-    int newSocket{-1};
+    std::atomic<int> newSocket{-1};
     struct sockaddr_in address{};
     std::thread threadRes;
     std::atomic<bool> running{false};
@@ -73,14 +73,15 @@ private:
         while (running)
         {
             socklen_t addrlen = sizeof(address);
-            newSocket = accept(socketId, reinterpret_cast<struct sockaddr *>(&address),
-                               &addrlen);
-            if (newSocket < 0)
+            const int client = accept(socketId, reinterpret_cast<struct sockaddr *>(&address),
+                                      &addrlen);
+            if (client < 0)
             {
                 if (running && errno != EINTR)
                     perror("accept");
                 continue;
             }
+            newSocket.store(client);
 
             rxBuffer.clear();
             startApp = true;
@@ -88,7 +89,7 @@ private:
             uint8_t buffer[1024];
             while (running)
             {
-                const ssize_t len = recv(newSocket, buffer, sizeof(buffer), 0);
+                const ssize_t len = recv(client, buffer, sizeof(buffer), 0);
                 if (len <= 0)
                     break;
                 startApp = true;
@@ -99,11 +100,11 @@ private:
 
             stopVehicle();
             startApp = false;
-            if (newSocket >= 0)
+            const int closingClient = newSocket.exchange(-1);
+            if (closingClient >= 0)
             {
-                shutdown(newSocket, SHUT_RDWR);
-                ::close(newSocket);
-                newSocket = -1;
+                shutdown(closingClient, SHUT_RDWR);
+                ::close(closingClient);
             }
         }
     }
@@ -137,7 +138,7 @@ public:
         int reuse = 1;
         setsockopt(socketId, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
         address.sin_family = AF_INET;
-        address.sin_addr.s_addr = INADDR_ANY;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         address.sin_port = htons(8899);
         if (bind(socketId, reinterpret_cast<struct sockaddr *>(&address), sizeof(address)) < 0 ||
             listen(socketId, 3) < 0)
@@ -159,8 +160,9 @@ public:
         if (!running.exchange(false))
             return;
         stopVehicle();
-        if (newSocket >= 0)
-            shutdown(newSocket, SHUT_RDWR);
+        const int activeClient = newSocket.load();
+        if (activeClient >= 0)
+            shutdown(activeClient, SHUT_RDWR);
         if (socketId >= 0)
         {
             int listeningSocket = socketId;
@@ -170,17 +172,28 @@ public:
         }
         if (threadRes.joinable())
             threadRes.join();
-        if (newSocket >= 0)
-            ::close(newSocket);
-        newSocket = -1;
+        const int remainingClient = newSocket.exchange(-1);
+        if (remainingClient >= 0)
+            ::close(remainingClient);
         uart.close();
+    }
+
+    void handleWatchdogTimeout()
+    {
+        stopVehicle();
+        startApp = false;
+        countDrop = 0;
+        const int activeClient = newSocket.load();
+        if (activeClient >= 0)
+            shutdown(activeClient, SHUT_RDWR);
     }
 
     void transmit(const std::string &data)
     {
-        if (!startApp || newSocket < 0)
+        const int activeClient = newSocket.load();
+        if (!startApp || activeClient < 0)
             return;
-        if (send(newSocket, data.data(), data.size(), MSG_NOSIGNAL) < 0)
+        if (send(activeClient, data.data(), data.size(), MSG_NOSIGNAL) < 0)
             perror("send failed");
     }
 };

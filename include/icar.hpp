@@ -81,6 +81,7 @@ private:
     std::mutex mtxImg;
     std::condition_variable cvImg;
     std::atomic<bool> readyImg{false};
+    std::atomic<bool> shuttingDown{false};
     std::mutex mtxRes;
     std::atomic<bool> readyRes{false};
     std::vector<PredictResult> latestResults; // AI线程单独写，主线程按帧复制
@@ -128,7 +129,9 @@ private:
     {
         std::unique_lock<std::mutex> lock(mtxImg);
         cvImg.wait(lock, [this]
-                   { return readyImg.load(); });
+                   { return readyImg.load() || shuttingDown.load(); });
+        if (shuttingDown)
+            return;
         cv::Mat img = imgShare.clone(); // 图像拷贝出来再释放锁
         readyImg = false;
         lock.unlock();
@@ -455,9 +458,11 @@ public:
     ~Icar()
     {
         if (fsmFactory.manual)
-        {
             fsmFactory.manual->stop();
-        }
+        shuttingDown = true;
+        cvImg.notify_all();
+        if (loops)
+            loops->shutdown();
     };
 
     /**
@@ -586,7 +591,7 @@ public:
         //[08] 综合显示调试UI窗口
         if (params->config.debug)
         {
-            detection->drawBox(img);        // 图像绘制AI结果
+            detection->drawBox(img, params->results); // 使用主线程结果快照绘框
             center->drawImage(params, img); // 图像绘制控制路径
             motion->drawImage(params, img); // 图像绘制速度
             show->setNewWindow(3, "Ctrl", img);

@@ -38,9 +38,12 @@ public:
     Loops(const std::string &name, double period, std::function<void()> func, int bindCPU = -1)
         : _name(name), _period(period), _func(func), _bindCPU(bindCPU), _running(false) {}
 
+    ~Loops() { shutdown(); }
+
     void start()
     {
-        _running = true;
+        if (_running.exchange(true))
+            return;
         log("[Loop Start] named: " + _name + ", period: " + formatPeriod() + "(ms)" + (_bindCPU != -1 ? ", run at cpu: " + std::to_string(_bindCPU) : ", cpu unspecified"));
         if (_bindCPU != -1)
         {
@@ -51,21 +54,16 @@ public:
         {
             _thread = std::thread(&Loops::loop, this);
         }
-        _thread.detach();
     }
 
     void shutdown()
     {
-        {
-            std::unique_lock<std::mutex> lock(_mutex);
-            _running = false;
-            _cv.notify_one();
-        }
+        const bool wasRunning = _running.exchange(false);
+        _cv.notify_all();
         if (_thread.joinable())
-        {
             _thread.join();
-        }
-        log("[Loop End] named: " + _name);
+        if (wasRunning)
+            log("[Loop End] named: " + _name);
     }
 
 private:

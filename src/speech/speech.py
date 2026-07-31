@@ -15,31 +15,24 @@ from llm import LLM
 
 
 def parsedToLapConfig(parsed: dict) -> dict:
-    """
-    将 LLM 解析的 task 列表映射为每圈功能配置
+    """Map a validated task list to consecutive lap configurations."""
+    normalizeTasks(parsed)
+    makers = {
+        "park": lambda task: _makeParkLap(task["spot"]),
+        "construction": lambda task: _makeBusyLap(task["stop"]),
+        "fork": lambda task: _makeForkLap(task["direction"]),
+    }
+    return {
+        f"lap{index}": makers[task["type"]](task)
+        for index, task in enumerate(parsed["tasks"], start=1)
+    }
 
-    Args:
-        parsed: {"tasks": [{"type":"fork","direction":"right"}, {"type":"park","spot":3}, {"type":"construction","stop":2}]}
-    Returns:
-        {"lap1": {...}, "lap2": {...}, "lap3": {...}}
-    """
-    tasks = parsed.get("tasks", [])[:3]
-    parsed["tasks"] = tasks
-    laps = {}
 
-    for i, task in enumerate(tasks):
-        lapNum = i + 1
-        taskType = task.get("type", "")
-
-        if taskType == "park":
-            laps[f"lap{lapNum}"] = _makeParkLap(task.get("spot", 1))
-        elif taskType == "construction":
-            laps[f"lap{lapNum}"] = _makeBusyLap(task.get("stop", 2))
-        elif taskType == "fork":
-            laps[f"lap{lapNum}"] = _makeForkLap(task.get("direction", "right"))
-
-    return laps
-
+def _makeDisabledLap() -> dict:
+    """Safe value used to completely replace unused lap slots."""
+    lap = _makeParkLap(0)
+    lap["park"] = False
+    return lap
 
 def _makeParkLap(spot: int) -> dict:
     return {
@@ -109,10 +102,17 @@ def updateConfigJson(lapConfig: dict, totalLaps: int, configPath: str = None):
     with open(configPath, "r", encoding="utf-8") as f:
         config = json.load(f)
 
-    totalLaps = max(1, min(int(totalLaps), 3))
-    lapConfig = {k: v for k, v in lapConfig.items() if k in ("lap1", "lap2", "lap3")}
+    totalLaps = int(totalLaps)
+    if not 1 <= totalLaps <= 3:
+        raise ValueError("totalLaps must be between 1 and 3")
+    expected = {f"lap{i}" for i in range(1, totalLaps + 1)}
+    if set(lapConfig) != expected:
+        raise ValueError("lapConfig must contain consecutive laps matching totalLaps")
     config["圈数配置"]["totalLaps"] = totalLaps
-    config["每圈功能使能配置"].update(lapConfig)
+    config["每圈功能使能配置"] = {
+        f"lap{i}": lapConfig.get(f"lap{i}", _makeDisabledLap())
+        for i in range(1, 4)
+    }
 
     with open(configPath, "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
@@ -140,14 +140,38 @@ def _describeLap(lap: dict) -> str:
 
 
 def normalizeTasks(parsed: dict):
-    """修复 LLM 输出的格式问题（字符串→对象转换）"""
-    tasks = parsed.get("tasks", [])[:3]
-    parsed["tasks"] = tasks
+    """Normalize and strictly validate one to three driving tasks."""
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("tasks"), list):
+        raise ValueError("tasks must be a list")
+    tasks = parsed["tasks"]
+    if not 1 <= len(tasks) <= 3:
+        raise ValueError("task count must be between 1 and 3")
 
-    for i, task in enumerate(tasks):
-        if isinstance(task, str):
-            tasks[i] = {"type": task}
-
+    normalized = []
+    for index, raw_task in enumerate(tasks, start=1):
+        task = {"type": raw_task} if isinstance(raw_task, str) else raw_task
+        if not isinstance(task, dict):
+            raise ValueError(f"task {index} must be an object")
+        task_type = task.get("type")
+        if task_type == "park":
+            spot = task.get("spot")
+            if isinstance(spot, bool) or not isinstance(spot, int) or not 0 <= spot <= 4:
+                raise ValueError(f"task {index}: park spot must be 0..4")
+            normalized.append({"type": "park", "spot": spot})
+        elif task_type == "construction":
+            stop = task.get("stop")
+            if isinstance(stop, bool) or not isinstance(stop, int) or stop not in (1, 2):
+                raise ValueError(f"task {index}: construction stop must be 1 or 2")
+            normalized.append({"type": "construction", "stop": stop})
+        elif task_type == "fork":
+            direction = task.get("direction")
+            if direction not in ("left", "right"):
+                raise ValueError(f"task {index}: fork direction must be left or right")
+            normalized.append({"type": "fork", "direction": direction})
+        else:
+            raise ValueError(f"task {index}: unsupported type {task_type!r}")
+    parsed["tasks"] = normalized
+    return parsed
 
 # ============ 使用示例 ============
 
@@ -168,7 +192,11 @@ if __name__ == "__main__":
         print(f"LLM 解析结果: {json.dumps(result, ensure_ascii=False)}\n")
 
         # 2. 修复格式
-        normalizeTasks(result)
+        try:
+            normalizeTasks(result)
+        except ValueError as exc:
+            print(f"Invalid task configuration: {exc}")
+            continue
         print(f"修正后: {json.dumps(result, ensure_ascii=False)}\n")
 
         # 3. task 列表 → 每圈配置
@@ -203,10 +231,11 @@ if __name__ == "__main__":
         bootNeeded = input("\n是否需要先启动boot？(y/n): ").strip().lower()
         if bootNeeded == "y":
             bootCmd = [
-                "gnome-terminal", "--", "export", "DISPLAY=:0.0",
-                "--working-directory", buildDir, "--", "./boot"
+                "gnome-terminal", "--working-directory", buildDir, "--", "./boot"
             ]
-            subprocess.Popen(bootCmd, cwd=buildDir)
+            bootEnv = os.environ.copy()
+            bootEnv.setdefault("DISPLAY", ":0.0")
+            subprocess.Popen(bootCmd, cwd=buildDir, env=bootEnv)
             print("已启动 boot，等待 3 秒...")
             time.sleep(3)
 

@@ -22,6 +22,7 @@
  */
 
 #include <algorithm>
+#include <atomic>
 #include <string>
 #include <iostream>
 #include <unistd.h>
@@ -318,7 +319,7 @@ public:
     int currentLap;                     // 当前圈数
     int crossStop;                      // 第几次检测到cross停车
     bool crossPassed;                   // 是否已经通过斑马线（每圈计数）
-    bool manualTakeover = false;        // 手动接管模式（禁用出界exit）
+    std::atomic<bool> manualTakeover{false}; // 手动接管模式（跨 AI/主线程共享）
     bool stationStopCompleted = false;  // station已完成一次停车
     bool stationStarted = false;        // station已触发检测（pressTimer启动）
     bool yforkGuiding = false;          // yfork正在强制引导转弯（期间station不检测）

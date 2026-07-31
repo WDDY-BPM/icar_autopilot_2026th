@@ -30,6 +30,7 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <vector>
+#include <string>
 #include <opencv2/opencv.hpp>
 
 /**
@@ -49,6 +50,8 @@ private:
     int clientSocket;
     struct sockaddr_in serverAddr, clientAddr;
     socklen_t addrSize;
+    std::string authToken;
+    std::string allowedIp;
 
     // Vehicle state
     struct VehicleState
@@ -94,6 +97,8 @@ public:
 
 private:
     void run();
+    bool authenticateClient();
+    void resetManualControl(bool emergency);
     void handleClientConnection();
     void receiveCommands();
     void checkTimeout();

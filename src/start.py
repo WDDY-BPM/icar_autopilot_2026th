@@ -68,7 +68,11 @@ def run_speech_flow():
 
         print(f"LLM 解析结果: {json.dumps(result, ensure_ascii=False)}\n")
 
-        normalizeTasks(result)
+        try:
+            normalizeTasks(result)
+        except ValueError as exc:
+            print(f"{COUT_RED}Invalid task configuration: {exc}{COUT_REST}")
+            continue
         print(f"修正后: {json.dumps(result, ensure_ascii=False)}\n")
 
         lapConfig = parsedToLapConfig(result)
@@ -146,10 +150,11 @@ def start_car_program():
     boot_needed = input("\n是否需要先启动boot？(y/n): ").strip().lower()
     if boot_needed == "y":
         boot_cmd = [
-            "gnome-terminal", "--", "export", "DISPLAY=:0.0",
-            "--working-directory", BUILD_DIR, "--", "./boot"
+            "gnome-terminal", "--working-directory", BUILD_DIR, "--", "./boot"
         ]
-        subprocess.Popen(boot_cmd, cwd=BUILD_DIR)
+        boot_env = os.environ.copy()
+        boot_env.setdefault("DISPLAY", ":0.0")
+        subprocess.Popen(boot_cmd, cwd=BUILD_DIR, env=boot_env)
         print("已启动 boot，等待 3 秒...")
         time.sleep(3)
 

@@ -27,9 +27,22 @@
 #include <fstream>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <limits.h>
 
 using namespace std;
 int launchCmd(const std::string &workdir, const std::string &cmd, bool wait);
+
+static std::string executableDirectory()
+{
+    char path[PATH_MAX] = {};
+    const ssize_t length = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (length <= 0)
+        return ".";
+    path[length] = '\0';
+    const std::string fullPath(path);
+    const size_t separator = fullPath.find_last_of('/');
+    return separator == std::string::npos ? "." : fullPath.substr(0, separator);
+}
 
 int main(int argc, char const *argv[])
 {
@@ -46,7 +59,10 @@ int main(int argc, char const *argv[])
         {
             server.countDrop++;
             if (server.countDrop > 10) // 2s
-                server.startApp = false;
+            {
+                std::cerr << "[Boot] Application heartbeat timed out; stopping vehicle.\n";
+                server.handleWatchdogTimeout();
+            }
         }
         else
             server.uart.sendHeart(); // 发送心跳信号
@@ -66,11 +82,10 @@ int main(int argc, char const *argv[])
         {
             server.uart.keypress = false;
             server.transmit("Keypress");
-            if (!server.startApp) // 应用未启动
+            if (!server.startApp) // Application is not connected
             {
                 printf("App icar-v1 is running!\n");
-                // system("gnome-terminal export DISPLAY=:0.0 --working-directory=/root/workspace/icar_autopilot_2026th/build -- ./icar");
-                launchCmd("/root/workspace/icar_autopilot_2026th/build/", "./icar", false);
+                launchCmd(executableDirectory(), "./icar", false);
                 server.startApp = true;
             }
             else
@@ -154,5 +169,3 @@ int launchCmd(const std::string &workdir, const std::string &cmd, bool wait)
         return -1;
     }
 }
-
-// gnome-terminal export DISPLAY=:0.0 --working-directory=/root/workspace/icar_autopilot_2026th/build -- ./boot

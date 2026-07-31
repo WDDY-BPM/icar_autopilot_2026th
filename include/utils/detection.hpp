@@ -297,9 +297,14 @@ public:
 
     void drawBox(Mat &img)
     {
-        for (int i = 0; i < results.size(); i++)
+        drawBox(img, results);
+    }
+
+    void drawBox(Mat &img, const std::vector<PredictResult> &snapshot)
+    {
+        for (size_t i = 0; i < snapshot.size(); i++)
         {
-            PredictResult result = results[i];
+            PredictResult result = snapshot[i];
 
             auto score = std::to_string(result.score);
             int pointY = result.y - 15;
