@@ -78,6 +78,70 @@ private:
     bool emergencyStopWasActive = false;
 
     // 全局共享数据链
+    enum class StartupGateState
+    {
+        WAIT_FOR_CONE,
+        WAIT_FOR_REMOVAL,
+        RELEASED
+    };
+    StartupGateState startupGateState = StartupGateState::WAIT_FOR_CONE;
+    int startupConeSeenCount = 0;
+    int startupConeMissingCount = 0;
+    int startupLaneValidCount = 0;
+
+    bool updateStartupGate(bool receivedNewAiResult)
+    {
+        if (startupGateState == StartupGateState::RELEASED)
+            return true;
+
+        bool coneDetected = false;
+        if (receivedNewAiResult)
+        {
+            for (const auto &result : params->results)
+            {
+                if (result.type == LABEL_CONE && result.width >= 10 && result.height >= 10)
+                {
+                    coneDetected = true;
+                    break;
+                }
+            }
+        }
+
+        const bool laneValid =
+            params->track->pointsEdgeLeft.size() >= 30 &&
+            params->track->pointsEdgeRight.size() >= 30;
+        startupLaneValidCount = laneValid ? startupLaneValidCount + 1 : 0;
+
+        if (startupGateState == StartupGateState::WAIT_FOR_CONE)
+        {
+            if (receivedNewAiResult)
+                startupConeSeenCount = coneDetected ? startupConeSeenCount + 1 : 0;
+
+            if (startupConeSeenCount >= 3)
+            {
+                startupGateState = StartupGateState::WAIT_FOR_REMOVAL;
+                startupConeMissingCount = 0;
+                std::cout << "[Startup] Cone confirmed. Remove it to start." << std::endl;
+            }
+        }
+        else if (receivedNewAiResult)
+        {
+            startupConeMissingCount = coneDetected ? 0 : startupConeMissingCount + 1;
+            if (startupConeMissingCount >= 5 && startupLaneValidCount >= 10)
+            {
+                startupGateState = StartupGateState::RELEASED;
+                params->ctrl.countAcc = 0;
+                params->ctrl.stop = false;
+                std::cout << "[Startup] Cone removed and lane stable. AUTO released." << std::endl;
+                return true;
+            }
+        }
+
+        params->ctrl.stop = true;
+        params->ctrl.speed = 0.0f;
+        params->ctrl.servo = PWMSERVOMID;
+        return false;
+    }
     cv::Mat imgShare;
     std::mutex mtxImg;
     std::condition_variable cvImg;
@@ -527,8 +591,7 @@ public:
         cvImg.notify_one();
         /*-------------------------------------------------------*/
         imgBin = predeal->binaryzation(img); // 图像二值化
-
-        //[04] 赛道识别（手动接管时跳过）
+        //[04] Track recognition (skipped during manual takeover).
         if (!fsmFactory.busy->isInManualTakeover())
             params->track->handle(imgBin);
         if (params->config.debug)
@@ -546,14 +609,18 @@ public:
         }
 
         // 在主线程按帧获取AI结果快照；FSM不再与推理线程共享可变vector
+        bool receivedNewAiResult = false;
         {
             std::lock_guard<std::mutex> resultLock(mtxRes);
             if (readyRes)
             {
                 params->results = latestResults;
                 readyRes = false;
+                receivedNewAiResult = true;
             }
         }
+
+        const bool startupGateReleased = updateStartupGate(receivedNewAiResult);
 
         //[05] 有限状态机任务执行。锁存急停时不得推进任何有状态 FSM。
         params->ctrl.fitting = false;
@@ -570,7 +637,7 @@ public:
             emergencyStopWasActive = false;
         }
 
-        if (!emergencyStopRequested && params->autoRecoveryFrames <= 0)
+        if (startupGateReleased && !emergencyStopRequested && params->autoRecoveryFrames <= 0)
             runFsm(imgBin);
 
         // 同步手动接管状态（runFsm中endManualTakeover可能改变了状态，但params->manualTakeover未更新）
@@ -589,13 +656,14 @@ public:
             params->ctrl.speed, params->ctrl.servo, params->manualTakeover);
         if (fsmFactory.manual->isConnected())
             fsmFactory.manual->sendImage(img);
-
-        //[06] 控制中心计算（手动接管时跳过）
-        if (!emergencyStopRequested && !params->manualTakeover && params->autoRecoveryFrames <= 0)
+        //[06] Calculate the lane control center in autonomous mode.
+        if (startupGateReleased && !emergencyStopRequested &&
+            !params->manualTakeover && params->autoRecoveryFrames <= 0)
             center->fitting(params);
 
         //[07] 车辆运动控制（仅手动接管时跳过）
-        if (!emergencyStopRequested && !fsmFactory.busy->isInManualTakeover() && params->autoRecoveryFrames <= 0)
+        if (startupGateReleased && !emergencyStopRequested &&
+            !fsmFactory.busy->isInManualTakeover() && params->autoRecoveryFrames <= 0)
         {
             motion->poseControl(params);
             motion->speedControl(params);
@@ -613,6 +681,12 @@ public:
 
         // Reassert after all recovery/control logic so the latch cannot be cleared this frame.
         if (emergencyStopRequested)
+        {
+            params->ctrl.stop = true;
+            params->ctrl.speed = 0.0f;
+            params->ctrl.servo = PWMSERVOMID;
+        }
+        if (!startupGateReleased)
         {
             params->ctrl.stop = true;
             params->ctrl.speed = 0.0f;

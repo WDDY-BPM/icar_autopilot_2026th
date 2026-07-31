@@ -116,8 +116,11 @@ public:
         }
         else if (params->ctrl.countAcc < 50)
         {
+            // Start gently after the physical start cone is removed.
             params->ctrl.countAcc++;
-            params->ctrl.speed = params->config.velCross;
+            const float startSpeed = std::min(params->config.velLow, 0.20f);
+            const float ratio = static_cast<float>(params->ctrl.countAcc) / 50.0f;
+            params->ctrl.speed = startSpeed + ratio * (params->config.velLow - startSpeed);
             return;
         }
 
