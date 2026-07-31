@@ -55,5 +55,5 @@ private:
     uint16_t searchBreakRightDown(vector<PointX> pointsEdgeRight);
     vector<PointX> centerCompute(vector<PointX> pointsEdge, int side);
     void validRowsCal(vector<PointX> pointsEdgeLeft, vector<PointX> pointsEdgeRight);
-    void derailmentCheck(vector<PointX> pointsEdgeLeft, vector<PointX> pointsEdgeRight);
+    bool derailmentCheck(vector<PointX> pointsEdgeLeft, vector<PointX> pointsEdgeRight);
 };

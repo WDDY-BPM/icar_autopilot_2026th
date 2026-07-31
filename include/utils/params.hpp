@@ -21,6 +21,7 @@
  *
  */
 
+#include <algorithm>
 #include <string>
 #include <iostream>
 #include <unistd.h>
@@ -244,6 +245,7 @@ public:
             config.lap1.yforkLeft = lap1Config.value("yforkLeft", true);
             config.lap1.station = lap1Config["station"];
             config.lap1.obstacle = lap1Config.value("obstacle", true);
+            config.lap1.manualTakeover = lap1Config.value("manualTakeover", false);
             config.lap1.busyStopEnable = lap1Config.value("busyStopEnable", false);
             config.lap1.busyStopPoint = lap1Config.value("busyStopPoint", 0);
 
@@ -262,6 +264,7 @@ public:
             config.lap2.yforkLeft = lap2Config.value("yforkLeft", true);
             config.lap2.station = lap2Config["station"];
             config.lap2.obstacle = lap2Config.value("obstacle", true);
+            config.lap2.manualTakeover = lap2Config.value("manualTakeover", false);
             config.lap2.busyStopEnable = lap2Config.value("busyStopEnable", false);
             config.lap2.busyStopPoint = lap2Config.value("busyStopPoint", 0);
 
@@ -280,6 +283,7 @@ public:
             config.lap3.yforkLeft = lap3Config.value("yforkLeft", true);
             config.lap3.station = lap3Config["station"];
             config.lap3.obstacle = lap3Config.value("obstacle", true);
+            config.lap3.manualTakeover = lap3Config.value("manualTakeover", false);
             config.lap3.busyStopEnable = lap3Config.value("busyStopEnable", false);
             config.lap3.busyStopPoint = lap3Config.value("busyStopPoint", 0);
         }
@@ -296,7 +300,7 @@ public:
         track->rowCutBottom = config.rowCutBottom; // 图像底部切行（盲区距离）
 
         // 初始化圈数和斑马线通过状态
-        totalLaps = config.totalLaps;
+        totalLaps = std::max(1, std::min(config.totalLaps, 3));
         currentLap = 1;
         crossPassed = true; // 初始true，第一次检测到不算，需先消失再出现才计一次经过
 
@@ -320,7 +324,8 @@ public:
     bool yforkGuiding = false;          // yfork正在强制引导转弯（期间station不检测）
     int yforkBranch = 0;                // yfork分支：0=无, 1=左, 2=右
     bool busyZone = false;              // 施工区标志（station据此调整检测参数）
-    bool takeoverJustEnded = false;     // 手动接管刚结束（station据此复位计数）
+    bool takeoverJustEnded = false;     // 手动接管刚结束
+    int autoRecoveryFrames = 0;         // 切回自动后等待新车道线的停车帧数
     int alertCountdown = 0;             // 蜂鸣器报警倒计时（帧数）
     int alertDecelCount = 0;            // 报警目标减速倒计时（帧数）
     int busyAlertCountdown = 0;         // 施工区蜂鸣器倒计时（帧数）

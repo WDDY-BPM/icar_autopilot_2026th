@@ -83,6 +83,7 @@ private:
     std::atomic<bool> readyImg{false};
     std::mutex mtxRes;
     std::atomic<bool> readyRes{false};
+    std::vector<PredictResult> latestResults; // AI线程单独写，主线程按帧复制
 
     /**
      * @brief 鼠标的事件回调函数
@@ -138,7 +139,7 @@ private:
             // 启动AI推理
             detection->inference(img);
             std::lock_guard<std::mutex> lock_result(mtxRes);
-            params->results = detection->results;
+            latestResults = detection->results;
             readyRes = true;
         }
     }
@@ -188,6 +189,10 @@ private:
                 params->ctrl.stop = false;
                 params->mode = FsmMode::NORMAL;   // 恢复自动模式
                 params->takeoverJustEnded = true; // 通知各FSM手动接管刚结束
+                params->autoRecoveryFrames = 2;
+                params->ctrl.stop = true;
+                params->ctrl.speed = 0.0f;
+                params->ctrl.servo = PWMSERVOMID;
             }
             else if (fsmFactory.manual->isConnected() &&
                      fsmFactory.manual->isManualControl())
@@ -471,7 +476,8 @@ public:
                 {
                     client->buzzerSound(client->BUZZER_FINISH); // 祖传提示音效
                     printf("-----> System Exit!!! <-----\n");
-                    exit(0); // 程序退出
+                    client->carControl(0.0f, PWMSERVOMID);
+                    exit(0); // 调试退出前先停车
                 }
                 show->show();        // 显示综合绘图
                 client->sendHeart(); // 发送给服务器在线心跳
@@ -481,11 +487,23 @@ public:
 
             capture->set(cv::CAP_PROP_POS_FRAMES, show->index); // 设置读取帧
             if (!capture->read(img))
+            {
+                params->ctrl.stop = true;
+                params->ctrl.speed = 0.0f;
+                params->ctrl.servo = PWMSERVOMID;
+                client->carControl(0.0f, PWMSERVOMID);
                 return;
+            }
             show->indexLast = show->index;
         }
         else if (!capture->read(img))
-            return;
+            {
+                params->ctrl.stop = true;
+                params->ctrl.speed = 0.0f;
+                params->ctrl.servo = PWMSERVOMID;
+                client->carControl(0.0f, PWMSERVOMID);
+                return;
+            }
 
         //[02] 图像存储
         if (params->config.saveImg && !params->config.debug) // 存储原始图像
@@ -521,6 +539,16 @@ public:
             }
         }
 
+        // 在主线程按帧获取AI结果快照；FSM不再与推理线程共享可变vector
+        {
+            std::lock_guard<std::mutex> resultLock(mtxRes);
+            if (readyRes)
+            {
+                params->results = latestResults;
+                readyRes = false;
+            }
+        }
+
         //[05] 有限状态机任务执行
         params->ctrl.fitting = false;
         runFsm(imgBin);
@@ -535,14 +563,24 @@ public:
             fsmFactory.manual->sendImage(img);
 
         //[06] 控制中心计算（手动接管时跳过）
-        if (!params->manualTakeover)
+        if (!params->manualTakeover && params->autoRecoveryFrames <= 0)
             center->fitting(params);
 
         //[07] 车辆运动控制（仅手动接管时跳过）
-        if (!fsmFactory.busy->isInManualTakeover())
+        if (!fsmFactory.busy->isInManualTakeover() && params->autoRecoveryFrames <= 0)
         {
             motion->poseControl(params);
             motion->speedControl(params);
+        }
+
+        if (params->autoRecoveryFrames > 0)
+        {
+            params->ctrl.stop = true;
+            params->ctrl.speed = 0.0f;
+            params->ctrl.servo = PWMSERVOMID;
+            params->autoRecoveryFrames--;
+            if (params->autoRecoveryFrames == 0)
+                params->ctrl.stop = false; // 下一帧允许使用新车道线恢复
         }
 
         //[08] 综合显示调试UI窗口

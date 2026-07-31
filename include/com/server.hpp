@@ -1,195 +1,186 @@
 #pragma once
-/**
- ********************************************************************************************************
- *                                               示例代码
- *                                             EXAMPLE  CODE
- *
- *                      (c) Copyright 2024; SaiShu.Lcc.; Leo; https://bjsstech.com
- *                                   版权所属[SASU-北京赛曙科技有限公司]
- *
- *            The code is for internal use only, not for commercial transactions(开源学习).
- *            The code ADAPTS the corresponding hardware circuit board(智能汽车-ICAR),
- *            The specific details consult the professional(欢迎联系我们,代码持续更正，敬请关注相关开源渠道).
- *********************************************************************************************************
- * @file server.cpp
- * @author Leo (leo@saishukeji.com)
- * @brief 套接字通信（服务器）
- * @version 0.1
- * @date 2024-09-04
- *
- * @copyright Copyright (c) 2024
- *
- */
 
+#include <algorithm>
+#include <atomic>
+#include <cerrno>
+#include <cstdint>
 #include <iostream>
+#include <string>
+#include <thread>
+#include <vector>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
 #include <string.h>
 #include "uart.hpp"
 
-using namespace std;
-
 class Server
 {
 private:
-    int socketId, newSocket;
-    struct sockaddr_in address;
-    std::thread threadRes; // 接收子线程
+    static constexpr uint8_t FRAME_HEAD = 0x42;
+    static constexpr size_t FRAME_MIN = 4;
+    static constexpr size_t FRAME_MAX = 12;
 
-    /**
-     * @brief 32位数据内存对齐/联合体
-     *
-     */
-    typedef union
-    {
-        char buffC[4];
-        uint8_t buff[4];
-        float float32;
-        int int32;
-    } Bit32Union;
+    int socketId{-1};
+    int newSocket{-1};
+    struct sockaddr_in address{};
+    std::thread threadRes;
+    std::atomic<bool> running{false};
+    std::vector<uint8_t> rxBuffer;
 
-    /**
-     * @brief 16位数据内存对齐/联合体
-     *
-     */
-    typedef union
+    void stopVehicle()
     {
-        char buffC[2];
-        uint8_t buff[2];
-        int int16;
-        uint16_t uint16;
-    } Bit16Union;
+        uart.carControl(0.0f, 1500);
+    }
+
+    void parseFrames()
+    {
+        while (true)
+        {
+            auto head = std::find(rxBuffer.begin(), rxBuffer.end(), FRAME_HEAD);
+            if (head != rxBuffer.begin())
+                rxBuffer.erase(rxBuffer.begin(), head);
+            if (rxBuffer.size() < 3)
+                return;
+
+            const size_t frameLength = rxBuffer[2];
+            if (frameLength < FRAME_MIN || frameLength > FRAME_MAX)
+            {
+                rxBuffer.erase(rxBuffer.begin());
+                continue;
+            }
+            if (rxBuffer.size() < frameLength)
+                return;
+
+            uint8_t check = 0;
+            for (size_t i = 0; i + 1 < frameLength; ++i)
+                check = static_cast<uint8_t>(check + rxBuffer[i]);
+            if (check == rxBuffer[frameLength - 1])
+            {
+                for (size_t i = 0; i < frameLength; ++i)
+                    uart.transmitByte(rxBuffer[i]);
+            }
+            else
+            {
+                std::cerr << "[Boot] Dropped control frame with bad checksum\n";
+            }
+            rxBuffer.erase(rxBuffer.begin(), rxBuffer.begin() + frameLength);
+        }
+    }
+
+    void receiveLoop()
+    {
+        while (running)
+        {
+            socklen_t addrlen = sizeof(address);
+            newSocket = accept(socketId, reinterpret_cast<struct sockaddr *>(&address),
+                               &addrlen);
+            if (newSocket < 0)
+            {
+                if (running && errno != EINTR)
+                    perror("accept");
+                continue;
+            }
+
+            rxBuffer.clear();
+            startApp = true;
+            countDrop = 0;
+            uint8_t buffer[1024];
+            while (running)
+            {
+                const ssize_t len = recv(newSocket, buffer, sizeof(buffer), 0);
+                if (len <= 0)
+                    break;
+                startApp = true;
+                countDrop = 0;
+                rxBuffer.insert(rxBuffer.end(), buffer, buffer + len);
+                parseFrames();
+            }
+
+            stopVehicle();
+            startApp = false;
+            if (newSocket >= 0)
+            {
+                shutdown(newSocket, SHUT_RDWR);
+                ::close(newSocket);
+                newSocket = -1;
+            }
+        }
+    }
 
 public:
-    Server() {};
-    ~Server()
-    {
-        closeServer();
-    };
+    Server() = default;
+    ~Server() { closeServer(); }
 
     Uart uart;
-    int countDrop = 0;     // 应用程序掉线计数器
-    bool startApp = false; // 应用程序启动标志
+    std::atomic<int> countDrop{0};
+    std::atomic<bool> startApp{false};
 
-    /**
-     * @brief 启动服务器监听
-     *
-     */
     bool start()
     {
-        // 串口初始化
+        if (running)
+            return true;
         if (uart.open("/dev/ttyUSB0") != 0)
         {
-            printf("[Error] Uart Open failed!\n");
+            std::cerr << "[Error] Uart Open failed!\n";
             return false;
         }
-        uart.startReceive(); // 启动数据接收子线程
+        uart.startReceive();
 
-        // 创建套接字
-        if ((socketId = socket(AF_INET, SOCK_STREAM, 0)) == 0)
+        socketId = socket(AF_INET, SOCK_STREAM, 0);
+        if (socketId < 0)
         {
             perror("socket failed");
+            uart.close();
             return false;
         }
-
-        // 绑定套接字到地址和端口
+        int reuse = 1;
+        setsockopt(socketId, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
         address.sin_family = AF_INET;
         address.sin_addr.s_addr = INADDR_ANY;
         address.sin_port = htons(8899);
-
-        if (bind(socketId, (struct sockaddr *)&address, sizeof(address)) < 0)
+        if (bind(socketId, reinterpret_cast<struct sockaddr *>(&address), sizeof(address)) < 0 ||
+            listen(socketId, 3) < 0)
         {
-            perror("bind failed");
+            perror("bind/listen failed");
+            ::close(socketId);
+            socketId = -1;
+            uart.close();
             return false;
         }
 
-        // 监听套接字
-        if (listen(socketId, 3) < 0)
-        {
-            perror("listen");
-            return false;
-        }
-
-        // 启动串口接收子线程
-        threadRes = std::thread([this]()
-                                {
-        // 接受客户端连接
-        int addrlen = sizeof(address);
-        if ((newSocket = accept(socketId, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0)
-        {
-            perror("accept");
-            return false;
-        }
-      while (1) 
-      {
-        receive(); // 串口接收校验
-      } });
-
+        running = true;
+        threadRes = std::thread(&Server::receiveLoop, this);
         return true;
     }
 
-    /**
-     * @brief 注销套接字通信
-     *
-     */
     void closeServer()
     {
-        // 关闭套接字
-        threadRes.join();
-        close(newSocket);
-        close(socketId);
-        uart.close(); // 串口通信关闭
-    }
-
-    /**
-     * @brief 接收客户端数据
-     *
-     */
-    void receive()
-    {
-        char buffer[1024] = {0};
-        // 接收客户端消息
-        int len = recv(newSocket, buffer, 1024, 0);
-        if (len <= 0)
-        {
-            // 客户端已退出
-            perror("Client is outting!");
-            int addrlen = sizeof(address);
-            if ((newSocket = accept(socketId, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0)
-            {
-                perror("accept");
-                exit(EXIT_FAILURE);
-            }
-        }
-
-        startApp = true;
-        countDrop = 0;
-        // 发送至串口通信
-        if (len >= 4 && len <= 30)
-        {
-            for (int i = 0; i < len; i++)
-            {
-                uint8_t u8 = static_cast<uint8_t>(buffer[i]);
-                uart.transmitByte(u8);
-            }
-        }
-    }
-
-    /**
-     * @brief 发送数据
-     *
-     */
-    void transmit(string data)
-    {
-        if (!startApp)
+        if (!running.exchange(false))
             return;
-
-        const char *greeting = data.c_str();
-        // 发送消息到客户端
-        if (send(newSocket, greeting, strlen(greeting), 0) < 0)
+        stopVehicle();
+        if (newSocket >= 0)
+            shutdown(newSocket, SHUT_RDWR);
+        if (socketId >= 0)
         {
-            perror("send failed");
+            int listeningSocket = socketId;
+            socketId = -1;
+            shutdown(listeningSocket, SHUT_RDWR);
+            ::close(listeningSocket); // unblock accept before join
         }
+        if (threadRes.joinable())
+            threadRes.join();
+        if (newSocket >= 0)
+            ::close(newSocket);
+        newSocket = -1;
+        uart.close();
+    }
+
+    void transmit(const std::string &data)
+    {
+        if (!startApp || newSocket < 0)
+            return;
+        if (send(newSocket, data.data(), data.size(), MSG_NOSIGNAL) < 0)
+            perror("send failed");
     }
 };

@@ -70,6 +70,9 @@ class OpenAIProvider(LLMProvider):
         """
         纯文本对话
         """
+        if not self.api_key:
+            print(COUT_RED, "[LLM] 未设置 QIANFAN_API_KEY 环境变量", COUT_REST)
+            return None
         try:
             import requests
 
@@ -231,9 +234,9 @@ LLM_CONFIG = {
     "role": "你是一个智能小车任务分析助手, 你叫小赛, 现在任务分成好几圈，你需要将任务分析成多个子任务, 并根据子任务的优先级和依赖关系, 生成一个任务执行计划。",
     "providers": {
         "qianfan": {
-            "api_key": "bce-v3/ALTAK-u5IxRxXedDILmimnPdkwL/31790ce34be88959e5c4b8eadf38184b825949c0",
-            "base_url": "https://qianfan.baidubce.com/v2",
-            "model": "ernie-4.5-turbo-128k",
+            "api_key": os.getenv("QIANFAN_API_KEY", ""),
+            "base_url": os.getenv("QIANFAN_BASE_URL", "https://qianfan.baidubce.com/v2"),
+            "model": os.getenv("QIANFAN_MODEL", "ernie-4.5-turbo-128k"),
             "temperature": 0.7,
             "max_tokens": 500,
         },

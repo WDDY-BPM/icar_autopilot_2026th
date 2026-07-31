@@ -118,7 +118,7 @@ void Track::handle(bool isResearch, uint16_t rowStart)
                 endBlock[counterBlock++] = COLSIMAGE - 1;
         }
 
-        int widthBlocks = endBlock[0] - startBlock[0]; // 色块宽度临时变量
+        int widthBlocks = 0; // 仅在确认存在色块后初始化
         int indexWidestBlock = 0;                      // 最宽色块的序号
         if (flagStartBlock)                            // 起始行做特殊处理
         {
@@ -128,6 +128,7 @@ void Track::handle(bool isResearch, uint16_t rowStart)
             {
                 continue;
             }
+            widthBlocks = endBlock[0] - startBlock[0];
             for (int i = 1; i < counterBlock; i++) // 搜索最宽色块
             {
                 int tmp_width = endBlock[i] - startBlock[i];

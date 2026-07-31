@@ -226,8 +226,8 @@ void FsmCross::run(Mat &img)
         timeout++;
         if (timeout >= 50)
         {
-            printf("[Cross] Last lap completed, exiting...\n");
-            exit(0);
+            printf("[Cross] Last lap completed, vehicle remains stopped.\n");
+            timeout = 50;
         }
         break;
     }

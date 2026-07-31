@@ -63,7 +63,7 @@ def run_speech_flow():
 
         result = llm.parseInstruction(instruction)
         if not result:
-            print(f"{COUT_RED}解析失败！请检查 API Key 是否有效{COUT_REST}")
+            print(f"{COUT_RED}解析失败！请查看上方 [LLM] 错误，并检查网络、密钥和模型权限{COUT_REST}")
             continue
 
         print(f"LLM 解析结果: {json.dumps(result, ensure_ascii=False)}\n")

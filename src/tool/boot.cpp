@@ -69,8 +69,8 @@ int main(int argc, char const *argv[])
             if (!server.startApp) // 应用未启动
             {
                 printf("App icar-v1 is running!\n");
-                // system("gnome-terminal export DISPLAY=:0.0 --working-directory=/root/workspace/icar_autopilot_2025th/build -- ./icar");
-                launchCmd("/root/workspace/icar_autopilot_2025th/build/", "./icar", false);
+                // system("gnome-terminal export DISPLAY=:0.0 --working-directory=/root/workspace/icar_autopilot_2026th/build -- ./icar");
+                launchCmd("/root/workspace/icar_autopilot_2026th/build/", "./icar", false);
                 server.startApp = true;
             }
             else
@@ -84,7 +84,6 @@ int main(int argc, char const *argv[])
         {
             server.uart.exitBoot = false;
             std::system("killall -9 icar collection img2video calibration camera detection main");
-            server.closeServer(); // 关闭socket通信
             break;
         }
     }
@@ -156,4 +155,4 @@ int launchCmd(const std::string &workdir, const std::string &cmd, bool wait)
     }
 }
 
-// gnome-terminal export DISPLAY=:0.0 --working-directory=/root/workspace/icar_autopilot_2025th/build -- ./boot
+// gnome-terminal export DISPLAY=:0.0 --working-directory=/root/workspace/icar_autopilot_2026th/build -- ./boot

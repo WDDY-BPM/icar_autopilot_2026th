@@ -22,6 +22,7 @@ class TakeoverConsole:
         self.keys = set()
         self.manual_mode = False
         self.frames = queue.Queue(maxsize=1)
+        self.status_updates = queue.Queue()
         self.root = tk.Tk()
         self.root.title("小车第一视角接管 - %s:%d" % (host, port))
         self.root.geometry("980x720")
@@ -44,6 +45,9 @@ class TakeoverConsole:
         threading.Thread(target=self.command_loop, daemon=True).start()
         self.root.after(20, self.refresh)
 
+    def set_status(self, text):
+        self.status_updates.put(text)
+
     def send(self, command):
         if self.alive:
             try:
@@ -61,7 +65,7 @@ class TakeoverConsole:
     def stop(self, _event=None):
         self.keys.clear()
         self.send("STOP")
-        self.status.set("急停")
+        self.set_status("急停")
 
     def return_auto(self, _event=None):
         if not self.manual_mode:
@@ -70,7 +74,7 @@ class TakeoverConsole:
         self.send("STOP")
         if messagebox.askyesno("切回自动", "确认小车已安全驶出施工路况？"):
             self.send("RETURN")
-            self.status.set("已请求切回自动模式")
+            self.set_status("已请求切回自动模式")
 
     def command_loop(self):
         mapping = {"w": "W", "s": "S", "a": "A", "d": "D"}
@@ -97,7 +101,7 @@ class TakeoverConsole:
                     if was_manual != self.manual_mode:
                         self.keys.clear()
                     mode_text = "手动接管" if self.manual_mode else "自动驾驶（仅监看）"
-                    self.status.set("%s　速度 %.2f m/s　舵机 %.0f" %
+                    self.set_status("%s　速度 %.2f m/s　舵机 %.0f" %
                                     (mode_text, float(speed), float(servo)))
                 elif text.startswith("IMAGE:"):
                     size = int(text[6:])
@@ -129,6 +133,11 @@ class TakeoverConsole:
 
     def refresh(self):
         try:
+            while True:
+                self.status.set(self.status_updates.get_nowait())
+        except queue.Empty:
+            pass
+        try:
             frame = cv2.cvtColor(self.add_guides(self.frames.get_nowait()),
                                  cv2.COLOR_BGR2RGB)
             image = Image.fromarray(frame)
@@ -145,7 +154,7 @@ class TakeoverConsole:
         if self.alive:
             self.alive = False
             self.keys.clear()
-            self.status.set("连接中断：车端将自动停车")
+            self.set_status("连接中断：车端将自动停车")
 
     def close(self):
         if self.alive:

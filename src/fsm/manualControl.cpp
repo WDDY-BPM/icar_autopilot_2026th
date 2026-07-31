@@ -24,6 +24,25 @@
 #include "utils/tools.hpp"
 #include <unistd.h>
 #include <signal.h>
+#include <cerrno>
+
+namespace {
+bool sendAll(int socketFd, const void *data, size_t length)
+{
+    const char *cursor = static_cast<const char *>(data);
+    while (length > 0)
+    {
+        ssize_t sent = send(socketFd, cursor, length, MSG_NOSIGNAL);
+        if (sent < 0 && errno == EINTR)
+            continue;
+        if (sent <= 0)
+            return false;
+        cursor += sent;
+        length -= static_cast<size_t>(sent);
+    }
+    return true;
+}
+}
 
 ManualControlThread::ManualControlThread() {
     serverSocket = -1;
@@ -220,17 +239,14 @@ void ManualControlThread::handleClientConnection() {
 
     // Start receiving commands thread
     std::thread cmdThread(&ManualControlThread::receiveCommands, this);
-    cmdThread.detach();
 
     // Start timeout check thread
     std::thread timeoutThread([this]() {
         while (running && connected) {
             checkTimeout();
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     });
-    timeoutThread.detach();
-
     // Send images and state
     while (running && connected) {
         // Send vehicle state (higher frequency for state)
@@ -243,8 +259,7 @@ void ManualControlThread::handleClientConnection() {
         }
 
         // 发送状态数据（带错误检查）
-        int stateSent = send(clientSocket, state.c_str(), state.length(), 0);
-        if (stateSent < 0) {
+        if (!sendAll(clientSocket, state.data(), state.size())) {
             cerr << "[Manual] Error sending state data" << endl;
             break;
         }
@@ -264,14 +279,25 @@ void ManualControlThread::handleClientConnection() {
                 std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, 50};
                 cv::imencode(".jpg", frameToSend, buf, params);
                 std::string header = "IMAGE:" + std::to_string(buf.size()) + "\n";
-                send(clientSocket, header.c_str(), header.length(), 0);
-                send(clientSocket, buf.data(), buf.size(), 0);
+                if (!sendAll(clientSocket, header.data(), header.size()) ||
+                    !sendAll(clientSocket, buf.data(), buf.size()))
+                {
+                    connected = false;
+                    break;
+                }
             } catch (const cv::Exception& e) {
                 cerr << "[Manual] Image encode error: " << e.what() << endl;
             }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(33));  // 约30 FPS
     }
+    connected = false;
+    if (clientSocket >= 0)
+        shutdown(clientSocket, SHUT_RDWR);
+    if (cmdThread.joinable())
+        cmdThread.join();
+    if (timeoutThread.joinable())
+        timeoutThread.join();
 }
 
 void ManualControlThread::receiveCommands() {
@@ -287,7 +313,10 @@ void ManualControlThread::receiveCommands() {
         lineBuf += std::string(rawBuf);
 
         // Update contact time
-        lastContact = std::chrono::steady_clock::now();
+        {
+            std::lock_guard<std::mutex> contactLock(mtxContact);
+            lastContact = std::chrono::steady_clock::now();
+        }
 
         // 按换行符分割处理（解决TCP粘包）
         size_t pos;
@@ -340,19 +369,31 @@ void ManualControlThread::processCommand(const std::string &cmd) {
         }
     }
     controlChanged = true;
-    printf("[Manual] Command received: %s", cmd.c_str());
+    if (cmd != "PING\n")
+        printf("[Manual] Command received: %s", cmd.c_str());
 }
 
 void ManualControlThread::checkTimeout() {
     if (connected) {
         auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now - lastContact).count();
+        long long elapsed;
+        {
+            std::lock_guard<std::mutex> contactLock(mtxContact);
+            elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - lastContact).count();
+        }
 
-        if (elapsed > 30000) { // 30 seconds timeout
-            printf("[Manual] Connection timeout, returning to auto mode\n");
+        if (elapsed > 500) { // 500 ms dead-man timeout
+            printf("[Manual] Connection timeout, stopping vehicle\n");
+            manualControl.forward = false;
+            manualControl.backward = false;
+            manualControl.left = false;
+            manualControl.right = false;
+            manualControl.emergencyStop = true;
             emergencyStop();
             connected = false;
+            if (clientSocket >= 0)
+                shutdown(clientSocket, SHUT_RDWR);
         }
     }
 }
@@ -360,6 +401,6 @@ void ManualControlThread::checkTimeout() {
 void ManualControlThread::emergencyStop() {
     std::lock_guard<std::mutex> lock(mtxState);
     vehicleState.speed = 0;
-    vehicleState.steering = 0;
+    vehicleState.steering = PWMSERVOMID;
     vehicleState.emergency = true;
 }

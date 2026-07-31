@@ -181,7 +181,12 @@ void Center::fitting(shared_ptr<Params> &params)
 
     // 车辆冲出赛道检测（手动接管/仿真模式时禁用）
     if (!params->ctrl.parking && !params->manualTakeover && !params->config.debug)
-        derailmentCheck(params->track->pointsEdgeLeft, params->track->pointsEdgeRight);
+        if (derailmentCheck(params->track->pointsEdgeLeft, params->track->pointsEdgeRight))
+        {
+            params->ctrl.stop = true;
+            params->ctrl.speed = 0.0f;
+            params->ctrl.servo = PWMSERVOMID;
+        }
 }
 
 /**
@@ -528,7 +533,7 @@ void Center::validRowsCal(vector<PointX> pointsEdgeLeft, vector<PointX> pointsEd
  * @return true
  * @return false
  */
-void Center::derailmentCheck(vector<PointX> pointsEdgeLeft, vector<PointX> pointsEdgeRight)
+bool Center::derailmentCheck(vector<PointX> pointsEdgeLeft, vector<PointX> pointsEdgeRight)
 {
     if (pointsEdgeLeft.size() < 30 && pointsEdgeRight.size() < 30) // 防止车辆冲出赛道
     {
@@ -537,7 +542,7 @@ void Center::derailmentCheck(vector<PointX> pointsEdgeLeft, vector<PointX> point
         if (countOut > 20)
         {
             printf("-----> ICAR Outline!!! <-----\n");
-            exit(0); // 程序退出
+            return true; // 保持进程运行，由主循环持续发送停车帧
         }
     }
     else
@@ -549,4 +554,5 @@ void Center::derailmentCheck(vector<PointX> pointsEdgeLeft, vector<PointX> point
             timeout = 50;
         }
     }
+    return false;
 }

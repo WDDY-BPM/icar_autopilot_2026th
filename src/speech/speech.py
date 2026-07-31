@@ -23,7 +23,8 @@ def parsedToLapConfig(parsed: dict) -> dict:
     Returns:
         {"lap1": {...}, "lap2": {...}, "lap3": {...}}
     """
-    tasks = parsed.get("tasks", [])
+    tasks = parsed.get("tasks", [])[:3]
+    parsed["tasks"] = tasks
     laps = {}
 
     for i, task in enumerate(tasks):
@@ -108,6 +109,8 @@ def updateConfigJson(lapConfig: dict, totalLaps: int, configPath: str = None):
     with open(configPath, "r", encoding="utf-8") as f:
         config = json.load(f)
 
+    totalLaps = max(1, min(int(totalLaps), 3))
+    lapConfig = {k: v for k, v in lapConfig.items() if k in ("lap1", "lap2", "lap3")}
     config["圈数配置"]["totalLaps"] = totalLaps
     config["每圈功能使能配置"].update(lapConfig)
 
@@ -138,7 +141,8 @@ def _describeLap(lap: dict) -> str:
 
 def normalizeTasks(parsed: dict):
     """修复 LLM 输出的格式问题（字符串→对象转换）"""
-    tasks = parsed.get("tasks", [])
+    tasks = parsed.get("tasks", [])[:3]
+    parsed["tasks"] = tasks
 
     for i, task in enumerate(tasks):
         if isinstance(task, str):

@@ -1,3 +1,12 @@
 build/
 res/samples/train
 res/samples/imgs
+__pycache__/
+*.py[cod]
+*.core
+core
+core.*
+.vscode/
+*.tmp
+*.docx
+.env

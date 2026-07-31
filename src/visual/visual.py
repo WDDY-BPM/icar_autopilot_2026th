@@ -16,8 +16,8 @@ import requests
 
 
 # ===== 配置 =====
-VISUAL_API_URL = "https://yijian-next.cloud.baidu.com/api/skills/v1/ep-wswjzmiw-nasdf9qq/run"
-VISUAL_API_KEY = "bce-v3/ALTAK-u5IxRxXedDILmimnPdkwL/31790ce34be88959e5c4b8eadf38184b825949c0"
+VISUAL_API_URL = os.getenv("VISUAL_API_URL", "https://yijian-next.cloud.baidu.com/api/skills/v1/ep-wswjzmiw-nasdf9qq/run")
+VISUAL_API_KEY = os.getenv("VISUAL_API_KEY", "")
 # =================
 
 # 终端颜色（兼容 Windows）
@@ -72,6 +72,10 @@ class VisualLLM:
             cone | person | busy | limit | unlimit | park
             或 None（识别失败时）
         """
+        if not self.api_key:
+            print(f"{COUT_RED}[VisualLLM] 未设置 VISUAL_API_KEY 环境变量{COUT_REST}")
+            return None
+
         if not os.path.exists(image_path):
             print(f"{COUT_RED}[VisualLLM] 图片不存在: {image_path}{COUT_REST}")
             return None

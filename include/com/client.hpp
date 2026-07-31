@@ -26,6 +26,7 @@
 #include <stdint.h> // 整型数据类
 #include <string>
 #include <thread>
+#include <atomic>
 #include <cstring>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -63,8 +64,9 @@ private:
     std::thread threadRes;  // 串口接收子线程
     std::string portName;   // 端口名字
     SerialStruct serialStr; // 串口通信数据结构体
-    int socketId = 0;
+    int socketId = -1;
     int countInit = 0; // 初始化计数器
+    std::atomic<bool> running{false};
     /**
      * @brief 32位数据内存对齐/联合体
      *
@@ -129,26 +131,34 @@ public:
         if (inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) <= 0)
         {
             std::cerr << "Invalid address/ Address not supported" << std::endl;
+            close(socketId);
+            socketId = -1;
             return false;
         }
 
         if (connect(socketId, (struct sockaddr *)&address, sizeof(address)) < 0)
         {
             cout << "socket connect error!" << endl;
+            close(socketId);
+            socketId = -1;
             return false;
         }
 
+        running = true;
         // 启动数据接收子线程
         threadRes = std::thread([this]()
                                 {
-        char buffer[1024] = {0};
-        while (1) {
-        int len = read(socketId, buffer, 1024);
-
-        std::string str(buffer);
-        if (str.find("Keypress") != std::string::npos)//按键按下
-            keypress = true;
-      } });
+        char buffer[1024];
+        while (running) {
+            int len = read(socketId, buffer, sizeof(buffer));
+            if (len <= 0)
+                break;
+            std::string str(buffer, static_cast<size_t>(len));
+            if (str.find("Keypress") != std::string::npos)
+                keypress = true;
+        }
+        running = false;
+      });
         return true;
     }
 
@@ -158,9 +168,16 @@ public:
      */
     void closeClient()
     {
-        carControl(0, 1500); // 舵机PWM中值 1500
-        close(socketId);
-        threadRes.join();
+        running = false;
+        if (socketId >= 0)
+        {
+            carControl(0, 1500);
+            shutdown(socketId, SHUT_RDWR);
+            close(socketId);
+            socketId = -1;
+        }
+        if (threadRes.joinable())
+            threadRes.join();
     }
 
     /**
@@ -189,8 +206,16 @@ public:
         char data[len];
         memcpy(data, buff, len); // 拷贝内存数据，防止“\0”数据丢失
 
-        // 发送消息到服务器
-        send(socketId, data, len, 0);
+        if (socketId < 0)
+            return;
+        int offset = 0;
+        while (offset < len)
+        {
+            int sent = send(socketId, data + offset, len - offset, MSG_NOSIGNAL);
+            if (sent <= 0)
+                return;
+            offset += sent;
+        }
     }
 
     /**
@@ -207,7 +232,7 @@ public:
         else
             speed = 0.0; // 初始化速度为0，等待1s发车
 
-        uint8_t buff[11];  // 多发送一个字节
+        uint8_t buff[10];
         uint8_t check = 0; // 校验位
         Bit32Union bit32U;
         Bit16Union bit16U;
@@ -228,7 +253,7 @@ public:
             check += buff[i];
         buff[9] = check; // 校验位
 
-        transmit(buff, 11); // 发送数据
+        transmit(buff, 10); // 发送完整的10字节控制帧
     }
 
     /**
@@ -238,7 +263,7 @@ public:
      */
     void buzzerSound(Buzzer sound)
     {
-        uint8_t buff[6];   // 多发送一个字节
+        uint8_t buff[5];
         uint8_t check = 0; // 校验位
 
         buff[0] = USB_FRAME_HEAD;  // 帧头
@@ -267,7 +292,7 @@ public:
             check += buff[i];
         buff[4] = check;
 
-        transmit(buff, 6); // 发送数据
+        transmit(buff, 5); // 发送完整的5字节蜂鸣器帧
     }
 
     /**
@@ -276,7 +301,11 @@ public:
      */
     void sendHeart()
     {
-        uint8_t buff[3];   // 多发送一个字节
-        transmit(buff, 3); // 发送数据
+        uint8_t buff[4];
+        buff[0] = USB_FRAME_HEAD;
+        buff[1] = 0; // USB_ADDR_HEART
+        buff[2] = 4;
+        buff[3] = static_cast<uint8_t>(buff[0] + buff[1] + buff[2]);
+        transmit(buff, 4);
     }
 };

@@ -28,6 +28,7 @@
 #include <stdint.h>               // 整型数据类
 #include <string.h>
 #include <thread>
+#include <atomic>
 
 using namespace LibSerial;
 using namespace std;
@@ -128,7 +129,7 @@ public:
     bool keypress = false; // 按键
     bool killAll = false;  // 杀进程
     bool exitBoot = false; // 退出boot
-    bool running = false;  // 运行状态
+    std::atomic<bool> running{false}; // 运行状态
 
     /**
      * @brief 蜂鸣器音效
@@ -233,10 +234,11 @@ public:
         if (!isOpen) // 串口是否正常打开
             return;
 
+        running = true;
         // 启动串口接收子线程
         threadRec = std::make_unique<std::thread>([this]()
                                                   {
-      while (1) {
+      while (running) {
         receiveCheck(); // 串口接收校验
       } });
     }
@@ -247,12 +249,17 @@ public:
      */
     void close(void)
     {
-        printf(" uart thread exit!\n");
-        carControl(0, PWMSERVOMID);
-        threadRec->join();
+        if (!isOpen && (!threadRec || !threadRec->joinable()))
+            return;
+        if (isOpen)
+            carControl(0, PWMSERVOMID);
+        running = false;
+        if (threadRec && threadRec->joinable())
+            threadRec->join();
         if (serialPort != nullptr)
         {
-            serialPort->Close();
+            if (serialPort->IsOpen())
+                serialPort->Close();
             serialPort = nullptr;
         }
         isOpen = false;
@@ -268,7 +275,7 @@ public:
             return;
 
         uint8_t resByte = 0;
-        int ret = receiveBytes(resByte, 0);
+        int ret = receiveBytes(resByte, 100);
         if (ret == 0)
         {
             if (resByte == USB_FRAME_HEAD && !serialStr.start) // 监听帧头
@@ -377,7 +384,7 @@ public:
         if (!isOpen)
             return;
 
-        uint8_t buff[11];  // 多发送一个字节
+        uint8_t buff[10];
         uint8_t check = 0; // 校验位
         Bit32Union bit32U;
         Bit16Union bit16U;
@@ -399,7 +406,7 @@ public:
         buff[9] = check; // 校验位
 
         // 循环发送数据
-        for (size_t i = 0; i < 11; i++)
+        for (size_t i = 0; i < 10; i++)
             transmitByte(buff[i]);
     }
 
@@ -412,7 +419,7 @@ public:
     {
         if (!isOpen)
             return;
-        uint8_t buff[6];   // 多发送一个字节
+        uint8_t buff[5];
         uint8_t check = 0; // 校验位
 
         buff[0] = USB_FRAME_HEAD;  // 帧头
@@ -442,7 +449,7 @@ public:
         buff[4] = check;
 
         // 循环发送数据
-        for (size_t i = 0; i < 6; i++)
+        for (size_t i = 0; i < 5; i++)
             transmitByte(buff[i]);
     }
 
@@ -455,7 +462,7 @@ public:
         if (!isOpen)
             return;
 
-        uint8_t buff[5];   // 多发送一个字节
+        uint8_t buff[4];
         uint8_t check = 0; // 校验位
 
         buff[0] = USB_FRAME_HEAD; // 通信帧头
@@ -467,7 +474,7 @@ public:
         buff[3] = check; // 校验位
 
         // 循环发送数据
-        for (size_t i = 0; i < 5; i++)
+        for (size_t i = 0; i < 4; i++)
             transmitByte(buff[i]);
     }
 };

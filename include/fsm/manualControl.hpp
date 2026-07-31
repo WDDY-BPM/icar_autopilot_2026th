@@ -39,7 +39,7 @@ class ManualControlThread
 {
 private:
     std::thread thread;
-    std::mutex mtxImg, mtxState;
+    std::mutex mtxImg, mtxState, mtxContact;
     std::condition_variable cvImg;
     std::atomic<bool> running{false};
     std::atomic<bool> connected{false};
