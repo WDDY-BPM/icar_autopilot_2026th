@@ -28,14 +28,20 @@ class TakeoverConsole:
         self.status_updates = queue.Queue()
         self.root = tk.Tk()
         self.root.title("小车第一视角接管 - %s:%d" % (host, port))
-        self.root.geometry("980x720")
+        self.root.geometry("1280x900")
+        self.root.minsize(800, 600)
         self.status = tk.StringVar(value="已连接；车辆保持停止")
+        self.guides_enabled = tk.BooleanVar(value=False)
         self.video = tk.Label(self.root, bg="black")
         self.video.pack(fill=tk.BOTH, expand=True)
         tk.Label(self.root, textvariable=self.status, font=("Arial", 14)).pack()
+        tk.Checkbutton(
+            self.root, text="显示固定参考线（G）",
+            variable=self.guides_enabled, takefocus=False
+        ).pack()
         tk.Label(
             self.root,
-            text="W/S 前进后退　A/D 转向　空格急停　R 切回自动",
+            text="W/S 前进后退　A/D 转向　空格急停　R 切回自动　G 参考线",
             font=("Arial", 12),
         ).pack(pady=8)
         for key in ("w", "a", "s", "d"):
@@ -44,6 +50,7 @@ class TakeoverConsole:
         self.root.bind("<space>", self.stop)
         self.root.bind("<KeyPress-c>", self.clear_stop)
         self.root.bind("<KeyPress-r>", self.return_auto)
+        self.root.bind("<KeyPress-g>", self.toggle_guides)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         threading.Thread(target=self.receive_loop, daemon=True).start()
         threading.Thread(target=self.command_loop, daemon=True).start()
@@ -85,6 +92,9 @@ class TakeoverConsole:
         if messagebox.askyesno("切回自动", "确认小车已安全驶出施工路况？"):
             self.send("RETURN")
             self.set_status("已切回自动但仍锁存停车；确认安全后按 C 解除")
+
+    def toggle_guides(self, _event=None):
+        self.guides_enabled.set(not self.guides_enabled.get())
 
     def command_loop(self):
         mapping = {"w": "W", "s": "S", "a": "A", "d": "D"}
@@ -152,10 +162,16 @@ class TakeoverConsole:
         except queue.Empty:
             pass
         try:
-            frame = cv2.cvtColor(self.add_guides(self.frames.get_nowait()),
-                                 cv2.COLOR_BGR2RGB)
+            frame = self.frames.get_nowait()
+            if self.guides_enabled.get():
+                frame = self.add_guides(frame.copy())
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             image = Image.fromarray(frame)
-            image.thumbnail((960, 620))
+            available_w = max(320, self.video.winfo_width() - 4)
+            available_h = max(240, self.video.winfo_height() - 4)
+            resample = (Image.Resampling.LANCZOS if hasattr(Image, "Resampling")
+                        else Image.LANCZOS)
+            image.thumbnail((available_w, available_h), resample)
             photo = ImageTk.PhotoImage(image)
             self.video.configure(image=photo)
             self.video.image = photo
