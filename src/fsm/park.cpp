@@ -750,6 +750,9 @@ void FsmPark::reset()
     countIn = 0;       // 入库矫正计数器
     speedUp = 0;       // 出库加速延迟计数器
     countFlow = 0;     // 直行计数器
+    params->ctrl.back = false;
+    params->ctrl.parking = false;
+    params->ctrl.fitting = false;
 }
 
 /**

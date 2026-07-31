@@ -76,22 +76,6 @@ private:
 
     int lastLap = 0; // 上一圈号（检测圈变更时复位FSM）
     bool emergencyStopWasActive = false;
-    bool emergencyStoppedInManual = false;
-
-    void resetSpecialElementsAfterEmergency()
-    {
-        fsmFactory.stop->resetLap();
-        fsmFactory.park->resetLap();
-        fsmFactory.fork->resetLap();
-        fsmFactory.yfork->resetLap();
-        fsmFactory.slow->resetLap();
-        fsmFactory.busy->resetLap();
-        fsmFactory.station->resetLap();
-        fsmFactory.obstacle->resetLap();
-        fsmFactory.cross->resetLap();
-        params->mode = FsmMode::NORMAL;
-        params->takeoverJustEnded = false;
-    }
 
     // 全局共享数据链
     cv::Mat imgShare;
@@ -576,18 +560,14 @@ public:
         const bool emergencyStopRequested = fsmFactory.manual->isEmergencyStopRequested();
         if (emergencyStopRequested && !emergencyStopWasActive)
         {
-            emergencyStoppedInManual = fsmFactory.busy->isInManualTakeover();
             emergencyStopWasActive = true;
         }
         else if (!emergencyStopRequested && emergencyStopWasActive)
         {
-            // AUTO 急停解除后丢弃可能依赖墙钟时间的特殊元素状态；
-            // MANUAL 接管保持原状态，避免在施工区内突然切回自动。
-            if (!emergencyStoppedInManual)
-                resetSpecialElementsAfterEmergency();
-            params->autoRecoveryFrames = emergencyStoppedInManual ? 2 : 15;
+            // All FSM state and parking trajectory history were frozen with the vehicle.
+            // Keep them intact, gather fresh lane data while stopped, then continue.
+            params->autoRecoveryFrames = 15;
             emergencyStopWasActive = false;
-            emergencyStoppedInManual = false;
         }
 
         if (!emergencyStopRequested && params->autoRecoveryFrames <= 0)
