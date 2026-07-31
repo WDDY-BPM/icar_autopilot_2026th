@@ -8,6 +8,7 @@
 import json
 import base64
 import os
+import re
 import time
 from typing import Optional
 from PIL import Image
@@ -146,6 +147,12 @@ class VisualLLM:
                 return None
             result = resp.json()
             label = self._parse_result(result)
+            if not label:
+                preview = json.dumps(result, ensure_ascii=False)
+                print(
+                    f"{COUT_YELLOW}[VisualLLM] 接口响应成功但未解析出标签，"
+                    f"响应摘要: {preview[:1500]}{COUT_REST}"
+                )
 
             # 二阶段确认：结果为"限速"时，再专门问一次区分限速/解除限速
             if strict_mode and label == "limit":
@@ -206,13 +213,19 @@ class VisualLLM:
 
         return self._match_label(raw_text)
 
-    def _match_label(self, text: str) -> Optional[str]:
+    def _match_label(self, text: str, warn: bool = True) -> Optional[str]:
         """从文本中匹配场景标签（特殊处理「限速/解除限速」冲突）"""
         text = text.strip()
 
         # 直接命中英文标签
         if text in LABEL_DICT:
             return text
+
+        # Accept explanatory output such as "label: park" or "scene is busy".
+        lowered = text.lower()
+        for label in sorted(LABEL_DICT, key=len, reverse=True):
+            if re.search(rf"\b{re.escape(label)}\b", lowered):
+                return label
 
         # 优先匹配"解除限速"（避免被短词"限速"截胡）
         if "解除限速" in text:
@@ -227,15 +240,18 @@ class VisualLLM:
             if chn in text:
                 return eng
 
-        print(f"{COUT_YELLOW}[VisualLLM] 未能匹配标签，原始文本: {text}{COUT_REST}")
+        if warn:
+            print(f"{COUT_YELLOW}[VisualLLM] 未能匹配标签，原始文本: {text}{COUT_REST}")
         return None
 
     def _find_label(self, obj) -> Optional[str]:
         """递归查找字典中是否有匹配的标签值"""
         if isinstance(obj, dict):
             for v in obj.values():
-                if isinstance(v, str) and v in LABEL_DICT:
-                    return v
+                if isinstance(v, str):
+                    found = self._match_label(v, warn=False)
+                    if found:
+                        return found
                 found = self._find_label(v)
                 if found:
                     return found
@@ -249,7 +265,7 @@ class VisualLLM:
                 parsed = json.loads(obj)
                 return self._find_label(parsed)
             except (json.JSONDecodeError, TypeError):
-                pass
+                return self._match_label(obj, warn=False)
         return None
 
     def _confirm_limit_unlimit(self, image_path: str) -> Optional[str]:
