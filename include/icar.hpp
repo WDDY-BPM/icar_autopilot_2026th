@@ -477,7 +477,7 @@ public:
         {
             if (show->indexLast == show->index) // 图像帧未更新
             {
-                if (client->keypress)
+                if (client->keypress.exchange(false))
                 {
                     client->buzzerSound(client->BUZZER_FINISH); // 祖传提示音效
                     printf("-----> System Exit!!! <-----\n");
@@ -561,6 +561,15 @@ public:
         // 同步手动接管状态（runFsm中endManualTakeover可能改变了状态，但params->manualTakeover未更新）
         params->manualTakeover = fsmFactory.busy->isInManualTakeover();
 
+        // A remote STOP is latched and has priority in AUTO and MANUAL modes.
+        const bool emergencyStopRequested = fsmFactory.manual->isEmergencyStopRequested();
+        if (emergencyStopRequested)
+        {
+            params->ctrl.stop = true;
+            params->ctrl.speed = 0.0f;
+            params->ctrl.servo = PWMSERVOMID;
+        }
+
         // Always publish first-person video and current control mode.
         fsmFactory.manual->updateVehicleState(
             params->ctrl.speed, params->ctrl.servo, params->manualTakeover);
@@ -568,11 +577,11 @@ public:
             fsmFactory.manual->sendImage(img);
 
         //[06] 控制中心计算（手动接管时跳过）
-        if (!params->manualTakeover && params->autoRecoveryFrames <= 0)
+        if (!emergencyStopRequested && !params->manualTakeover && params->autoRecoveryFrames <= 0)
             center->fitting(params);
 
         //[07] 车辆运动控制（仅手动接管时跳过）
-        if (!fsmFactory.busy->isInManualTakeover() && params->autoRecoveryFrames <= 0)
+        if (!emergencyStopRequested && !fsmFactory.busy->isInManualTakeover() && params->autoRecoveryFrames <= 0)
         {
             motion->poseControl(params);
             motion->speedControl(params);
@@ -588,6 +597,13 @@ public:
                 params->ctrl.stop = false; // 下一帧允许使用新车道线恢复
         }
 
+        // Reassert after all recovery/control logic so the latch cannot be cleared this frame.
+        if (emergencyStopRequested)
+        {
+            params->ctrl.stop = true;
+            params->ctrl.speed = 0.0f;
+            params->ctrl.servo = PWMSERVOMID;
+        }
         //[08] 综合显示调试UI窗口
         if (params->config.debug)
         {

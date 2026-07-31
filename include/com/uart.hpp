@@ -29,6 +29,7 @@
 #include <string.h>
 #include <thread>
 #include <atomic>
+#include <mutex>
 
 using namespace LibSerial;
 using namespace std;
@@ -67,6 +68,7 @@ private:
     std::unique_ptr<std::thread> threadRec; // 串口接收子线程
     std::shared_ptr<SerialPort> serialPort = nullptr;
     bool isOpen = false;
+    std::mutex transmitMutex;
     SerialStruct serialStr; // 串口通信数据结构体
 
     /**
@@ -126,9 +128,9 @@ public:
     Uart() {};
     // 定义析构函数
     ~Uart() { close(); };
-    bool keypress = false; // 按键
-    bool killAll = false;  // 杀进程
-    bool exitBoot = false; // 退出boot
+    std::atomic<bool> keypress{false}; // 按键
+    std::atomic<bool> killAll{false};  // 杀进程
+    std::atomic<bool> exitBoot{false}; // 退出boot
     std::atomic<bool> running{false}; // 运行状态
 
     /**
@@ -151,7 +153,8 @@ public:
      * @param data
      * @return int
      */
-    int transmitByte(unsigned char data)
+private:
+    int transmitByteUnlocked(unsigned char data)
     {
         // try检测语句块有没有异常
         try
@@ -172,6 +175,7 @@ public:
         return 0;
     }
 
+public:
     /**
      * @brief 启动串口通信
      *
@@ -225,6 +229,14 @@ public:
         return 0;
     }
 
+    void transmitFrame(const uint8_t *data, size_t length)
+    {
+        if (!isOpen || data == nullptr || length == 0)
+            return;
+        std::lock_guard<std::mutex> lock(transmitMutex);
+        for (size_t i = 0; i < length; ++i)
+            transmitByteUnlocked(data[i]);
+    }
     /**
      * @brief 启动接收子线程
      *
@@ -405,9 +417,7 @@ public:
             check += buff[i];
         buff[9] = check; // 校验位
 
-        // 循环发送数据
-        for (size_t i = 0; i < 10; i++)
-            transmitByte(buff[i]);
+        transmitFrame(buff, sizeof(buff));
     }
 
     /**
@@ -448,9 +458,7 @@ public:
             check += buff[i];
         buff[4] = check;
 
-        // 循环发送数据
-        for (size_t i = 0; i < 5; i++)
-            transmitByte(buff[i]);
+        transmitFrame(buff, sizeof(buff));
     }
 
     /**
@@ -473,8 +481,6 @@ public:
             check += buff[i];
         buff[3] = check; // 校验位
 
-        // 循环发送数据
-        for (size_t i = 0; i < 4; i++)
-            transmitByte(buff[i]);
+        transmitFrame(buff, sizeof(buff));
     }
 };

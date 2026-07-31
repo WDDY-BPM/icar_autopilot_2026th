@@ -94,7 +94,7 @@ public:
     Client() {};
     // 定义析构函数
     ~Client() { closeClient(); };
-    bool keypress = false; // 按键
+    std::atomic<bool> keypress{false}; // 按键
 
     /**
      * @brief 蜂鸣器音效

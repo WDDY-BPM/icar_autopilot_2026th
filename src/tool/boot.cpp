@@ -28,6 +28,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <limits.h>
+#include <chrono>
+#include <csignal>
 
 using namespace std;
 int launchCmd(const std::string &workdir, const std::string &cmd, bool wait);
@@ -44,68 +46,115 @@ static std::string executableDirectory()
     return separator == std::string::npos ? "." : fullPath.substr(0, separator);
 }
 
+static bool processRunning(pid_t &pid)
+{
+    if (pid <= 0)
+        return false;
+    int status = 0;
+    const pid_t result = waitpid(pid, &status, WNOHANG);
+    if (result == 0)
+        return true;
+    pid = -1;
+    return false;
+}
+
+static bool icarProcessExists()
+{
+    return std::system("pgrep -x icar >/dev/null 2>&1") == 0;
+}
+
 int main(int argc, char const *argv[])
 {
-    // 套接字服务器
     Server server;
-
-    if (!server.start()) // 启动socket监听子线程
+    if (!server.start())
         return -1;
 
+    constexpr int64_t WATCHDOG_TIMEOUT_MS = 2000;
+    constexpr int64_t STARTUP_GRACE_MS = 30000;
+    pid_t appPid = -1;
+    bool clientWasSeen = false;
+    auto appStartedAt = std::chrono::steady_clock::time_point{};
+
     printf("Boot is running!\n");
-    while (1)
+    while (true)
     {
-        if (server.startApp)
+        processRunning(appPid); // reap a child that exited
+        if (server.isClientConnected())
+            clientWasSeen = true;
+        if (server.watchdogExpired(WATCHDOG_TIMEOUT_MS))
         {
-            server.countDrop++;
-            if (server.countDrop > 10) // 2s
-            {
-                std::cerr << "[Boot] Application heartbeat timed out; stopping vehicle.\n";
-                server.handleWatchdogTimeout();
-            }
+            std::cerr << "[Boot] Valid-frame watchdog timed out; stopping vehicle.\n";
+            server.handleWatchdogTimeout();
         }
-        else
-            server.uart.sendHeart(); // 发送心跳信号
+        if (!server.isClientConnected())
+            server.uart.sendHeart();
 
-        usleep(200 * 1000); // us延迟
+        usleep(200 * 1000);
 
-        if (server.uart.killAll) // 强制杀进程
+        if (server.uart.killAll.exchange(false))
         {
-            server.uart.killAll = false;
-            server.uart.carControl(0, 1500); // 停车
+            server.uart.carControl(0, 1500);
             std::system("killall -9 icar collection img2video calibration camera detection main");
-            server.startApp = false;
-
+            appPid = -1;
+            clientWasSeen = false;
             printf("Kill all app!\n");
         }
-        else if (server.uart.keypress) // 按键
+        else if (server.uart.keypress.exchange(false))
         {
-            server.uart.keypress = false;
-            server.transmit("Keypress");
-            if (!server.startApp) // Application is not connected
+            if (server.isClientConnected())
             {
-                printf("App icar-v1 is running!\n");
-                launchCmd(executableDirectory(), "./icar", false);
-                server.startApp = true;
+                server.transmit("Keypress");
+                server.handleWatchdogTimeout();
+                std::system("pkill -x icar");
+                appPid = -1;
+                clientWasSeen = false;
+                printf("App was killed!\n");
+            }
+            else if (processRunning(appPid))
+            {
+                const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - appStartedAt).count();
+                if (elapsed < STARTUP_GRACE_MS)
+                {
+                    printf("App is still initializing; duplicate launch blocked.\n");
+                }
+                else
+                {
+                    kill(appPid, SIGKILL);
+                    waitpid(appPid, nullptr, 0);
+                    appPid = -1;
+                    server.uart.carControl(0, 1500);
+                    printf("Unconnected app was stopped; press again to restart.\n");
+                }
+            }
+            else if (clientWasSeen || icarProcessExists())
+            {
+                std::system("pkill -x icar");
+                server.uart.carControl(0, 1500);
+                clientWasSeen = false;
+                printf("Disconnected app was stopped; press again to restart.\n");
             }
             else
             {
-                std::system("pkill -f icar");
-                printf("App was killed!\n");
+                appPid = launchCmd(executableDirectory(), "./icar", false);
+                if (appPid > 0)
+                {
+                    appStartedAt = std::chrono::steady_clock::now();
+                    printf("App icar is starting (30 s connection grace).\n");
+                }
             }
-            usleep(2000 * 1000); // us延迟
+            usleep(2000 * 1000);
         }
-        else if (server.uart.exitBoot) // 退出Boot
+        else if (server.uart.exitBoot.exchange(false))
         {
-            server.uart.exitBoot = false;
+            server.uart.carControl(0, 1500);
             std::system("killall -9 icar collection img2video calibration camera detection main");
             break;
         }
     }
 
     printf("Boot was closed!\n");
-    server.closeServer(); // 关闭socket通信
-
+    server.closeServer();
     return 0;
 }
 

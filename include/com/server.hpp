@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -22,15 +24,36 @@ private:
     static constexpr size_t FRAME_MAX = 12;
 
     int socketId{-1};
-    std::atomic<int> newSocket{-1};
+    std::atomic<int> clientSocket{-1};
     struct sockaddr_in address{};
     std::thread threadRes;
     std::atomic<bool> running{false};
+    std::atomic<bool> clientConnected{false};
+    std::atomic<bool> connectionValid{false};
+    std::atomic<int64_t> lastValidFrameMs{0};
+    std::mutex forwardMutex;
     std::vector<uint8_t> rxBuffer;
 
-    void stopVehicle()
+    static int64_t nowMs()
+    {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    }
+
+    void stopVehicleLocked()
     {
         uart.carControl(0.0f, 1500);
+    }
+
+    void invalidateConnection(int socket)
+    {
+        connectionValid = false;
+        clientConnected = false;
+        if (socket >= 0)
+            shutdown(socket, SHUT_RDWR);
+        std::lock_guard<std::mutex> lock(forwardMutex);
+        stopVehicleLocked();
     }
 
     void parseFrames()
@@ -57,8 +80,12 @@ private:
                 check = static_cast<uint8_t>(check + rxBuffer[i]);
             if (check == rxBuffer[frameLength - 1])
             {
-                for (size_t i = 0; i < frameLength; ++i)
-                    uart.transmitByte(rxBuffer[i]);
+                std::lock_guard<std::mutex> lock(forwardMutex);
+                if (connectionValid)
+                {
+                    uart.transmitFrame(rxBuffer.data(), frameLength);
+                    lastValidFrameMs = nowMs();
+                }
             }
             else
             {
@@ -81,31 +108,27 @@ private:
                     perror("accept");
                 continue;
             }
-            newSocket.store(client);
 
+            clientSocket = client;
             rxBuffer.clear();
-            startApp = true;
-            countDrop = 0;
+            lastValidFrameMs = nowMs();
+            connectionValid = true;
+            clientConnected = true;
+
             uint8_t buffer[1024];
-            while (running)
+            while (running && connectionValid)
             {
-                const ssize_t len = recv(client, buffer, sizeof(buffer), 0);
-                if (len <= 0)
+                const ssize_t length = recv(client, buffer, sizeof(buffer), 0);
+                if (length <= 0)
                     break;
-                startApp = true;
-                countDrop = 0;
-                rxBuffer.insert(rxBuffer.end(), buffer, buffer + len);
+                rxBuffer.insert(rxBuffer.end(), buffer, buffer + length);
                 parseFrames();
             }
 
-            stopVehicle();
-            startApp = false;
-            const int closingClient = newSocket.exchange(-1);
+            invalidateConnection(client);
+            const int closingClient = clientSocket.exchange(-1);
             if (closingClient >= 0)
-            {
-                shutdown(closingClient, SHUT_RDWR);
                 ::close(closingClient);
-            }
         }
     }
 
@@ -114,8 +137,6 @@ public:
     ~Server() { closeServer(); }
 
     Uart uart;
-    std::atomic<int> countDrop{0};
-    std::atomic<bool> startApp{false};
 
     bool start()
     {
@@ -155,43 +176,44 @@ public:
         return true;
     }
 
+    bool isClientConnected() const { return clientConnected.load(); }
+
+    bool watchdogExpired(int64_t timeoutMs) const
+    {
+        return clientConnected && nowMs() - lastValidFrameMs.load() > timeoutMs;
+    }
+
+    void handleWatchdogTimeout()
+    {
+        const int activeClient = clientSocket.load();
+        invalidateConnection(activeClient);
+    }
+
     void closeServer()
     {
         if (!running.exchange(false))
             return;
-        stopVehicle();
-        const int activeClient = newSocket.load();
-        if (activeClient >= 0)
-            shutdown(activeClient, SHUT_RDWR);
+        const int activeClient = clientSocket.load();
+        invalidateConnection(activeClient);
         if (socketId >= 0)
         {
-            int listeningSocket = socketId;
+            const int listeningSocket = socketId;
             socketId = -1;
             shutdown(listeningSocket, SHUT_RDWR);
-            ::close(listeningSocket); // unblock accept before join
+            ::close(listeningSocket);
         }
         if (threadRes.joinable())
             threadRes.join();
-        const int remainingClient = newSocket.exchange(-1);
+        const int remainingClient = clientSocket.exchange(-1);
         if (remainingClient >= 0)
             ::close(remainingClient);
         uart.close();
     }
 
-    void handleWatchdogTimeout()
-    {
-        stopVehicle();
-        startApp = false;
-        countDrop = 0;
-        const int activeClient = newSocket.load();
-        if (activeClient >= 0)
-            shutdown(activeClient, SHUT_RDWR);
-    }
-
     void transmit(const std::string &data)
     {
-        const int activeClient = newSocket.load();
-        if (!startApp || activeClient < 0)
+        const int activeClient = clientSocket.load();
+        if (!clientConnected || activeClient < 0)
             return;
         if (send(activeClient, data.data(), data.size(), MSG_NOSIGNAL) < 0)
             perror("send failed");

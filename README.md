@@ -45,7 +45,7 @@ python3 src/start.py
 python tools/manual_control_client.py <小车IP> --token '<强随机令牌>'
 ```
 
-AUTO 模式仅监看；施工区状态机报警停车并发布 MANUAL 后才开放 WASD。空格急停，`R` 确认后返回自动。
+AUTO 模式仅监看；施工区状态机报警停车并发布 MANUAL 后才开放 WASD。空格锁存急停（AUTO/MANUAL 均生效），确认安全后按 `C` 解除，`R` 确认后返回自动；切换后仍保持锁存停车，必须再按 `C` 确认解除。
 
 ## 安全要求
 

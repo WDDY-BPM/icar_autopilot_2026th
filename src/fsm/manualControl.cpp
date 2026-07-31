@@ -118,23 +118,25 @@ void ManualControlThread::start() {
 
 void ManualControlThread::stop() {
     running = false;
+    connected = false;
 
-    // Close sockets
-    if (clientSocket >= 0) {
-        close(clientSocket);
-        clientSocket = -1;
-    }
-    if (serverSocket >= 0) {
-        close(serverSocket);
-        serverSocket = -1;
-    }
+    const int activeClient = clientSocket.load();
+    if (activeClient >= 0)
+        shutdown(activeClient, SHUT_RDWR);
+    const int listeningSocket = serverSocket.load();
+    if (listeningSocket >= 0)
+        shutdown(listeningSocket, SHUT_RDWR);
 
-    // Wait for thread to finish
-    if (thread.joinable()) {
+    if (thread.joinable())
         thread.join();
-    }
-}
 
+    const int remainingClient = clientSocket.exchange(-1);
+    if (remainingClient >= 0)
+        close(remainingClient);
+    const int remainingServer = serverSocket.exchange(-1);
+    if (remainingServer >= 0)
+        close(remainingServer);
+}
 void ManualControlThread::sendImage(cv::Mat &img) {
     if (!img.empty()) {
         std::lock_guard<std::mutex> lock(mtxImg);
@@ -148,7 +150,7 @@ void ManualControlThread::updateVehicleState(float speed, float steering, bool m
     std::lock_guard<std::mutex> lock(mtxState);
     vehicleState.speed = speed;
     vehicleState.steering = steering;
-    vehicleState.emergency = false;
+    vehicleState.emergency = manualControl.emergencyStopRequested.load();
     vehicleState.manual = manual;
 }
 
@@ -193,13 +195,15 @@ bool ManualControlThread::checkForReturnKey() {
 }
 
 void ManualControlThread::disconnectClient() {
-    if (clientSocket >= 0) {
-        close(clientSocket);
-        clientSocket = -1;
-    }
     connected = false;
+    const int socket = clientSocket.load();
+    if (socket >= 0)
+        shutdown(socket, SHUT_RDWR);
 }
 
+bool ManualControlThread::isEmergencyStopRequested() const {
+    return manualControl.emergencyStopRequested.load();
+}
 void ManualControlThread::run() {
     while (running) {
         // 如果socket未成功初始化（start失败），等待重试
@@ -317,7 +321,8 @@ void ManualControlThread::handleClientConnection() {
             std::lock_guard<std::mutex> lock(mtxState);
             state = "STATE:" + std::to_string(vehicleState.speed) +
                     "," + std::to_string(vehicleState.steering) +
-                    "," + (vehicleState.manual ? "MANUAL" : "AUTO") + "\n";
+                    "," + (vehicleState.manual ? "MANUAL" : "AUTO") +
+                    "," + (vehicleState.emergency ? "ESTOP" : "NORMAL") + "\n";
         }
 
         // 发送状态数据（带错误检查）
@@ -401,7 +406,7 @@ void ManualControlThread::processCommand(const std::string &cmd) {
         std::lock_guard<std::mutex> lock(mtxState);
         manualMode = vehicleState.manual;
     }
-    if (cmd != "PING\n" && cmd != "STOP\n" && !manualMode) {
+    if (cmd != "PING\n" && cmd != "STOP\n" && cmd != "CLEAR_STOP\n" && !manualMode) {
         resetManualControl(true);
         std::cerr << "[Manual] Ignored motion command while vehicle is in AUTO\n";
         return;
@@ -413,12 +418,19 @@ void ManualControlThread::processCommand(const std::string &cmd) {
         printf("[Manual] Return to auto command received\n");
         return;
     }
+    if (cmd == "CLEAR_STOP\n") {
+        manualControl.emergencyStopRequested = false;
+        resetManualControl(false);
+        printf("[Manual] Latched emergency stop cleared\n");
+        return;
+    }
     if (cmd == "STOP\n") {
         manualControl.forward = false;
         manualControl.backward = false;
         manualControl.left = false;
         manualControl.right = false;
         manualControl.emergencyStop = true;
+        manualControl.emergencyStopRequested = true;
         manualControl.returnAuto = false;
         controlChanged = true;
         printf("[Manual] Stop command received\n");

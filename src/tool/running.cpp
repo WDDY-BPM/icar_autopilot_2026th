@@ -313,7 +313,7 @@ public:
         {
             if (show->indexLast == show->index) // 图像帧未更新
             {
-                if (uart->keypress)
+                if (uart->keypress.exchange(false))
                 {
                     uart->buzzerSound(uart->BUZZER_FINISH); // 祖传提示音效
                     printf("-----> System Exit!!! <-----\n");

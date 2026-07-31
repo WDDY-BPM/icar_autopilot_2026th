@@ -41,6 +41,7 @@ class TakeoverConsole:
             self.root.bind("<KeyPress-%s>" % key, self.key_down)
             self.root.bind("<KeyRelease-%s>" % key, self.key_up)
         self.root.bind("<space>", self.stop)
+        self.root.bind("<KeyPress-c>", self.clear_stop)
         self.root.bind("<KeyPress-r>", self.return_auto)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         threading.Thread(target=self.receive_loop, daemon=True).start()
@@ -69,6 +70,12 @@ class TakeoverConsole:
         self.send("STOP")
         self.set_status("急停")
 
+    def clear_stop(self, _event=None):
+        self.keys.clear()
+        if messagebox.askyesno("解除急停", "确认周围安全并解除锁存急停？"):
+            self.send("CLEAR_STOP")
+            self.set_status("急停已解除")
+
     def return_auto(self, _event=None):
         if not self.manual_mode:
             return
@@ -76,7 +83,7 @@ class TakeoverConsole:
         self.send("STOP")
         if messagebox.askyesno("切回自动", "确认小车已安全驶出施工路况？"):
             self.send("RETURN")
-            self.set_status("已请求切回自动模式")
+            self.set_status("已切回自动但仍锁存停车；确认安全后按 C 解除")
 
     def command_loop(self):
         mapping = {"w": "W", "s": "S", "a": "A", "d": "D"}
@@ -103,6 +110,9 @@ class TakeoverConsole:
                     if was_manual != self.manual_mode:
                         self.keys.clear()
                     mode_text = "手动接管" if self.manual_mode else "自动驾驶（仅监看）"
+                    estop = len(fields) > 3 and fields[3] == "ESTOP"
+                    if estop:
+                        mode_text = "锁存急停（按 C 确认解除）"
                     self.set_status("%s　速度 %.2f m/s　舵机 %.0f" %
                                     (mode_text, float(speed), float(servo)))
                 elif text.startswith("IMAGE:"):

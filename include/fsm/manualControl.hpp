@@ -46,8 +46,8 @@ private:
     std::atomic<bool> connected{false};
 
     // Network
-    int serverSocket;
-    int clientSocket;
+    std::atomic<int> serverSocket{-1};
+    std::atomic<int> clientSocket{-1};
     struct sockaddr_in serverAddr, clientAddr;
     socklen_t addrSize;
     std::string authToken;
@@ -71,6 +71,7 @@ private:
         std::atomic<bool> right{false};
         std::atomic<bool> emergencyStop{false};
         std::atomic<bool> returnAuto{false};
+        std::atomic<bool> emergencyStopRequested{false};
     } manualControl;
 
     // Image data
@@ -92,6 +93,7 @@ public:
     bool isManualControl();
     void applyManualControl(float *speed, uint16_t *steering);
     bool checkForReturnKey();
+    bool isEmergencyStopRequested() const;
     void disconnectClient();
     bool isConnected() const { return connected; }
 
