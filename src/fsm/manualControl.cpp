@@ -95,7 +95,7 @@ void ManualControlThread::start() {
     serverAddr.sin_port = htons(8080);
     serverAddr.sin_addr.s_addr = INADDR_ANY;
 
-    if (bind(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0)
+    if (::bind(serverSocket.load(), (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0)
     {
         perror("[Manual] bind failed");
         close(serverSocket);
