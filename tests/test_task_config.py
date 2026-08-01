@@ -23,6 +23,18 @@ class TaskConfigTests(unittest.TestCase):
         self.assertTrue(lap["busy"])
         self.assertTrue(lap["manualTakeover"])
         self.assertEqual(1, lap["busyStopPoint"])
+        self.assertTrue(lap["station"])
+
+    def test_station_is_only_enabled_for_construction_tasks(self):
+        parsed = {"tasks": [
+            {"type": "park", "spot": 4},
+            {"type": "construction", "stop": 2},
+            {"type": "fork", "direction": "right"},
+        ]}
+        laps = parsedToLapConfig(parsed)
+        self.assertFalse(laps["lap1"]["station"])
+        self.assertTrue(laps["lap2"]["station"])
+        self.assertFalse(laps["lap3"]["station"])
 
     def test_unknown_and_out_of_range_tasks_are_rejected(self):
         invalid = [

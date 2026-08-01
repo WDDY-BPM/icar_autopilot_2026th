@@ -109,6 +109,11 @@ void FsmStation::run(Mat &img)
             break;
         }
 
+        // 旧AI结果可能被多个摄像头控制帧重复使用；框计数和消失计数
+        // 只能由一组新的推理结果推进。
+        if (!params->aiResultFresh)
+            break;
+
         // 左岔路：引导结束见框开始计时（要求框到底部0.5以下，给足时间完成左转）
         if (params->yforkBranch == 1)
         {
@@ -151,12 +156,14 @@ void FsmStation::run(Mat &img)
                         boxAtThreshold = true;
                 }
 
-                if (!stationVisible)
+                // 只关心已经到达计数阈值的框。前一框离开阈值区域后，
+                // 即使远处的下一框仍可见，也应允许重新武装。
+                if (!boxAtThreshold)
                 {
-                    if (++boxMissingFrames >= 5)
+                    if (++boxMissingFrames >= 8)
                     {
                         boxArmed = true;
-                        boxMissingFrames = 5;
+                        boxMissingFrames = 8;
                     }
                 }
                 else

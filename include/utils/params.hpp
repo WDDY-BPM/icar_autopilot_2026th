@@ -317,6 +317,7 @@ public:
     FsmMode mode, modeLast;             // FSM状态场景
     shared_ptr<Track> track;            // 赛道识别类
     std::vector<PredictResult> results; // AI推理结果
+    bool aiResultFresh = false;         // 本控制帧是否收到了一组新的AI结果
     int totalLaps;                      // 总圈数
     int currentLap;                     // 当前圈数
     int crossStop;                      // 第几次检测到cross停车

@@ -607,9 +607,11 @@ public:
         cv::Mat imgBin;
         predeal->correction(img); // 图像矫正
         /*---------------子线程共享数据，避免浅拷贝-----------------*/
-        std::lock_guard<std::mutex> lock(mtxImg);
-        imgShare = img.clone();
-        readyImg = true;
+        {
+            std::lock_guard<std::mutex> lock(mtxImg);
+            imgShare = img.clone();
+            readyImg = true;
+        }
         cvImg.notify_one();
         /*-------------------------------------------------------*/
         imgBin = predeal->binaryzation(img); // 图像二值化
@@ -641,6 +643,8 @@ public:
                 receivedNewAiResult = true;
             }
         }
+
+        params->aiResultFresh = receivedNewAiResult;
 
         const bool startupGateReleased = updateStartupGate(receivedNewAiResult);
 

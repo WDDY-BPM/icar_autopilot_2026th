@@ -266,8 +266,8 @@ bool FsmYfork::handle(Mat &img)
     case Step::END:
     {
         reset();
-        completed = true; // 超时只结束引导，不将本圈任务标记为成功
-        printf("[Yfork] Guidance timed out; lap task remains incomplete\n");
+        completed = false; // 超时未完成任务，允许车辆下一圈重新检测并重试
+        printf("[Yfork] Guidance timed out; retry remains enabled\n");
         return true;
     }
     }

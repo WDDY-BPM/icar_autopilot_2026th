@@ -17,15 +17,22 @@ from PIL import Image, ImageTk
 
 class TakeoverConsole:
     def __init__(self, host, port, token):
+        self.send_lock = threading.Lock()
         self.sock = socket.create_connection((host, port), timeout=5)
-        self.sock.sendall(("AUTH:" + token + "\n").encode("utf-8"))
+        with self.send_lock:
+            self.sock.sendall(("AUTH:" + token + "\n").encode("utf-8"))
         self.sock.settimeout(1)
         self.alive = True
         self.keys = set()
         self.manual_mode = False
         self.estop_latched = False
         self.last_frame_time = 0.0
-        self.video_stale = False
+        self.connected_time = time.monotonic()
+        self.video_stale = True
+        self.video_ready = False
+        self.fresh_frame_streak = 0
+        self.video_stop_sent = False
+        self.last_frame = None
         self.frames = queue.Queue(maxsize=1)
         self.status_updates = queue.Queue()
         self.root = tk.Tk()
@@ -64,12 +71,13 @@ class TakeoverConsole:
     def send(self, command):
         if self.alive:
             try:
-                self.sock.sendall((command + "\n").encode("ascii"))
+                with self.send_lock:
+                    self.sock.sendall((command + "\n").encode("ascii"))
             except OSError:
                 self.link_lost()
 
     def key_down(self, event):
-        if self.manual_mode:
+        if self.manual_mode and self.video_ready and not self.video_stale:
             self.keys.add(event.keysym.lower())
 
     def key_up(self, event):
@@ -82,6 +90,9 @@ class TakeoverConsole:
 
     def clear_stop(self, _event=None):
         self.keys.clear()
+        if not self.video_ready or self.video_stale:
+            messagebox.showerror("无法解除急停", "实时画面尚未稳定恢复，禁止解除急停。")
+            return
         if messagebox.askyesno("解除急停", "确认周围安全并解除锁存急停？"):
             self.send("CLEAR_STOP")
             self.set_status("急停已解除")
@@ -105,7 +116,8 @@ class TakeoverConsole:
         while self.alive:
             command = "".join(mapping[k] for k in ("w", "s", "a", "d")
                               if k in self.keys)
-            self.send(command if self.manual_mode and command else "PING")
+            can_drive = self.manual_mode and self.video_ready and not self.video_stale
+            self.send(command if can_drive and command else "PING")
             time.sleep(0.05)
 
     def receive_loop(self):
@@ -139,7 +151,16 @@ class TakeoverConsole:
                     frame = cv2.imdecode(np.frombuffer(raw, np.uint8),
                                          cv2.IMREAD_COLOR)
                     if frame is not None:
-                        self.last_frame_time = time.monotonic()
+                        now = time.monotonic()
+                        if self.last_frame_time and now - self.last_frame_time <= 0.4:
+                            self.fresh_frame_streak += 1
+                        else:
+                            self.fresh_frame_streak = 1
+                        self.last_frame_time = now
+                        if self.fresh_frame_streak >= 3:
+                            self.video_ready = True
+                            self.video_stale = False
+                            self.video_stop_sent = False
                         if self.frames.full():
                             self.frames.get_nowait()
                         self.frames.put_nowait(frame)
@@ -167,9 +188,26 @@ class TakeoverConsole:
         except queue.Empty:
             pass
         try:
-            frame = self.frames.get_nowait()
+            self.last_frame = self.frames.get_nowait()
+        except queue.Empty:
+            pass
+
+        now = time.monotonic()
+        reference_time = self.last_frame_time or self.connected_time
+        self.video_stale = now - reference_time > 0.75
+        if self.video_stale:
+            self.video_ready = False
+            self.fresh_frame_streak = 0
+            self.keys.clear()
+            if self.manual_mode and not self.video_stop_sent:
+                self.send("STOP")
+                self.video_stop_sent = True
+            self.status.set("实时画面已失效；遥控已锁止")
+
+        if self.last_frame is not None:
+            frame = self.last_frame.copy()
             if self.guides_enabled.get():
-                frame = self.add_guides(frame.copy())
+                frame = self.add_guides(frame)
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             image = Image.fromarray(frame)
             available_w = max(320, self.video.winfo_width() - 4)
@@ -178,15 +216,18 @@ class TakeoverConsole:
                         else Image.LANCZOS)
             image.thumbnail((available_w, available_h), resample)
             photo = ImageTk.PhotoImage(image)
-            self.video.configure(image=photo)
+            self.video.configure(
+                image=photo,
+                text="画面已失效" if self.video_stale else "",
+                foreground="red",
+                compound=tk.CENTER,
+                font=("Arial", 32, "bold"),
+            )
             self.video.image = photo
-        except queue.Empty:
-            pass
-        if self.alive and self.last_frame_time:
-            stale = time.monotonic() - self.last_frame_time > 1.0
-            self.video_stale = stale
-            if stale:
-                self.status.set("摄像头画面超过1秒未更新；控制连接仍在检查中")
+        else:
+            self.video.configure(
+                image="", text="等待实时画面" if not self.video_stale else "画面已失效",
+                foreground="red", font=("Arial", 32, "bold"))
         if self.alive:
             self.root.after(20, self.refresh)
 

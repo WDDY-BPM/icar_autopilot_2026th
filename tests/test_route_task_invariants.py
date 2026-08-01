@@ -19,7 +19,8 @@ class RouteTaskInvariantTests(unittest.TestCase):
         source = (ROOT / "src" / "fsm" / "station.cpp").read_text(encoding="utf-8")
         self.assertNotIn("busyEntryDelay", source)
         self.assertIn("stationVisible && boxAtThreshold && boxArmed", source)
-        self.assertIn("if (++boxMissingFrames >= 5)", source)
+        self.assertIn("if (!params->aiResultFresh)", source)
+        self.assertIn("if (++boxMissingFrames >= 8)", source)
         self.assertIn("detectedBoxIndex++", source)
         self.assertIn("detectedBoxIndex == targetBox", source)
 
@@ -35,6 +36,7 @@ class RouteTaskInvariantTests(unittest.TestCase):
         timeout_end = re.search(r"case Step::END:.*?return true;", yfork, re.DOTALL)
         self.assertIsNotNone(timeout_end)
         self.assertNotIn("completeLapTask", timeout_end.group(0))
+        self.assertIn("completed = false", timeout_end.group(0))
 
     def test_passenger_wait_states_stop_the_vehicle(self):
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
@@ -61,6 +63,15 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertLess(publish, predeal)
         self.assertLess(publish, startup_gate)
         self.assertLess(publish, run_fsm)
+
+    def test_manual_control_requires_fresh_video_and_serializes_sends(self):
+        source = (ROOT / "tools" / "manual_control_client.py").read_text(encoding="utf-8")
+        self.assertIn("self.send_lock = threading.Lock()", source)
+        self.assertIn("with self.send_lock:", source)
+        self.assertIn("now - reference_time > 0.75", source)
+        self.assertIn("self.fresh_frame_streak >= 3", source)
+        self.assertIn('self.send("STOP")', source)
+        self.assertIn('text="画面已失效" if self.video_stale else ""', source)
 
 
 if __name__ == "__main__":
