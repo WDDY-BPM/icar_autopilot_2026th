@@ -192,9 +192,9 @@ void ManualControlThread::applyManualControl(float *speed, uint16_t *steering) {
 
     // Steering control
     if (manualControl.left) {
-        *steering = PWMSERVOMID - 300; // 左转
+        *steering = PWMSERVOMID + 300; // 左转
     } else if (manualControl.right) {
-        *steering = PWMSERVOMID + 300; // 右转
+        *steering = PWMSERVOMID - 300; // 右转
     } else {
         *steering = PWMSERVOMID;  // 直行
     }

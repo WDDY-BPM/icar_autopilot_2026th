@@ -251,7 +251,7 @@ class TakeoverConsole:
     def add_guides(self, frame):
         """Draw a perspective lane corridor and steering-aware center path."""
         h, w = frame.shape[:2]
-        steering = float(np.clip((self.current_steering - 1500.0) / 300.0,
+        steering = float(np.clip((1500.0 - self.current_steering) / 300.0,
                                  -1.0, 1.0))
         center_points = []
         left_points = []

@@ -50,7 +50,7 @@ public:
         params->config.turnP = abs(error) * params->config.runP2 + params->config.runP1;
         int pwmDiff = (error * params->config.turnP) + (error - errorLast) * params->config.turnD;
         errorLast = error;
-        params->ctrl.servo = (uint16_t)(PWMSERVOMID + pwmDiff); // PWM转换
+        params->ctrl.servo = (uint16_t)(PWMSERVOMID - pwmDiff); // PWM转换
         if (params->ctrl.servo > PWMSERVOMAX)
             params->ctrl.servo = PWMSERVOMAX;
         else if (params->ctrl.servo < PWMSERVOMIN)

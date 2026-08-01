@@ -7,6 +7,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RouteTaskInvariantTests(unittest.TestCase):
+    def test_steering_polarity_matches_vehicle(self):
+        motion = (ROOT / "include" / "ctrl" / "motion.hpp").read_text(encoding="utf-8")
+        manual = (ROOT / "src" / "fsm" / "manualControl.cpp").read_text(encoding="utf-8")
+        self.assertIn("PWMSERVOMID - pwmDiff", motion)
+        self.assertNotIn("PWMSERVOMID + pwmDiff", motion)
+        self.assertIn("*steering = PWMSERVOMID + 300; // 左转", manual)
+        self.assertIn("*steering = PWMSERVOMID - 300; // 右转", manual)
     def test_cross_requires_current_lap_task(self):
         source = (ROOT / "src" / "fsm" / "cross.cpp").read_text(encoding="utf-8")
         gate = source.index("params->lapTaskRequired && !params->lapTaskCompleted")
@@ -82,7 +89,7 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIn("self.gui_heartbeat_time = time.monotonic()", source)
         self.assertIn("and self.drive_enabled", source)
         self.assertIn('self.root.bind("<KeyPress-Shift_L>", self.enable_down)', source)
-        self.assertIn("self.current_steering - 1500.0", source)
+        self.assertIn("1500.0 - self.current_steering", source)
         self.assertIn("cv2.polylines", source)
         self.assertIn("Dashed red planned center line", source)
         self.assertIn("真实车道线（L）", source)
