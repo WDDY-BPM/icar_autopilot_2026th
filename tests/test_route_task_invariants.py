@@ -104,6 +104,22 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIn("count() >= 2000", park)
         self.assertIn("count() >= 2000", busy)
 
+        trackin = re.search(r"case Step::TRACKIN:.*?case Step::ENTER:", park, re.DOTALL)
+        trackout = re.search(r"case Step::TRACKOUT:.*?case Step::FORKOUT:", park, re.DOTALL)
+        self.assertIsNotNone(trackin)
+        self.assertIsNotNone(trackout)
+        self.assertIn("params->aiResultFresh", trackin.group(0))
+        self.assertIn("params->aiResultFresh", trackout.group(0))
+        self.assertNotIn("if (timeout > 45)\n            countRes++", trackout.group(0))
+
+    def test_scene_entry_counts_at_most_once_per_ai_frame(self):
+        park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
+        busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
+        self.assertIn("bool parkDetectedThisFrame = false;", park)
+        self.assertIn("if (parkDetectedThisFrame)\n            countRes++;", park)
+        self.assertIn("bool countedBusyThisFrame = false;", busy)
+        self.assertIn("!countedBusyThisFrame", busy)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -110,13 +110,19 @@ void FsmPark::run(Mat &img)
         if (!params->aiResultFresh)
             break;
 
+        bool parkDetectedThisFrame = false;
         for (int i = 0; i < params->results.size(); i++)
         {
             if (params->results[i].type == LABEL_PARK &&
                 params->results[i].height < 100 && params->results[i].width < 90 &&
                 params->results[i].x > COLSIMAGE / 2) // AI标志：停车场
-                countRes++;
+            {
+                parkDetectedThisFrame = true;
+                break;
+            }
         }
+        if (parkDetectedThisFrame)
+            countRes++;
 
         if (countRes >= 3)
         {
@@ -208,7 +214,7 @@ void FsmPark::run(Mat &img)
     case Step::TRACKIN: // 入库巡线中
     {
         timeout++;  // 超时计数
-        countSes++; // 图像场次计数
+        countSes++; // 控制周期计数（仅用于超时，不作为AI证据）
 
         //[01] 道闸检测
         for (int i = 0; i < params->results.size(); i++)
@@ -224,7 +230,9 @@ void FsmPark::run(Mat &img)
                 }
 
                 // 出停车场检测
-                if ((params->results[i].y + params->results[i].height) > ROWSIMAGE * 0.25 && spots.checked) // 道闸距离估算
+                if (params->aiResultFresh &&
+                    (params->results[i].y + params->results[i].height) > ROWSIMAGE * 0.25 &&
+                    spots.checked) // 道闸距离估算
                 {
                     countOut++;
                     if (countOut > 4)
@@ -232,8 +240,11 @@ void FsmPark::run(Mat &img)
 
                     break;
                 }
-                timeout = 0; // 超时计数
-                countRes = 0;
+                if (params->aiResultFresh)
+                {
+                    timeout = 0;
+                    countRes = 0;
+                }
             }
         }
 
@@ -300,7 +311,8 @@ void FsmPark::run(Mat &img)
             countRes = 0;
 
             // 出停车场检测
-            if (resLeft.score > 0 && (resLeft.y + resLeft.height / 2) > ROWSIMAGE * 0.2)
+            if (params->aiResultFresh && resLeft.score > 0 &&
+                (resLeft.y + resLeft.height / 2) > ROWSIMAGE * 0.2)
                 countOut++;
             if (countOut > 3)
                 setStep(Step::TRACKOUT); // 设置停车场新步骤
@@ -328,13 +340,14 @@ void FsmPark::run(Mat &img)
                       << ", fork1_center=" << fork1_center
                       << ", threshold=" << threshold << std::endl;
 
-            if (fork0_center > threshold || fork1_center > threshold)
+            if (params->aiResultFresh &&
+                (fork0_center > threshold || fork1_center > threshold))
             {
                 spots.countRes++;
                 std::cout << "[Park] Fork positions: fork0_y=" << fork0_center
                           << ", fork1_y=" << fork1_center << std::endl;
             }
-            else
+            else if (params->aiResultFresh)
                 spots.countRes = 0;
             if (spots.countRes > 1) // 开始确认驶入车位号
             {
@@ -345,7 +358,7 @@ void FsmPark::run(Mat &img)
         }
 
         //[04] 入库检测
-        if (spots.checked && params->config.spot) // 车位停车使能
+        if (params->aiResultFresh && spots.checked && params->config.spot)
         {
             std::cout << "[Park] spotEnable[0]=" << spots.spotEnable[0]
                       << ", spotEnable[1]=" << spots.spotEnable[1]
@@ -392,13 +405,8 @@ void FsmPark::run(Mat &img)
         }
 
         // 出库状态切换
-        if (countSes > 100)
-        {
-            if (timeout > 20) // 超时
-                countRes++;   // 出库计数器
-            if (countRes > 3)
-                setStep(Step::FORKOUT); // 设置停车场新步骤
-        }
+        if (countSes > 100 && timeout > 23)
+            setStep(Step::FORKOUT); // 纯控制周期超时，不混入AI证据计数器
         break;
     }
 
@@ -510,8 +518,11 @@ void FsmPark::run(Mat &img)
             if (params->results[i].type == LABEL_GATE &&
                 params->results[i].width > 100 && params->results[i].height < 130) // 搜索AI标志：岔路箭头
             {
-                timeout = 0; // 超时计数
-                countRes = 0;
+                if (params->aiResultFresh)
+                {
+                    timeout = 0;
+                    countRes = 0;
+                }
                 if ((params->results[i].y + params->results[i].height) > ROWSIMAGE * 0.4) // 停车距离计算
                 {
                     stopping = true; // 停车等待标志
@@ -546,19 +557,18 @@ void FsmPark::run(Mat &img)
             vector<PointX> repairPoints = {start, mid, end};
             params->ctrl.centerEdge = Bezier(0.02, repairPoints); // 三阶贝塞尔曲线拟合
             params->ctrl.fitting = true;                          // 控制中心拟合标志
-            if (spots.forks.size() > 0)
+            if (params->aiResultFresh && spots.forks.size() > 0)
                 timeout = 0; // 定时入库关闭 | 仅依靠AI标志转向
 
-            if (resLeft.score > 0 && (resLeft.y + resLeft.height / 2) > ROWSIMAGE * 0.35)
+            if (params->aiResultFresh && resLeft.score > 0 &&
+                (resLeft.y + resLeft.height / 2) > ROWSIMAGE * 0.35)
             {
                 countRes++;
             }
         }
 
         // 出库状态切换
-        if (timeout > 45)
-            countRes++; // 出库计数器
-        if (countRes > 2)
+        if (timeout > 48 || countRes > 2)
             setStep(Step::FORKOUT); // 设置停车场新步骤
 
         break;
