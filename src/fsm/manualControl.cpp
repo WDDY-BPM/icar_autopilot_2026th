@@ -137,13 +137,27 @@ void ManualControlThread::stop() {
     if (remainingServer >= 0)
         close(remainingServer);
 }
-void ManualControlThread::sendImage(cv::Mat &img) {
+uint64_t ManualControlThread::sendImage(cv::Mat &img, int64_t *timestampMs) {
+    const uint64_t frameId = nextFrameId.fetch_add(1);
+    const int64_t capturedAt = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (timestampMs)
+        *timestampMs = capturedAt;
     if (!img.empty()) {
         std::lock_guard<std::mutex> lock(mtxImg);
         image = img.clone();
+        imageFrameId = frameId;
+        imageTimestampMs = capturedAt;
         hasImage = true;
         cvImg.notify_one();
     }
+    return frameId;
+}
+
+void ManualControlThread::sendOverlay(const std::string &json) {
+    std::lock_guard<std::mutex> lock(mtxOverlay);
+    overlay = json;
+    hasOverlay = true;
 }
 
 void ManualControlThread::updateVehicleState(float speed, float steering, bool manual) {
@@ -310,7 +324,8 @@ void ManualControlThread::handleClientConnection() {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     });
-    // Send images and state
+    // Send images and state. Overlay telemetry is limited to about 12.5 Hz.
+    auto lastOverlaySent = std::chrono::steady_clock::time_point{};
     while (running && connected) {
         // Send vehicle state (higher frequency for state)
         std::string state;
@@ -331,10 +346,15 @@ void ManualControlThread::handleClientConnection() {
         // Copy the newest frame under the lock, then encode/send without
         // blocking the vehicle control thread.
         cv::Mat frameToSend;
+        uint64_t frameId = 0;
+        int64_t frameTimestampMs = 0;
         if (hasImage) {
             std::lock_guard<std::mutex> imgLock(mtxImg);
-            if (!image.empty())
+            if (!image.empty()) {
                 frameToSend = image.clone();
+                frameId = imageFrameId;
+                frameTimestampMs = imageTimestampMs;
+            }
             hasImage = false;
         }
         if (!frameToSend.empty()) {
@@ -342,7 +362,9 @@ void ManualControlThread::handleClientConnection() {
                 std::vector<uchar> buf;
                 std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, 50};
                 cv::imencode(".jpg", frameToSend, buf, params);
-                std::string header = "IMAGE:" + std::to_string(buf.size()) + "\n";
+                std::string header = "IMAGE:" + std::to_string(buf.size()) +
+                    "," + std::to_string(frameId) + "," +
+                    std::to_string(frameTimestampMs) + "\n";
                 if (!sendAll(clientSocket, header.data(), header.size()) ||
                     !sendAll(clientSocket, buf.data(), buf.size()))
                 {
@@ -352,6 +374,23 @@ void ManualControlThread::handleClientConnection() {
             } catch (const cv::Exception& e) {
                 cerr << "[Manual] Image encode error: " << e.what() << endl;
             }
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (hasOverlay && now - lastOverlaySent >= std::chrono::milliseconds(80)) {
+            std::string overlayToSend;
+            {
+                std::lock_guard<std::mutex> overlayLock(mtxOverlay);
+                overlayToSend = overlay;
+                hasOverlay = false;
+            }
+            const std::string header = "OVERLAY:" +
+                std::to_string(overlayToSend.size()) + "\n";
+            if (!sendAll(clientSocket, header.data(), header.size()) ||
+                !sendAll(clientSocket, overlayToSend.data(), overlayToSend.size())) {
+                connected = false;
+                break;
+            }
+            lastOverlaySent = now;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(33));  // 约30 FPS
     }

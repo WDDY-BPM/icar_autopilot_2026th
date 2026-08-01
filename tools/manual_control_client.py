@@ -2,6 +2,7 @@
 """First-person remote takeover console for the construction zone."""
 
 import argparse
+import json
 import os
 import queue
 import socket
@@ -39,6 +40,10 @@ class TakeoverConsole:
         self.fresh_frame_streak = 0
         self.video_stop_sent = False
         self.last_frame = None
+        self.last_frame_id = 0
+        self.last_frame_timestamp_ms = 0
+        self.latest_overlay = None
+        self.overlay_received_time = 0.0
         self.frames = queue.Queue(maxsize=1)
         self.status_updates = queue.Queue()
         self.root = tk.Tk()
@@ -47,13 +52,23 @@ class TakeoverConsole:
         self.root.minsize(800, 600)
         self.status = tk.StringVar(value="已连接；等待实时画面")
         self.guides_enabled = tk.BooleanVar(value=False)
+        self.lanes_enabled = tk.BooleanVar(value=True)
+        self.ai_enabled = tk.BooleanVar(value=True)
         self.video = tk.Label(self.root, bg="black")
         self.video.pack(fill=tk.BOTH, expand=True)
         tk.Label(self.root, textvariable=self.status, font=("Arial", 14)).pack()
         tk.Checkbutton(
-            self.root, text="显示固定参考线（G）",
+            self.root, text="估计引导线（G）",
             variable=self.guides_enabled, takefocus=False
-        ).pack()
+        ).pack(side=tk.LEFT)
+        tk.Checkbutton(
+            self.root, text="真实车道线（L）",
+            variable=self.lanes_enabled, takefocus=False
+        ).pack(side=tk.LEFT)
+        tk.Checkbutton(
+            self.root, text="AI框和运行信息（B）",
+            variable=self.ai_enabled, takefocus=False
+        ).pack(side=tk.LEFT)
         tk.Label(
             self.root,
             text="按住 Shift 才能遥控　W/S 前后　A/D 转向　失焦自动急停　空格急停",
@@ -71,6 +86,8 @@ class TakeoverConsole:
         self.root.bind("<KeyPress-c>", self.clear_stop)
         self.root.bind("<KeyPress-r>", self.return_auto)
         self.root.bind("<KeyPress-g>", self.toggle_guides)
+        self.root.bind("<KeyPress-l>", self.toggle_lanes)
+        self.root.bind("<KeyPress-b>", self.toggle_ai)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         threading.Thread(target=self.receive_loop, daemon=True).start()
         threading.Thread(target=self.command_loop, daemon=True).start()
@@ -145,6 +162,12 @@ class TakeoverConsole:
     def toggle_guides(self, _event=None):
         self.guides_enabled.set(not self.guides_enabled.get())
 
+    def toggle_lanes(self, _event=None):
+        self.lanes_enabled.set(not self.lanes_enabled.get())
+
+    def toggle_ai(self, _event=None):
+        self.ai_enabled.set(not self.ai_enabled.get())
+
     def command_loop(self):
         mapping = {"w": "W", "s": "S", "a": "A", "d": "D"}
         while self.alive:
@@ -192,7 +215,10 @@ class TakeoverConsole:
                     self.set_status("%s　速度 %.2f m/s　舵机 %.0f" %
                                     (mode_text, float(speed), float(servo)))
                 elif text.startswith("IMAGE:"):
-                    size = int(text[6:])
+                    image_fields = text[6:].split(",")
+                    size = int(image_fields[0])
+                    frame_id = int(image_fields[1]) if len(image_fields) > 1 else 0
+                    timestamp_ms = int(image_fields[2]) if len(image_fields) > 2 else 0
                     raw = stream.read(size)
                     if len(raw) != size:
                         raise ConnectionError
@@ -211,7 +237,14 @@ class TakeoverConsole:
                             self.video_stop_sent = False
                         if self.frames.full():
                             self.frames.get_nowait()
-                        self.frames.put_nowait(frame)
+                        self.frames.put_nowait((frame_id, timestamp_ms, frame))
+                elif text.startswith("OVERLAY:"):
+                    size = int(text[8:])
+                    raw = stream.read(size)
+                    if len(raw) != size:
+                        raise ConnectionError
+                    self.latest_overlay = json.loads(raw.decode("utf-8"))
+                    self.overlay_received_time = time.monotonic()
         except (OSError, ValueError, ConnectionError):
             self.link_lost()
 
@@ -256,6 +289,47 @@ class TakeoverConsole:
                     cv2.LINE_AA)
         return frame
 
+    @staticmethod
+    def _draw_polyline(frame, points, color, thickness=2):
+        if len(points) >= 2:
+            cv2.polylines(frame, [np.asarray(points, dtype=np.int32)], False,
+                          color, thickness, cv2.LINE_AA)
+
+    def add_real_lanes(self, frame, overlay):
+        self._draw_polyline(frame, overlay.get("left", []), (0, 255, 0), 2)
+        self._draw_polyline(frame, overlay.get("right", []), (0, 255, 255), 2)
+        center = overlay.get("center_line", [])
+        for index in range(0, len(center) - 1, 2):
+            cv2.line(frame, tuple(center[index]), tuple(center[index + 1]),
+                     (0, 0, 255), 2, cv2.LINE_AA)
+        return frame
+
+    def add_ai_overlay(self, frame, overlay):
+        detections_match = (
+            abs(self.last_frame_id -
+                int(overlay.get("detections_frame_id", 0))) <= 5
+        )
+        for result in overlay.get("detections", []) if detections_match else []:
+            x, y = int(result["x"]), int(result["y"])
+            w, h = int(result["w"]), int(result["h"])
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            caption = "%s %.2f" % (result.get("label", result.get("type", "?")),
+                                   float(result.get("score", 0.0)))
+            cv2.putText(frame, caption, (x, max(14, y - 4)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1,
+                        cv2.LINE_AA)
+        edge = overlay.get("edge", {})
+        info = "mode=%s speed=%.2f servo=%d err=%d edge=%d/%d valid=%d/%d" % (
+            overlay.get("mode", "?"), float(overlay.get("speed", 0.0)),
+            int(overlay.get("steering", 1500)),
+            int(overlay.get("center_error", 0)),
+            int(edge.get("left_count", 0)), int(edge.get("right_count", 0)),
+            int(edge.get("valid_left", 0)), int(edge.get("valid_right", 0)))
+        cv2.putText(frame, info, (8, frame.shape[0] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 0), 1,
+                    cv2.LINE_AA)
+        return frame
+
     def refresh(self):
         self.gui_heartbeat_time = time.monotonic()
         self.gui_watchdog_stop_sent = False
@@ -265,7 +339,8 @@ class TakeoverConsole:
         except queue.Empty:
             pass
         try:
-            self.last_frame = self.frames.get_nowait()
+            (self.last_frame_id, self.last_frame_timestamp_ms,
+             self.last_frame) = self.frames.get_nowait()
         except queue.Empty:
             pass
 
@@ -285,6 +360,16 @@ class TakeoverConsole:
             frame = self.last_frame.copy()
             if self.guides_enabled.get():
                 frame = self.add_guides(frame)
+            overlay = self.latest_overlay
+            overlay_matches = (
+                overlay is not None and
+                now - self.overlay_received_time <= 0.5 and
+                abs(self.last_frame_id - int(overlay.get("frame_id", 0))) <= 5
+            )
+            if overlay_matches and self.lanes_enabled.get():
+                frame = self.add_real_lanes(frame, overlay)
+            if overlay_matches and self.ai_enabled.get():
+                frame = self.add_ai_overlay(frame, overlay)
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             image = Image.fromarray(frame)
             available_w = max(320, self.video.winfo_width() - 4)

@@ -22,6 +22,8 @@
  */
 
 #include <thread>
+#include <chrono>
+#include <cstdint>
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
@@ -40,7 +42,7 @@ class ManualControlThread
 {
 private:
     std::thread thread;
-    std::mutex mtxImg, mtxState, mtxContact;
+    std::mutex mtxImg, mtxState, mtxContact, mtxOverlay;
     std::condition_variable cvImg;
     std::atomic<bool> running{false};
     std::atomic<bool> connected{false};
@@ -77,6 +79,13 @@ private:
     // Image data
     cv::Mat image;
     std::atomic<bool> hasImage{false};
+    uint64_t imageFrameId{0};
+    int64_t imageTimestampMs{0};
+    std::atomic<uint64_t> nextFrameId{1};
+
+    // Latest-only telemetry overlay, independent from the JPEG queue.
+    std::string overlay;
+    std::atomic<bool> hasOverlay{false};
 
     // Last contact time
     std::chrono::steady_clock::time_point lastContact;
@@ -88,7 +97,8 @@ public:
 
     void start();
     void stop();
-    void sendImage(cv::Mat &img);
+    uint64_t sendImage(cv::Mat &img, int64_t *timestampMs = nullptr);
+    void sendOverlay(const std::string &json);
     void updateVehicleState(float speed, float steering, bool manual);
     bool isManualControl();
     void applyManualControl(float *speed, uint16_t *steering);

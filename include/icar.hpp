@@ -159,6 +159,7 @@ private:
         return false;
     }
     cv::Mat imgShare;
+    uint64_t imgShareFrameId{0};
     std::mutex mtxImg;
     std::condition_variable cvImg;
     std::atomic<bool> readyImg{false};
@@ -166,6 +167,8 @@ private:
     std::mutex mtxRes;
     std::atomic<bool> readyRes{false};
     std::vector<PredictResult> latestResults; // AI线程单独写，主线程按帧复制
+    uint64_t latestResultsFrameId{0};
+    uint64_t activeResultsFrameId{0};
 
     /**
      * @brief 鼠标的事件回调函数
@@ -214,6 +217,7 @@ private:
         if (shuttingDown)
             return;
         cv::Mat img = imgShare.clone(); // 图像拷贝出来再释放锁
+        const uint64_t inferenceFrameId = imgShareFrameId;
         readyImg = false;
         lock.unlock();
 
@@ -224,6 +228,7 @@ private:
             detection->inference(img);
             std::lock_guard<std::mutex> lock_result(mtxRes);
             latestResults = detection->results;
+            latestResultsFrameId = inferenceFrameId;
             readyRes = true;
         }
     }
@@ -591,11 +596,8 @@ public:
                 return;
             }
 
-        // Publish the raw first-person frame immediately after capture.  Video
-        // monitoring must remain independent of startup gates, emergency stops,
-        // AUTO/MANUAL mode, AI inference and every FSM below.
-        if (fsmFactory.manual->isConnected())
-            fsmFactory.manual->sendImage(img);
+        uint64_t currentFrameId = 0;
+        int64_t currentFrameTimestampMs = 0;
 
         //[02] 图像存储
         if (params->config.saveImg && !params->config.debug) // 存储原始图像
@@ -606,10 +608,16 @@ public:
         //[03] 图像预处理
         cv::Mat imgBin;
         predeal->correction(img); // 图像矫正
+        // Publish an unannotated, geometrically corrected frame before lane,
+        // AI and FSM processing. Overlay coordinates therefore match exactly.
+        if (fsmFactory.manual->isConnected())
+            currentFrameId = fsmFactory.manual->sendImage(
+                img, &currentFrameTimestampMs);
         /*---------------子线程共享数据，避免浅拷贝-----------------*/
         {
             std::lock_guard<std::mutex> lock(mtxImg);
             imgShare = img.clone();
+            imgShareFrameId = currentFrameId;
             readyImg = true;
         }
         cvImg.notify_one();
@@ -639,6 +647,7 @@ public:
             if (readyRes)
             {
                 params->results = latestResults;
+                activeResultsFrameId = latestResultsFrameId;
                 readyRes = false;
                 receivedNewAiResult = true;
             }
@@ -716,6 +725,54 @@ public:
             params->ctrl.stop = true;
             params->ctrl.speed = 0.0f;
             params->ctrl.servo = PWMSERVOMID;
+        }
+
+        // Latest-only overlay packet. The network thread rate-limits this to
+        // 12.5 Hz while the unannotated JPEG stream remains near 30 FPS.
+        if (fsmFactory.manual->isConnected() && currentFrameId != 0)
+        {
+            nlohmann::json overlay;
+            overlay["frame_id"] = currentFrameId;
+            overlay["frame_timestamp_ms"] = currentFrameTimestampMs;
+            overlay["timestamp_ms"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            overlay["mode"] = static_cast<int>(params->mode);
+            overlay["speed"] = params->ctrl.speed;
+            overlay["steering"] = params->ctrl.servo;
+            overlay["center"] = params->ctrl.center;
+            overlay["center_error"] = params->ctrl.center - COLSIMAGE / 2;
+            overlay["edge"] = {
+                {"left_count", params->track->pointsEdgeLeft.size()},
+                {"right_count", params->track->pointsEdgeRight.size()},
+                {"valid_left", center->validRowsLeft},
+                {"valid_right", center->validRowsRight},
+                {"sigma_center", center->sigmaCenter},
+                {"line_area", params->ctrl.lineArea}
+            };
+
+            auto samplePoints = [](const std::vector<PointX> &points) {
+                nlohmann::json sampled = nlohmann::json::array();
+                constexpr size_t stride = 4;
+                for (size_t i = 0; i < points.size(); i += stride)
+                    sampled.push_back({points[i].y, points[i].x});
+                if (!points.empty() && (points.size() - 1) % stride != 0)
+                    sampled.push_back({points.back().y, points.back().x});
+                return sampled;
+            };
+            overlay["left"] = samplePoints(params->track->pointsEdgeLeft);
+            overlay["right"] = samplePoints(params->track->pointsEdgeRight);
+            overlay["center_line"] = samplePoints(params->ctrl.centerEdge);
+            overlay["detections"] = nlohmann::json::array();
+            overlay["detections_frame_id"] = activeResultsFrameId;
+            for (const auto &result : params->results)
+            {
+                overlay["detections"].push_back({
+                    {"type", result.type}, {"label", result.label},
+                    {"score", result.score}, {"x", result.x}, {"y", result.y},
+                    {"w", result.width}, {"h", result.height}
+                });
+            }
+            fsmFactory.manual->sendOverlay(overlay.dump());
         }
         //[08] 综合显示调试UI窗口
         if (params->config.debug)

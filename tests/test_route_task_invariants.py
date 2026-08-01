@@ -58,11 +58,13 @@ class RouteTaskInvariantTests(unittest.TestCase):
 
     def test_live_video_is_published_before_control_processing(self):
         source = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
-        publish = source.index("fsmFactory.manual->sendImage(img);")
+        publish = source.index("fsmFactory.manual->sendImage(")
         predeal = source.index("predeal->correction(img);")
         startup_gate = source.index("updateStartupGate(receivedNewAiResult)")
         run_fsm = source.index("runFsm(imgBin);")
-        self.assertLess(publish, predeal)
+        # The unannotated frame is sent immediately after geometric correction
+        # so transmitted lane coordinates share the same pixel space.
+        self.assertLess(predeal, publish)
         self.assertLess(publish, startup_gate)
         self.assertLess(publish, run_fsm)
 
@@ -83,6 +85,28 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIn("self.current_steering - 1500.0", source)
         self.assertIn("cv2.polylines", source)
         self.assertIn("Dashed red planned center line", source)
+        self.assertIn("真实车道线（L）", source)
+        self.assertIn("AI框和运行信息（B）", source)
+        self.assertIn("OVERLAY:", source)
+        self.assertIn("abs(self.last_frame_id - int(overlay.get", source)
+
+    def test_overlay_protocol_is_latest_only_and_frame_correlated(self):
+        header = (ROOT / "include" / "fsm" / "manualControl.hpp").read_text(
+            encoding="utf-8")
+        server = (ROOT / "src" / "fsm" / "manualControl.cpp").read_text(
+            encoding="utf-8")
+        core = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
+        self.assertIn("std::atomic<bool> hasOverlay", header)
+        self.assertIn("std::chrono::milliseconds(80)", server)
+        self.assertIn("IMAGE:", server)
+        self.assertIn("OVERLAY:", server)
+        self.assertIn("frame_id", core)
+        self.assertIn("frame_timestamp_ms", core)
+        self.assertIn("constexpr size_t stride = 4", core)
+        self.assertIn("center_line", core)
+        self.assertIn("detections", core)
+        self.assertIn("detections_frame_id", core)
+        self.assertIn("valid_left", core)
 
     def test_scene_entry_counts_only_fresh_ai_results(self):
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
