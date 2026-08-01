@@ -93,7 +93,7 @@ struct Config
     float runP1 = 2.2;                                  // 比例系数：直线控制量
     float runP2 = 0.007;                                // 动态P变化系数
     float turnP = 3.5;                                  // 比例系数：转弯控制量
-    float turnD = 3.5;                                  // 微分系数：转弯控制量
+    float turnD = 0.8;                                  // 微分系数：转弯控制量
     bool debug = false;                                 // 调试模式使能
     bool saveImg = false;                               // 存图使能
     bool saveIpm = false;                               // 存储IPM图像

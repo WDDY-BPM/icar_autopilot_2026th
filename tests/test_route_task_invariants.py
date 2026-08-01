@@ -12,8 +12,15 @@ class RouteTaskInvariantTests(unittest.TestCase):
         manual = (ROOT / "src" / "fsm" / "manualControl.cpp").read_text(encoding="utf-8")
         self.assertIn("PWMSERVOMID - pwmDiff", motion)
         self.assertNotIn("PWMSERVOMID + pwmDiff", motion)
+        self.assertIn("std::clamp(filteredError", motion)
+        self.assertIn("std::clamp(PWMSERVOMID - pwmDiff", motion)
+        self.assertIn("lastServo - maxServoStep", motion)
+        self.assertIn("void reset()", motion)
+        icar = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
+        self.assertIn("motion->reset();", icar)
         self.assertIn("*steering = PWMSERVOMID + 300; // 左转", manual)
         self.assertIn("*steering = PWMSERVOMID - 300; // 右转", manual)
+
     def test_cross_requires_current_lap_task(self):
         source = (ROOT / "src" / "fsm" / "cross.cpp").read_text(encoding="utf-8")
         gate = source.index("params->lapTaskRequired && !params->lapTaskCompleted")

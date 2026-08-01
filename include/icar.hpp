@@ -703,11 +703,17 @@ public:
         }
 
         //[07] 车辆运动控制（仅手动接管时跳过）
-        if (startupGateReleased && !emergencyStopRequested &&
-            !fsmFactory.busy->isInManualTakeover() && params->autoRecoveryFrames <= 0)
+        const bool automaticControlActive =
+            startupGateReleased && !emergencyStopRequested &&
+            !fsmFactory.busy->isInManualTakeover() && params->autoRecoveryFrames <= 0;
+        if (automaticControlActive)
         {
             motion->poseControl(params);
             motion->speedControl(params);
+        }
+        else
+        {
+            motion->reset();
         }
 
         if (!emergencyStopRequested && params->autoRecoveryFrames > 0)

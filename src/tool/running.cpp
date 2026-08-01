@@ -379,6 +379,10 @@ public:
             motion->poseControl(params);
             motion->speedControl(params);
         }
+        else
+        {
+            motion->reset();
+        }
 
         //[08] 综合显示调试UI窗口
         if (params->config.debug)

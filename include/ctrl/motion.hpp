@@ -39,22 +39,53 @@ public:
      */
     void poseControl(shared_ptr<Params> &params)
     {
-        float error = params->ctrl.center - COLSIMAGE / 2; // 图像控制中心转换偏差
-        static int errorLast = 0;                          // 记录前一次的偏差
-        if (abs(error - errorLast) > COLSIMAGE / 20)
+        constexpr float filterOldWeight = 0.6f;
+        constexpr float maxErrorStep = 12.0f;
+        constexpr int maxServoStep = 25;
+
+        const float rawError = params->ctrl.center - COLSIMAGE / 2.0f;
+        if (!controlInitialized)
         {
-            error = error > errorLast ? errorLast + COLSIMAGE / 10
-                                      : errorLast - COLSIMAGE / 10;
+            filteredError = rawError;
+            errorLast = rawError;
+            lastServo = PWMSERVOMID;
+            controlInitialized = true;
+        }
+        else
+        {
+            filteredError = filterOldWeight * filteredError +
+                            (1.0f - filterOldWeight) * rawError;
         }
 
+        // Limit the real frame-to-frame error change. The old implementation
+        // replaced a threshold crossing with an even larger fixed jump.
+        const float error = std::clamp(filteredError,
+                                       errorLast - maxErrorStep,
+                                       errorLast + maxErrorStep);
         params->config.turnP = abs(error) * params->config.runP2 + params->config.runP1;
-        int pwmDiff = (error * params->config.turnP) + (error - errorLast) * params->config.turnD;
+        const int pwmDiff = static_cast<int>(std::lround(
+            error * params->config.turnP +
+            (error - errorLast) * params->config.turnD));
+
+        // Clamp in the signed domain before converting to uint16_t, then limit
+        // actuator slew so a single noisy frame cannot produce a steering kick.
+        int targetServo = std::clamp(PWMSERVOMID - pwmDiff,
+                                     PWMSERVOMIN, PWMSERVOMAX);
+        targetServo = std::clamp(targetServo,
+                                 lastServo - maxServoStep,
+                                 lastServo + maxServoStep);
+
         errorLast = error;
-        params->ctrl.servo = (uint16_t)(PWMSERVOMID - pwmDiff); // PWM转换
-        if (params->ctrl.servo > PWMSERVOMAX)
-            params->ctrl.servo = PWMSERVOMAX;
-        else if (params->ctrl.servo < PWMSERVOMIN)
-            params->ctrl.servo = PWMSERVOMIN;
+        lastServo = targetServo;
+        params->ctrl.servo = static_cast<uint16_t>(targetServo);
+    }
+
+    void reset()
+    {
+        controlInitialized = false;
+        filteredError = 0.0f;
+        errorLast = 0.0f;
+        lastServo = PWMSERVOMID;
     }
 
     /**
@@ -211,6 +242,10 @@ public:
     }
 
 private:
+    bool controlInitialized = false;
+    float filteredError = 0.0f;
+    float errorLast = 0.0f;
+    int lastServo = PWMSERVOMID;
     int countRes = 0;
     int countOut = 0;
     bool outline = false; // 出线标志
