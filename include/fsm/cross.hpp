@@ -56,6 +56,7 @@ private:
   int countCross = 0;     // 斑马线屏蔽计数器
   int countInit = 0;      // 起点屏蔽计数器
   int crossLostCount = 0;      // checkCrossPass用：复位crossPassed（>10帧）
+  int crossPassConfirmCount = 0; // 下方斑马线连续新AI结果确认次数
   int crossLostStepCount = 0;  // ENABLE步用：触发STOP（>=3帧）
   int crossCount = 0;          // 累计检测到cross次数
 

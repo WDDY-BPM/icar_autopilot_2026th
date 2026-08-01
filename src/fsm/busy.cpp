@@ -189,12 +189,13 @@ void FsmBusy::run(Mat &img)
         params->track->pointsEdgeRight.size() < ROWSIMAGE / 2)
         return;
 
-    // 检测施工区标志，触发停车和手动接管
-    for (int i = 0; i < params->results.size(); i++)
+    // 检测施工区标志，触发停车和手动接管。连续检测计数仅由新AI结果推进。
+    if (params->aiResultFresh)
     {
-        if (params->results[i].type == LABEL_BUSY)
+        for (int i = 0; i < params->results.size(); i++)
         {
-            if (params->results[i].height < 100 && params->results[i].width < 80)
+            if (params->results[i].type == LABEL_BUSY &&
+                params->results[i].height < 100 && params->results[i].width < 80)
             {
                 countRec++;
                 countSes = 0; // 复位会话计数器，防止连续检测时意外清零
@@ -260,12 +261,12 @@ void FsmBusy::run(Mat &img)
                 break;
             }
         }
-    }
-    if (countRec > 0)
-    {
-        countSes++;
-        if (countSes > 6)
-            countRec = 0;
+        if (countRec > 0)
+        {
+            countSes++;
+            if (countSes > 6)
+                countRec = 0;
+        }
     }
 
     if (slowing)

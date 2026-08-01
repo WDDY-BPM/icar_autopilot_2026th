@@ -107,6 +107,9 @@ void FsmPark::run(Mat &img)
     {
     case Step::NONE: // AI未识别
     {
+        if (!params->aiResultFresh)
+            break;
+
         for (int i = 0; i < params->results.size(); i++)
         {
             if (params->results[i].type == LABEL_PARK &&

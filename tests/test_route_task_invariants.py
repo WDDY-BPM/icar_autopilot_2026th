@@ -14,6 +14,8 @@ class RouteTaskInvariantTests(unittest.TestCase):
         next_lap = source.index("params->nextLap()", count)
         self.assertLess(gate, count)
         self.assertLess(count, next_lap)
+        self.assertIn("if (!params->aiResultFresh)", source)
+        self.assertIn("++crossPassConfirmCount >= 2", source)
 
     def test_construction_boxes_are_edge_counted(self):
         source = (ROOT / "src" / "fsm" / "station.cpp").read_text(encoding="utf-8")
@@ -72,6 +74,21 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIn("self.fresh_frame_streak >= 3", source)
         self.assertIn('self.send("STOP")', source)
         self.assertIn('text="画面已失效" if self.video_stale else ""', source)
+        self.assertIn('self.root.bind("<FocusOut>", self.focus_lost)', source)
+        self.assertIn("time.monotonic() + 0.25", source)
+        self.assertIn("and self.drive_enabled", source)
+        self.assertIn('self.root.bind("<KeyPress-Shift_L>", self.enable_down)', source)
+
+    def test_scene_entry_counts_only_fresh_ai_results(self):
+        busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
+        park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
+        self.assertRegex(
+            busy,
+            r"if \(params->aiResultFresh\)[\s\S]*?LABEL_BUSY[\s\S]*?countRec\+\+;",
+        )
+        park_none = re.search(r"case Step::NONE:.*?break;", park, re.DOTALL)
+        self.assertIsNotNone(park_none)
+        self.assertIn("if (!params->aiResultFresh)", park_none.group(0))
 
 
 if __name__ == "__main__":

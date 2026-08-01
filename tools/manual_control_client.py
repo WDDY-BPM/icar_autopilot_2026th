@@ -18,12 +18,15 @@ from PIL import Image, ImageTk
 class TakeoverConsole:
     def __init__(self, host, port, token):
         self.send_lock = threading.Lock()
+        self.key_lock = threading.Lock()
         self.sock = socket.create_connection((host, port), timeout=5)
         with self.send_lock:
             self.sock.sendall(("AUTH:" + token + "\n").encode("utf-8"))
         self.sock.settimeout(1)
         self.alive = True
         self.keys = set()
+        self.key_deadlines = {}
+        self.drive_enabled = False
         self.manual_mode = False
         self.estop_latched = False
         self.last_frame_time = 0.0
@@ -50,12 +53,17 @@ class TakeoverConsole:
         ).pack()
         tk.Label(
             self.root,
-            text="通过障碍后、到第一个停靠框前按 R 切回自动　W/S 前后　A/D 转向　空格急停",
+            text="按住 Shift 才能遥控　W/S 前后　A/D 转向　失焦自动急停　空格急停",
             font=("Arial", 12),
         ).pack(pady=8)
         for key in ("w", "a", "s", "d"):
             self.root.bind("<KeyPress-%s>" % key, self.key_down)
             self.root.bind("<KeyRelease-%s>" % key, self.key_up)
+        self.root.bind("<KeyPress-Shift_L>", self.enable_down)
+        self.root.bind("<KeyPress-Shift_R>", self.enable_down)
+        self.root.bind("<KeyRelease-Shift_L>", self.enable_up)
+        self.root.bind("<KeyRelease-Shift_R>", self.enable_up)
+        self.root.bind("<FocusOut>", self.focus_lost)
         self.root.bind("<space>", self.stop)
         self.root.bind("<KeyPress-c>", self.clear_stop)
         self.root.bind("<KeyPress-r>", self.return_auto)
@@ -68,6 +76,11 @@ class TakeoverConsole:
     def set_status(self, text):
         self.status_updates.put(text)
 
+    def clear_keys(self):
+        with self.key_lock:
+            self.keys.clear()
+            self.key_deadlines.clear()
+
     def send(self, command):
         if self.alive:
             try:
@@ -77,19 +90,40 @@ class TakeoverConsole:
                 self.link_lost()
 
     def key_down(self, event):
-        if self.manual_mode and self.video_ready and not self.video_stale:
-            self.keys.add(event.keysym.lower())
+        key = event.keysym.lower()
+        if (self.manual_mode and self.video_ready and not self.video_stale
+                and self.drive_enabled):
+            with self.key_lock:
+                self.keys.add(key)
+                self.key_deadlines[key] = time.monotonic() + 0.25
 
     def key_up(self, event):
-        self.keys.discard(event.keysym.lower())
+        key = event.keysym.lower()
+        with self.key_lock:
+            self.keys.discard(key)
+            self.key_deadlines.pop(key, None)
+
+    def enable_down(self, _event=None):
+        self.drive_enabled = True
+
+    def enable_up(self, _event=None):
+        self.drive_enabled = False
+        self.clear_keys()
+
+    def focus_lost(self, _event=None):
+        self.drive_enabled = False
+        self.clear_keys()
+        if self.manual_mode:
+            self.send("STOP")
+            self.set_status("窗口失去焦点；遥控已急停锁止")
 
     def stop(self, _event=None):
-        self.keys.clear()
+        self.clear_keys()
         self.send("STOP")
         self.set_status("急停")
 
     def clear_stop(self, _event=None):
-        self.keys.clear()
+        self.clear_keys()
         if not self.video_ready or self.video_stale:
             messagebox.showerror("无法解除急停", "实时画面尚未稳定恢复，禁止解除急停。")
             return
@@ -100,7 +134,7 @@ class TakeoverConsole:
     def return_auto(self, _event=None):
         if not self.manual_mode:
             return
-        self.keys.clear()
+        self.clear_keys()
         self.send("STOP")
         if messagebox.askyesno(
                 "切回自动",
@@ -114,9 +148,17 @@ class TakeoverConsole:
     def command_loop(self):
         mapping = {"w": "W", "s": "S", "a": "A", "d": "D"}
         while self.alive:
-            command = "".join(mapping[k] for k in ("w", "s", "a", "d")
-                              if k in self.keys)
-            can_drive = self.manual_mode and self.video_ready and not self.video_stale
+            now = time.monotonic()
+            with self.key_lock:
+                expired = [key for key, deadline in self.key_deadlines.items()
+                           if deadline < now]
+                for key in expired:
+                    self.keys.discard(key)
+                    self.key_deadlines.pop(key, None)
+                command = "".join(mapping[k] for k in ("w", "s", "a", "d")
+                                  if k in self.keys)
+            can_drive = (self.manual_mode and self.video_ready and
+                         not self.video_stale and self.drive_enabled)
             self.send(command if can_drive and command else "PING")
             time.sleep(0.05)
 
@@ -135,7 +177,8 @@ class TakeoverConsole:
                     was_manual = self.manual_mode
                     self.manual_mode = mode == "MANUAL"
                     if was_manual != self.manual_mode:
-                        self.keys.clear()
+                        self.clear_keys()
+                        self.drive_enabled = False
                     mode_text = "手动接管" if self.manual_mode else "自动驾驶（仅监看）"
                     estop = len(fields) > 3 and fields[3] == "ESTOP"
                     self.estop_latched = estop
@@ -198,7 +241,7 @@ class TakeoverConsole:
         if self.video_stale:
             self.video_ready = False
             self.fresh_frame_streak = 0
-            self.keys.clear()
+            self.clear_keys()
             if self.manual_mode and not self.video_stop_sent:
                 self.send("STOP")
                 self.video_stop_sent = True
@@ -234,7 +277,7 @@ class TakeoverConsole:
     def link_lost(self):
         if self.alive:
             self.alive = False
-            self.keys.clear()
+            self.clear_keys()
             if self.estop_latched:
                 message = "连接中断：车辆保持锁存急停"
             elif self.manual_mode:

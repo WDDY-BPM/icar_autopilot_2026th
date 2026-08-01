@@ -59,7 +59,11 @@ FsmMode FsmCross::getMode()
  */
 bool FsmCross::checkCrossPass()
 {
+    if (!params->aiResultFresh)
+        return false;
+
     bool crossDetected = false;
+    bool passCandidate = false;
     for (int i = 0; i < params->results.size(); i++)
     {
         if (params->results[i].type == LABEL_CROSS)
@@ -70,11 +74,23 @@ bool FsmCross::checkCrossPass()
                 // 斑马线底部进入图像下方1/3时才进行过线计数（避免过早识别）
                 if (params->results[i].y + params->results[i].height <= ROWSIMAGE * 2 / 3)
                     continue;
-
-                params->crossPassed = true;
-                return true;
+                passCandidate = true;
             }
         }
+    }
+
+    if (!params->crossPassed && passCandidate)
+    {
+        if (++crossPassConfirmCount >= 2)
+        {
+            params->crossPassed = true;
+            crossPassConfirmCount = 0;
+            return true;
+        }
+    }
+    else if (!passCandidate)
+    {
+        crossPassConfirmCount = 0;
     }
 
     // cross离开画面一段时间后才复位，防止AI闪烁导致重复触发
@@ -148,6 +164,9 @@ void FsmCross::run(Mat &img)
         if (countCross > 999)
             countCross = 999;
 
+        if (!params->aiResultFresh)
+            break;
+
         for (int i = 0; i < params->results.size(); i++)
         {
             // 只有斑马线出现在图像下方1/3时才进行场景识别
@@ -176,6 +195,8 @@ void FsmCross::run(Mat &img)
     case Step::ENABLE: // 场景使能
     {
         timeout++;
+        if (!params->aiResultFresh)
+            break;
         bool crossDetected = false;
         for (int i = 0; i < params->results.size(); i++)
         {
