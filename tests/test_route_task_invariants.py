@@ -75,7 +75,9 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIn('self.send("STOP")', source)
         self.assertIn('text="画面已失效" if self.video_stale else ""', source)
         self.assertIn('self.root.bind("<FocusOut>", self.focus_lost)', source)
-        self.assertIn("time.monotonic() + 0.25", source)
+        self.assertNotIn("key_deadlines", source)
+        self.assertIn("now - self.gui_heartbeat_time <= 0.3", source)
+        self.assertIn("self.gui_heartbeat_time = time.monotonic()", source)
         self.assertIn("and self.drive_enabled", source)
         self.assertIn('self.root.bind("<KeyPress-Shift_L>", self.enable_down)', source)
 
@@ -89,6 +91,18 @@ class RouteTaskInvariantTests(unittest.TestCase):
         park_none = re.search(r"case Step::NONE:.*?break;", park, re.DOTALL)
         self.assertIsNotNone(park_none)
         self.assertIn("if (!params->aiResultFresh)", park_none.group(0))
+
+    def test_park_internal_ai_evidence_and_exit_timeouts(self):
+        park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
+        busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
+        enable = re.search(r"case Step::ENABLE:.*?case Step::FORKIN:", park, re.DOTALL)
+        forkin = re.search(r"case Step::FORKIN:.*?case Step::TRACKIN:", park, re.DOTALL)
+        self.assertIsNotNone(enable)
+        self.assertIsNotNone(forkin)
+        self.assertIn("if (params->aiResultFresh)", enable.group(0))
+        self.assertIn("params->aiResultFresh && findSymbols", forkin.group(0))
+        self.assertIn("count() >= 2000", park)
+        self.assertIn("count() >= 2000", busy)
 
 
 if __name__ == "__main__":

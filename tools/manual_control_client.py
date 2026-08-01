@@ -25,8 +25,9 @@ class TakeoverConsole:
         self.sock.settimeout(1)
         self.alive = True
         self.keys = set()
-        self.key_deadlines = {}
         self.drive_enabled = False
+        self.gui_heartbeat_time = time.monotonic()
+        self.gui_watchdog_stop_sent = False
         self.manual_mode = False
         self.estop_latched = False
         self.last_frame_time = 0.0
@@ -79,7 +80,6 @@ class TakeoverConsole:
     def clear_keys(self):
         with self.key_lock:
             self.keys.clear()
-            self.key_deadlines.clear()
 
     def send(self, command):
         if self.alive:
@@ -95,13 +95,11 @@ class TakeoverConsole:
                 and self.drive_enabled):
             with self.key_lock:
                 self.keys.add(key)
-                self.key_deadlines[key] = time.monotonic() + 0.25
 
     def key_up(self, event):
         key = event.keysym.lower()
         with self.key_lock:
             self.keys.discard(key)
-            self.key_deadlines.pop(key, None)
 
     def enable_down(self, _event=None):
         self.drive_enabled = True
@@ -149,16 +147,19 @@ class TakeoverConsole:
         mapping = {"w": "W", "s": "S", "a": "A", "d": "D"}
         while self.alive:
             now = time.monotonic()
+            gui_responsive = now - self.gui_heartbeat_time <= 0.3
+            if not gui_responsive:
+                self.drive_enabled = False
+                self.clear_keys()
+                if self.manual_mode and not self.gui_watchdog_stop_sent:
+                    self.send("STOP")
+                    self.gui_watchdog_stop_sent = True
             with self.key_lock:
-                expired = [key for key, deadline in self.key_deadlines.items()
-                           if deadline < now]
-                for key in expired:
-                    self.keys.discard(key)
-                    self.key_deadlines.pop(key, None)
                 command = "".join(mapping[k] for k in ("w", "s", "a", "d")
                                   if k in self.keys)
             can_drive = (self.manual_mode and self.video_ready and
-                         not self.video_stale and self.drive_enabled)
+                         not self.video_stale and self.drive_enabled and
+                         gui_responsive)
             self.send(command if can_drive and command else "PING")
             time.sleep(0.05)
 
@@ -225,6 +226,8 @@ class TakeoverConsole:
         return frame
 
     def refresh(self):
+        self.gui_heartbeat_time = time.monotonic()
+        self.gui_watchdog_stop_sent = False
         try:
             while True:
                 self.status.set(self.status_updates.get_nowait())

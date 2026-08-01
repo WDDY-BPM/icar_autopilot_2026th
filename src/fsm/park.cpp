@@ -138,40 +138,39 @@ void FsmPark::run(Mat &img)
 
     case Step::ENABLE: // 停车场使能
     {
-        countSes++;
         if (!params->ctrl.stop) // 停车等待
             timeout++;
         if (timeout > 80) // 超时退出停车状态
             reset();      // 停车场数据复位
 
-        if (findSymbols(params->results, LABEL_PARK)) // 搜索AI标志：停车场
-            countSes = 0;
-
-        if (countSes > 30)         // 停车场Park标志丢失后，倒计时15场图像开始左转向: 25场
-            setStep(Step::FORKIN); // 设置停车场新步骤
-
-        // 检测入库AI标志
-        PredictResult fork;
-        fork.score = 0;
-        fork.y = 0;
-        for (int i = 0; i < params->results.size(); i++)
+        if (params->aiResultFresh)
         {
-            if (params->results[i].type == LABEL_CHOICE) // AI标志：左转直行
+            countSes++;
+            if (findSymbols(params->results, LABEL_PARK))
+                countSes = 0;
+
+            PredictResult fork;
+            fork.score = 0;
+            fork.y = 0;
+            for (int i = 0; i < params->results.size(); i++)
             {
-                if (params->results[i].y > fork.y && params->results[i].width < 120 && params->results[i].height < 120)
+                if (params->results[i].type == LABEL_CHOICE &&
+                    params->results[i].y > fork.y &&
+                    params->results[i].width < 120 && params->results[i].height < 120)
                 {
-                    fork = params->results[i]; // 搜索最底行的岔路标志
+                    fork = params->results[i];
                 }
             }
+            if (fork.score > 0)
+            {
+                countSes = 0;
+                if ((fork.y + fork.height / 2) > ROWSIMAGE * 0.35)
+                    countRes++;
+            }
         }
-        if (fork.score > 0) // 检测到AI标志
-        {
-            countSes = 0; // 定时入库关闭 | 仅依靠AI标志转向
-            if ((fork.y + fork.height / 2) > ROWSIMAGE * 0.35)
-                countRes++;
-            if (countRes > 1)
-                setStep(Step::FORKIN); // 设置停车场新步骤
-        }
+
+        if (countSes > 30 || countRes > 1)
+            setStep(Step::FORKIN);
 
         // parkSpot为0时穿过停车场不停车（不提前回退，让流程走到FORKIN）
         break;
@@ -181,7 +180,7 @@ void FsmPark::run(Mat &img)
     {
         timeout++;
         replanTracking();                             // 车道线重绘（岔路左转）
-        if (findSymbols(params->results, LABEL_GATE)) // 搜索AI标志：道闸
+        if (params->aiResultFresh && findSymbols(params->results, LABEL_GATE))
             countRes++;
         if (countRes > 2 || timeout > 24) // 转向超时：
         {
@@ -198,7 +197,7 @@ void FsmPark::run(Mat &img)
             setStep(Step::TRACKIN); // 设置停车场新步骤
         }
 
-        if (timeout > 20)
+        if (params->aiResultFresh && timeout > 20)
         {
             if (findSymbols(params->results, LABEL_FORK)) // 搜索AI标志：岔路箭头
                 countRes++;
@@ -591,7 +590,10 @@ void FsmPark::run(Mat &img)
                 countRes++;
         }
 
-        if (timeout > 20 || countRes > 2) // 转向超时
+        const bool exitTimedOut =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - forkOutStartedAt).count() >= 2000;
+        if (exitTimedOut || countRes > 2) // 转向超时
         {
             const bool exitConfirmed = countRes > 2;
             params->ctrl.countAcc = 50;        // 跳过缓加速，直接恢复速度
@@ -793,6 +795,8 @@ void FsmPark::setStep(Step st)
     countSes = 0; // 场次计数器
     timeout = 0;  // 超时计数器
     step = st;    // 停车步骤
+    if (st == Step::FORKOUT)
+        forkOutStartedAt = std::chrono::steady_clock::now();
     countIn = 0;  // 入库矫正计数器
     countFlow = 0;
     params->ctrl.back = false; // 倒车失能

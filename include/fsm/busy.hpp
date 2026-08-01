@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 /**
  ********************************************************************************************************
  *                                               示例代码
@@ -56,6 +57,7 @@ private:
     bool drivingThrough = false;    // 退出手动接管后继续在施工区模式行驶，等待左拐退出
     bool exiting = false;           // 退出转向中（看到左转标志后重绘车道线引导转向）
     int exitTimeout = 0;            // 退出转向超时计数器
+    std::chrono::steady_clock::time_point exitStartedAt; // 退出转向真实时间起点
     int countRes = 0;               // 场景识别计数器（退出转向标志丢失计数）
     int stationExitCooldown = 0;    // 第一个框停车后等待检测左转的冷却（30帧=1秒）
 

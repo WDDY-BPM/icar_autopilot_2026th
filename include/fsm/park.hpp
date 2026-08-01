@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 /**
  ********************************************************************************************************
  *                                               示例代码
@@ -116,6 +117,7 @@ private:
   uint16_t countRes = 0;                                          // AI场景识别计数器
   uint16_t countSes = 0;                                          // 场次计数器
   uint16_t timeout = 0;                                           // 超时计数器
+  std::chrono::steady_clock::time_point forkOutStartedAt;         // 出库转向真实时间起点
   int countOut = 0;                                               // 出库检测计数
   bool waiting = false;                                           // 停车等待使能
   int countWait = 0;                                              // 停车等待计数器

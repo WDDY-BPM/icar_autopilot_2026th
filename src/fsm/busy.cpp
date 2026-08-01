@@ -120,6 +120,7 @@ void FsmBusy::run(Mat &img)
                     {
                         exiting = true;
                         exitTimeout = 0;
+                        exitStartedAt = std::chrono::steady_clock::now();
                         countRes = 0;
                         printf("[Busy] Left sign detected, starting exit turn\n");
                         break;
@@ -163,7 +164,10 @@ void FsmBusy::run(Mat &img)
                     countRes++;
             }
 
-            if (countRes > 2 || exitTimeout > 15)
+            const bool exitTimedOut =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - exitStartedAt).count() >= 2000;
+            if (countRes > 2 || exitTimedOut)
             { // 标志丢失或超时
                 const bool exitConfirmed = countRes > 2;
                 drivingThrough = false;
