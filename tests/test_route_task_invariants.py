@@ -80,6 +80,9 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIn("self.gui_heartbeat_time = time.monotonic()", source)
         self.assertIn("and self.drive_enabled", source)
         self.assertIn('self.root.bind("<KeyPress-Shift_L>", self.enable_down)', source)
+        self.assertIn("self.current_steering - 1500.0", source)
+        self.assertIn("cv2.polylines", source)
+        self.assertIn("Dashed red planned center line", source)
 
     def test_scene_entry_counts_only_fresh_ai_results(self):
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")

@@ -30,6 +30,8 @@ class TakeoverConsole:
         self.gui_watchdog_stop_sent = False
         self.manual_mode = False
         self.estop_latched = False
+        self.current_speed = 0.0
+        self.current_steering = 1500.0
         self.last_frame_time = 0.0
         self.connected_time = time.monotonic()
         self.video_stale = True
@@ -174,6 +176,8 @@ class TakeoverConsole:
                 if text.startswith("STATE:"):
                     fields = text[6:].split(",")
                     speed, servo = fields[0], fields[1]
+                    self.current_speed = float(speed)
+                    self.current_steering = float(servo)
                     mode = fields[2] if len(fields) > 2 else "MANUAL"
                     was_manual = self.manual_mode
                     self.manual_mode = mode == "MANUAL"
@@ -211,18 +215,45 @@ class TakeoverConsole:
         except (OSError, ValueError, ConnectionError):
             self.link_lost()
 
-    @staticmethod
-    def add_guides(frame):
+    def add_guides(self, frame):
+        """Draw a perspective lane corridor and steering-aware center path."""
         h, w = frame.shape[:2]
-        cv2.line(frame, (int(w*.12), h-1), (int(w*.43), int(h*.55)),
-                 (0, 255, 0), max(2, w//320))
-        cv2.line(frame, (int(w*.88), h-1), (int(w*.57), int(h*.55)),
-                 (0, 255, 0), max(2, w//320))
-        for ratio in (.68, .82):
-            y = int(h*ratio)
-            t = (ratio-.55)/.45
-            cv2.line(frame, (int(w*(.43-.31*t)), y),
-                     (int(w*(.57+.31*t)), y), (0, 200, 255), 2)
+        steering = float(np.clip((self.current_steering - 1500.0) / 300.0,
+                                 -1.0, 1.0))
+        center_points = []
+        left_points = []
+        right_points = []
+        samples = 25
+        for index in range(samples):
+            progress = index / (samples - 1)  # 0=vehicle, 1=horizon
+            y = int(h * (0.95 - 0.58 * progress))
+            curve = steering * w * 0.22 * progress * progress
+            center_x = w * 0.5 + curve
+            half_width = w * (0.20 - 0.13 * progress)
+            center_points.append((int(center_x), y))
+            left_points.append((int(center_x - half_width), y))
+            right_points.append((int(center_x + half_width), y))
+
+        thickness = max(2, w // 240)
+        cv2.polylines(frame, [np.array(left_points, np.int32)], False,
+                      (0, 255, 0), thickness, cv2.LINE_AA)
+        cv2.polylines(frame, [np.array(right_points, np.int32)], False,
+                      (0, 255, 255), thickness, cv2.LINE_AA)
+
+        # Dashed red planned center line, similar to the on-board Ctrl view.
+        for index in range(0, samples - 1, 2):
+            cv2.line(frame, center_points[index], center_points[index + 1],
+                     (0, 0, 255), thickness, cv2.LINE_AA)
+
+        vehicle_y = int(h * 0.95)
+        cv2.line(frame, (int(w * 0.47), vehicle_y),
+                 (int(w * 0.53), vehicle_y), (0, 0, 255),
+                 max(4, thickness * 2), cv2.LINE_AA)
+        label = "MANUAL" if self.manual_mode else "AUTO"
+        cv2.putText(frame, "%s  %.2f m/s" % (label, self.current_speed),
+                    (int(w * 0.03), int(h * 0.08)), cv2.FONT_HERSHEY_SIMPLEX,
+                    max(0.45, w / 1000.0), (0, 255, 0), thickness,
+                    cv2.LINE_AA)
         return frame
 
     def refresh(self):
