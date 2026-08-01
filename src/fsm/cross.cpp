@@ -113,6 +113,12 @@ void FsmCross::run(Mat &img)
     // 检查是否通过斑马线（起点/终点）- 仅用于计数和圈数切换
     if (checkCrossPass())
     {
+        if (params->lapTaskRequired && !params->lapTaskCompleted)
+        {
+            printf("[Cross] Current lap task incomplete, staying in lap %d\n", params->currentLap);
+            return;
+        }
+
         crossCount++;
         printf("[Cross] Cross #%d detected (currentLap=%d)\n", crossCount, params->currentLap);
 

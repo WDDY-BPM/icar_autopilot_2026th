@@ -11,7 +11,7 @@ class SafetyInvariantTests(unittest.TestCase):
         source = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
         self.assertNotIn("resetSpecialElementsAfterEmergency", source)
         self.assertIn(
-            "if (!emergencyStopRequested && params->autoRecoveryFrames <= 0)",
+            "if (startupGateReleased && !emergencyStopRequested && params->autoRecoveryFrames <= 0)",
             source,
         )
         self.assertIn("params->autoRecoveryFrames = 15;", source)

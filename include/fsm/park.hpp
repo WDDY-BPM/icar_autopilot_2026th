@@ -104,6 +104,7 @@ private:
     TRACKIN,  // 入库巡线
     ENTER,    // 入库
     PARKING,  // 停车
+    WAIT_PICKUP, // 乘客上车等待
     EXIT,     // 出库
     TRACKOUT, // 出库巡线
     FORKOUT,  // 出库岔路转向

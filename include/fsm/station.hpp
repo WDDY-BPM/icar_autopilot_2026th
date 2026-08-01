@@ -53,9 +53,9 @@ private:
     int countInit = 0;
     int pressTimer = 0;    // 压到station后计时器（9帧=0.3秒）
     int cooldown = 0;      // 停车后冷却计数器（150帧=5秒）
-    int stationBoxCounter = 0;      // 跳过计数（施工区busyStopPoint选择用）
-    bool stationBoxCounted = false; // 当前框已计数标志（防止重复计数同一框）
-    int busyEntryDelay = 0;         // 施工区进入后延迟检测（帧数）
+    int detectedBoxIndex = 0; // 已确认通过的施工区停靠框编号
+    bool boxArmed = true;      // 是否允许把下一个框计数一次
+    int boxMissingFrames = 0;  // 符合门限的框连续消失帧数
 
     void setStep(Step st);
 };

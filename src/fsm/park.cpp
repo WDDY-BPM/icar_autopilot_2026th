@@ -461,8 +461,21 @@ void FsmPark::run(Mat &img)
     {
         params->ctrl.stop = true; // 停车标志
         timeout++;
-        if (timeout > 20)        // 停车计时
-            setStep(Step::EXIT); // 出库
+        if (timeout > 20)
+            setStep(Step::WAIT_PICKUP);
+
+        break;
+    }
+
+    case Step::WAIT_PICKUP: // 等待乘客上车
+    {
+        params->ctrl.stop = true;
+        timeout++;
+        if (timeout > 90) // 约3秒，防止永久等待
+        {
+            printf("[Park] Pickup wait complete, exiting parking spot\n");
+            setStep(Step::EXIT);
+        }
 
         break;
     }
@@ -574,9 +587,14 @@ void FsmPark::run(Mat &img)
 
         if (timeout > 20 || countRes > 2) // 转向超时
         {
+            const bool exitConfirmed = countRes > 2;
             params->ctrl.countAcc = 50;        // 跳过缓加速，直接恢复速度
             params->ctrl.outlineCooldown = 90; // 出库后约4.5秒内禁用outlineCheck
             params->ctrl.yforkReset = true;    // 通知yfork复位，防止残留forkSeen误触发
+            if (exitConfirmed)
+                params->completeLapTask("park-exit");
+            else
+                printf("[Park] Exit timed out; lap task remains incomplete\n");
             setStep(Step::NONE);               // 设置停车场新步骤
         }
         break;
@@ -672,6 +690,9 @@ void FsmPark::show(Mat &img)
         break;
     case Step::PARKING:
         str = "Parking";
+        break;
+    case Step::WAIT_PICKUP:
+        str = "Wait pickup";
         break;
     case Step::EXIT:
         str = "Exit";

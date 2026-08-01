@@ -162,6 +162,7 @@ void FsmBusy::run(Mat &img)
 
             if (countRes > 2 || exitTimeout > 15)
             { // 标志丢失或超时
+                const bool exitConfirmed = countRes > 2;
                 drivingThrough = false;
                 exiting = false;
                 enable = false;
@@ -170,6 +171,10 @@ void FsmBusy::run(Mat &img)
                 params->ctrl.countAcc = 0; // 出库缓加速，约1.7s后恢复正常速度
                 params->track->pointsEdgeLeft.clear();
                 params->track->pointsEdgeRight.clear();
+                if (exitConfirmed)
+                    params->completeLapTask("construction-exit");
+                else
+                    printf("[Busy] Exit timed out; lap task remains incomplete\n");
                 printf("[Busy] Exit turn complete, returning to normal mode\n");
                 return;
             }
@@ -435,7 +440,7 @@ void FsmBusy::startManualTakeover()
 {
     manualTakeover = true;
     waitingForTakeover = false;
-    printf("[Busy] Starting manual takeover\n");
+    printf("[Busy] Manual takeover active. Pass the obstacle and press R/RETURN before the first station box.\n");
 }
 
 /**

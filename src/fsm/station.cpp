@@ -45,17 +45,9 @@ void FsmStation::run(Mat &img)
     if (params->takeoverJustEnded)
     {
         params->takeoverJustEnded = false;
-        stationBoxCounter = 0;
-        stationBoxCounted = false;
-        if (params->busyZone)
-        {
-            int target = params->config.currentLapConfig->busyStopPoint;
-            if (target > 1)
-            {
-                busyEntryDelay = 60; // 跳过第一个框：等2秒再开始检测
-                stationBoxCounter = target - 1;
-            }
-        }
+        detectedBoxIndex = 0;
+        boxArmed = true;
+        boxMissingFrames = 0;
         printf("[Station] Manual takeover ended, reset counters\n");
     }
 
@@ -77,13 +69,6 @@ void FsmStation::run(Mat &img)
     {
     case Step::NONE:
     {
-        // 施工区进入后等4秒再开始检测（让车走过前面N个框）
-        if (params->busyZone && busyEntryDelay > 0)
-        {
-            busyEntryDelay--;
-            break;
-        }
-
         // 施工区未启用停车或busyStopPoint为0时跳过检测
         if (params->busyZone && (!params->config.currentLapConfig->busyStopEnable ||
                                  params->config.currentLapConfig->busyStopPoint == 0))
@@ -92,8 +77,9 @@ void FsmStation::run(Mat &img)
         // 非施工区复位跳过计数
         if (!params->busyZone)
         {
-            stationBoxCounter = 0;
-            stationBoxCounted = false;
+            detectedBoxIndex = 0;
+            boxArmed = true;
+            boxMissingFrames = 0;
         }
 
         // 停车后冷却期内不检测
@@ -108,10 +94,10 @@ void FsmStation::run(Mat &img)
             pressTimer++;
             // 施工区第一个框1.3s(40帧)，第二个目标框0.6s(20帧)，左岔路1.1s(33帧)，其他0.6s(19帧)
             int pressThreshold = 19;
-            if (params->busyZone && stationBoxCounter == 0)
+            if (params->busyZone && detectedBoxIndex <= 1)
                 pressThreshold = 40;
             if (params->busyZone && params->config.currentLapConfig->busyStopPoint > 1 &&
-                stationBoxCounter >= params->config.currentLapConfig->busyStopPoint - 1)
+                detectedBoxIndex >= params->config.currentLapConfig->busyStopPoint)
                 pressThreshold = 20;
             if (params->yforkBranch == 1)
                 pressThreshold = 33;
@@ -152,45 +138,53 @@ void FsmStation::run(Mat &img)
             if (params->yforkGuiding)
                 break;
 
-            // 非左岔路：框到底部才检测
-            for (int i = 0; i < params->results.size(); i++)
+            if (params->busyZone)
             {
-                if (params->results[i].type == LABEL_STATION)
+                bool stationVisible = false;
+                bool boxAtThreshold = false;
+                for (const auto &result : params->results)
                 {
-                    // 第一个框在中部检测，第二个框到底部才触发
-                    int boxBottom = params->results[i].y + params->results[i].height;
-                    bool isFirstBox = params->busyZone && !params->stationStopCompleted &&
-                                      (params->config.currentLapConfig->busyStopPoint == 1 ||
-                                       (params->config.currentLapConfig->busyStopPoint > 1 &&
-                                        stationBoxCounter < params->config.currentLapConfig->busyStopPoint - 1));
-                    int threshold = isFirstBox
-                                        ? static_cast<int>(ROWSIMAGE * 0.5)
-                                        : ROWSIMAGE - 10;
-                    if (boxBottom > threshold)
+                    if (result.type != LABEL_STATION)
+                        continue;
+                    stationVisible = true;
+                    if (result.y + result.height > static_cast<int>(ROWSIMAGE * 0.5))
+                        boxAtThreshold = true;
+                }
+
+                if (!stationVisible)
+                {
+                    if (++boxMissingFrames >= 5)
                     {
-                        // 施工区已停过，不再重复检测
-                        if (params->busyZone && params->stationStopCompleted)
-                            break;
+                        boxArmed = true;
+                        boxMissingFrames = 5;
+                    }
+                }
+                else
+                {
+                    boxMissingFrames = 0;
+                }
 
-                        // 施工区跳过前N个框
-                        if (params->busyZone)
-                        {
-                            // 当前框已计过数，跳过本次检测
-                            if (stationBoxCounted)
-                                break;
-
-                            int targetBox = params->config.currentLapConfig->busyStopPoint;
-                            if (targetBox > 1 && stationBoxCounter < targetBox - 1)
-                            {
-                                stationBoxCounter++;
-                                stationBoxCounted = true;
-                                params->stationStarted = true;
-                                params->stationStopCompleted = false;
-                                printf("[Station] Skip box #%d (target=%d)\n", stationBoxCounter, targetBox);
-                                break;
-                            }
-                        }
-
+                if (!params->stationStopCompleted && stationVisible && boxAtThreshold && boxArmed)
+                {
+                    const int targetBox = params->config.currentLapConfig->busyStopPoint;
+                    detectedBoxIndex++;
+                    boxArmed = false;
+                    printf("[Station] Counted box #%d (target=%d)\n", detectedBoxIndex, targetBox);
+                    if (detectedBoxIndex == targetBox)
+                    {
+                        params->stationStarted = true;
+                        pressTimer = 1;
+                        printf("[Station] Target box reached\n");
+                    }
+                }
+            }
+            else
+            {
+                for (const auto &result : params->results)
+                {
+                    if (result.type == LABEL_STATION &&
+                        result.y + result.height > ROWSIMAGE - 10)
+                    {
                         params->stationStarted = true;
                         pressTimer = 1;
                         printf("[Station] Pressed\n");
@@ -206,8 +200,8 @@ void FsmStation::run(Mat &img)
     {
         params->ctrl.stop = true;
         stopCounter++;
-        printf("[Station] Stop %d/30\n", stopCounter);
-        if (stopCounter > 30) // 停车约1秒
+        printf("[Station] Stop %d/90\n", stopCounter);
+        if (stopCounter > 90) // 施工区乘客下车等待约3秒
         {
             printf("[Station] Stop end, resume\n");
             params->stationStopCompleted = true; // 通知yfork边线突变可以退出了
@@ -249,9 +243,9 @@ void FsmStation::resetLap()
     setStep(Step::NONE);
     countInit = 0;
     cooldown = 0;
-    stationBoxCounter = 0;
-    stationBoxCounted = false;
-    busyEntryDelay = 0;
+    detectedBoxIndex = 0;
+    boxArmed = true;
+    boxMissingFrames = 0;
     params->stationStopCompleted = false;
     params->stationStarted = false;
 }

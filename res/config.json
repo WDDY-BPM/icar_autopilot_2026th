@@ -23,7 +23,8 @@
     "binary": -1,
     "model": "../res/models/yolov3_mobilenet_v1",
     "video": "../res/samples/sample.mp4",
-    "alertTarget": "park"
+    "alertTarget": "park",
+    "requireStartCone": true
   },
   "圈数配置": {
     "totalLaps": 3,
@@ -127,6 +128,7 @@
     "score": "AI检测置信度[0,1]",
     "binary": "二值化阈值[0,255], <0 默认使用大津法",
     "#alertTarget": "蜂鸣器报警目标: none-关闭, cone-锥桶, person-行人等",
+    "#requireStartCone": "实车比赛设为true；无锥桶视频回放调试可设为false",
     "#model": "AI模型路径(../res/models/yolov3_mobilenet_v1)",
     "#video": "视频路径(../res/samples/sample.mp4)",
     "totalLaps": "总圈数，默认3圈",

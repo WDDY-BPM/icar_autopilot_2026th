@@ -222,6 +222,7 @@ bool FsmYfork::handle(Mat &img)
             int cur = params->track->pointsEdgeLeft.back().y;
             if (countRes > 0 && abs(cur - countRes) > 25)
             {
+                params->completeLapTask("yfork-left-exit");
                 reset();
                 completed = true;
                 printf("[Yfork] 驶出岔路 (left edge)\n");
@@ -236,6 +237,7 @@ bool FsmYfork::handle(Mat &img)
             int cur = params->track->pointsEdgeRight.back().y;
             if (countRes > 0 && abs(cur - countRes) > 25)
             {
+                params->completeLapTask("yfork-right-exit");
                 reset();
                 completed = true;
                 printf("[Yfork] 驶出岔路 (right edge)\n");
@@ -264,7 +266,8 @@ bool FsmYfork::handle(Mat &img)
     case Step::END:
     {
         reset();
-        completed = true; // 完成一轮Y型岔路，防止停车区误触发
+        completed = true; // 超时只结束引导，不将本圈任务标记为成功
+        printf("[Yfork] Guidance timed out; lap task remains incomplete\n");
         return true;
     }
     }

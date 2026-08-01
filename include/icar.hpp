@@ -112,6 +112,22 @@ private:
             params->track->pointsEdgeRight.size() >= 30;
         startupLaneValidCount = laneValid ? startupLaneValidCount + 1 : 0;
 
+        if (!params->config.requireStartCone)
+        {
+            if (startupLaneValidCount >= 10)
+            {
+                startupGateState = StartupGateState::RELEASED;
+                params->ctrl.countAcc = 0;
+                params->ctrl.stop = false;
+                std::cout << "[Startup] Cone gate disabled; stable lane confirmed. AUTO released." << std::endl;
+                return true;
+            }
+            params->ctrl.stop = true;
+            params->ctrl.speed = 0.0f;
+            params->ctrl.servo = PWMSERVOMID;
+            return false;
+        }
+
         if (startupGateState == StartupGateState::WAIT_FOR_CONE)
         {
             if (receivedNewAiResult)
@@ -575,6 +591,12 @@ public:
                 return;
             }
 
+        // Publish the raw first-person frame immediately after capture.  Video
+        // monitoring must remain independent of startup gates, emergency stops,
+        // AUTO/MANUAL mode, AI inference and every FSM below.
+        if (fsmFactory.manual->isConnected())
+            fsmFactory.manual->sendImage(img);
+
         //[02] 图像存储
         if (params->config.saveImg && !params->config.debug) // 存储原始图像
             savePicture(img);
@@ -651,11 +673,10 @@ public:
             params->ctrl.servo = PWMSERVOMID;
         }
 
-        // Always publish first-person video and current control mode.
+        // Always publish current control mode. Video was already queued directly
+        // after camera capture so slow control processing cannot interrupt it.
         fsmFactory.manual->updateVehicleState(
             params->ctrl.speed, params->ctrl.servo, params->manualTakeover);
-        if (fsmFactory.manual->isConnected())
-            fsmFactory.manual->sendImage(img);
         //[06] Calculate the lane control center in autonomous mode.
         if (startupGateReleased && !emergencyStopRequested &&
             !params->manualTakeover && params->autoRecoveryFrames <= 0)

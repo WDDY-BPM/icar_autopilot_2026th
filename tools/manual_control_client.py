@@ -24,13 +24,15 @@ class TakeoverConsole:
         self.keys = set()
         self.manual_mode = False
         self.estop_latched = False
+        self.last_frame_time = 0.0
+        self.video_stale = False
         self.frames = queue.Queue(maxsize=1)
         self.status_updates = queue.Queue()
         self.root = tk.Tk()
         self.root.title("小车第一视角接管 - %s:%d" % (host, port))
         self.root.geometry("1280x900")
         self.root.minsize(800, 600)
-        self.status = tk.StringVar(value="已连接；车辆保持停止")
+        self.status = tk.StringVar(value="已连接；等待实时画面")
         self.guides_enabled = tk.BooleanVar(value=False)
         self.video = tk.Label(self.root, bg="black")
         self.video.pack(fill=tk.BOTH, expand=True)
@@ -41,7 +43,7 @@ class TakeoverConsole:
         ).pack()
         tk.Label(
             self.root,
-            text="W/S 前进后退　A/D 转向　空格急停　R 切回自动　G 参考线",
+            text="通过障碍后、到第一个停靠框前按 R 切回自动　W/S 前后　A/D 转向　空格急停",
             font=("Arial", 12),
         ).pack(pady=8)
         for key in ("w", "a", "s", "d"):
@@ -89,7 +91,9 @@ class TakeoverConsole:
             return
         self.keys.clear()
         self.send("STOP")
-        if messagebox.askyesno("切回自动", "确认小车已安全驶出施工路况？"):
+        if messagebox.askyesno(
+                "切回自动",
+                "确认已通过障碍，且尚未到达第一个停靠框？\n切回后车辆将自动识别停靠框。"):
             self.send("RETURN")
             self.set_status("已切回自动但仍锁存停车；确认安全后按 C 解除")
 
@@ -135,6 +139,7 @@ class TakeoverConsole:
                     frame = cv2.imdecode(np.frombuffer(raw, np.uint8),
                                          cv2.IMREAD_COLOR)
                     if frame is not None:
+                        self.last_frame_time = time.monotonic()
                         if self.frames.full():
                             self.frames.get_nowait()
                         self.frames.put_nowait(frame)
@@ -177,6 +182,11 @@ class TakeoverConsole:
             self.video.image = photo
         except queue.Empty:
             pass
+        if self.alive and self.last_frame_time:
+            stale = time.monotonic() - self.last_frame_time > 1.0
+            self.video_stale = stale
+            if stale:
+                self.status.set("摄像头画面超过1秒未更新；控制连接仍在检查中")
         if self.alive:
             self.root.after(20, self.refresh)
 

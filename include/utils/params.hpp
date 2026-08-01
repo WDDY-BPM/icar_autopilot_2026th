@@ -105,6 +105,7 @@ struct Config
     string model = "../res/models/yolov3_mobilenet_v1"; // 模型路径
     string video = "../res/samples/sample.mp4";         // 视频路径
     string alertTarget = "none";                        // 蜂鸣器报警目标: "none"/"cone"/"person"
+    bool requireStartCone = true;                        // 启动前是否必须识别并移除锥桶
 
     // 圈数配置
     int totalLaps = 3; // 总圈数
@@ -210,6 +211,7 @@ public:
             config.model = configs["通用配置参数"]["model"];
             config.video = configs["通用配置参数"]["video"];
             config.alertTarget = configs["通用配置参数"].value("alertTarget", "none");
+            config.requireStartCone = configs["通用配置参数"].value("requireStartCone", true);
             config.totalLaps = configs["圈数配置"]["totalLaps"];
 
             // 加载crossStop: 第几次见cross停车totalLaps
@@ -330,6 +332,8 @@ public:
     int alertCountdown = 0;             // 蜂鸣器报警倒计时（帧数）
     int alertDecelCount = 0;            // 报警目标减速倒计时（帧数）
     int busyAlertCountdown = 0;         // 施工区蜂鸣器倒计时（帧数）
+    bool lapTaskRequired = false;       // 当前圈是否配置了必须完成的主任务
+    bool lapTaskCompleted = false;      // 当前圈主任务是否已可靠完成
 
 public:
     /**
@@ -352,6 +356,20 @@ public:
             config.currentLapConfig = nullptr;
             break;
         }
+
+        lapTaskRequired = config.currentLapConfig &&
+                          (config.currentLapConfig->park ||
+                           config.currentLapConfig->busy ||
+                           config.currentLapConfig->yfork);
+        lapTaskCompleted = false;
+    }
+
+    void completeLapTask(const char *source)
+    {
+        if (!lapTaskRequired || lapTaskCompleted)
+            return;
+        lapTaskCompleted = true;
+        printf("[Task] Lap %d completed by %s\n", currentLap, source);
     }
 
     /**
