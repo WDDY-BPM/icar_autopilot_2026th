@@ -76,6 +76,7 @@ private:
 
     int lastLap = 0; // 上一圈号（检测圈变更时复位FSM）
     bool emergencyStopWasActive = false;
+    std::chrono::steady_clock::time_point lastOverlayBuilt{};
 
     // 全局共享数据链
     enum class StartupGateState
@@ -624,7 +625,9 @@ public:
         /*-------------------------------------------------------*/
         imgBin = predeal->binaryzation(img); // 图像二值化
         //[04] Track recognition (skipped during manual takeover).
-        if (!fsmFactory.busy->isInManualTakeover())
+        const bool lanesUpdatedThisFrame =
+            !fsmFactory.busy->isInManualTakeover();
+        if (lanesUpdatedThisFrame)
             params->track->handle(imgBin);
         if (params->config.debug)
         {
@@ -691,9 +694,13 @@ public:
         fsmFactory.manual->updateVehicleState(
             params->ctrl.speed, params->ctrl.servo, params->manualTakeover);
         //[06] Calculate the lane control center in autonomous mode.
+        bool centerUpdatedThisFrame = false;
         if (startupGateReleased && !emergencyStopRequested &&
             !params->manualTakeover && params->autoRecoveryFrames <= 0)
+        {
             center->fitting(params);
+            centerUpdatedThisFrame = true;
+        }
 
         //[07] 车辆运动控制（仅手动接管时跳过）
         if (startupGateReleased && !emergencyStopRequested &&
@@ -727,10 +734,17 @@ public:
             params->ctrl.servo = PWMSERVOMID;
         }
 
-        // Latest-only overlay packet. The network thread rate-limits this to
-        // 12.5 Hz while the unannotated JPEG stream remains near 30 FPS.
-        if (fsmFactory.manual->isConnected() && currentFrameId != 0)
+        // Construct and publish overlays at no more than 12.5 Hz. This avoids
+        // allocating and serializing JSON on every 30 Hz control iteration.
+        const auto overlayNow = std::chrono::steady_clock::now();
+        if (fsmFactory.manual->isConnected() && currentFrameId != 0 &&
+            overlayNow - lastOverlayBuilt >= std::chrono::milliseconds(80))
         {
+            lastOverlayBuilt = overlayNow;
+            const bool lanesValid = lanesUpdatedThisFrame &&
+                                    !params->manualTakeover;
+            const bool centerValid = centerUpdatedThisFrame &&
+                                     !params->manualTakeover;
             nlohmann::json overlay;
             overlay["frame_id"] = currentFrameId;
             overlay["frame_timestamp_ms"] = currentFrameTimestampMs;
@@ -741,13 +755,17 @@ public:
             overlay["steering"] = params->ctrl.servo;
             overlay["center"] = params->ctrl.center;
             overlay["center_error"] = params->ctrl.center - COLSIMAGE / 2;
+            overlay["lanes_valid"] = lanesValid;
+            overlay["lanes_frame_id"] = lanesValid ? currentFrameId : 0;
+            overlay["center_valid"] = centerValid;
+            overlay["center_frame_id"] = centerValid ? currentFrameId : 0;
             overlay["edge"] = {
-                {"left_count", params->track->pointsEdgeLeft.size()},
-                {"right_count", params->track->pointsEdgeRight.size()},
-                {"valid_left", center->validRowsLeft},
-                {"valid_right", center->validRowsRight},
-                {"sigma_center", center->sigmaCenter},
-                {"line_area", params->ctrl.lineArea}
+                {"left_count", lanesValid ? params->track->pointsEdgeLeft.size() : 0},
+                {"right_count", lanesValid ? params->track->pointsEdgeRight.size() : 0},
+                {"valid_left", lanesValid ? center->validRowsLeft : 0},
+                {"valid_right", lanesValid ? center->validRowsRight : 0},
+                {"sigma_center", centerValid ? center->sigmaCenter : 0.0},
+                {"line_area", centerValid ? params->ctrl.lineArea : 0}
             };
 
             auto samplePoints = [](const std::vector<PointX> &points) {
@@ -759,9 +777,15 @@ public:
                     sampled.push_back({points.back().y, points.back().x});
                 return sampled;
             };
-            overlay["left"] = samplePoints(params->track->pointsEdgeLeft);
-            overlay["right"] = samplePoints(params->track->pointsEdgeRight);
-            overlay["center_line"] = samplePoints(params->ctrl.centerEdge);
+            overlay["left"] = lanesValid
+                ? samplePoints(params->track->pointsEdgeLeft)
+                : nlohmann::json::array();
+            overlay["right"] = lanesValid
+                ? samplePoints(params->track->pointsEdgeRight)
+                : nlohmann::json::array();
+            overlay["center_line"] = centerValid
+                ? samplePoints(params->ctrl.centerEdge)
+                : nlohmann::json::array();
             overlay["detections"] = nlohmann::json::array();
             overlay["detections_frame_id"] = activeResultsFrameId;
             for (const auto &result : params->results)

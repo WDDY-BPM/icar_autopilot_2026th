@@ -96,6 +96,8 @@ class RouteTaskInvariantTests(unittest.TestCase):
         server = (ROOT / "src" / "fsm" / "manualControl.cpp").read_text(
             encoding="utf-8")
         core = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
+        client = (ROOT / "tools" / "manual_control_client.py").read_text(
+            encoding="utf-8")
         self.assertIn("std::atomic<bool> hasOverlay", header)
         self.assertIn("std::chrono::milliseconds(80)", server)
         self.assertIn("IMAGE:", server)
@@ -107,6 +109,12 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIn("detections", core)
         self.assertIn("detections_frame_id", core)
         self.assertIn("valid_left", core)
+        self.assertIn("lanes_valid", core)
+        self.assertIn("center_valid", core)
+        self.assertIn("!params->manualTakeover", core)
+        self.assertIn("overlayNow - lastOverlayBuilt", core)
+        self.assertIn("<= 2", client)
+        self.assertIn("overlay_matches and not self.manual_mode", client)
 
     def test_scene_entry_counts_only_fresh_ai_results(self):
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")

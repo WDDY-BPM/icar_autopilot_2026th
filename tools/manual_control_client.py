@@ -296,12 +296,16 @@ class TakeoverConsole:
                           color, thickness, cv2.LINE_AA)
 
     def add_real_lanes(self, frame, overlay):
-        self._draw_polyline(frame, overlay.get("left", []), (0, 255, 0), 2)
-        self._draw_polyline(frame, overlay.get("right", []), (0, 255, 255), 2)
-        center = overlay.get("center_line", [])
-        for index in range(0, len(center) - 1, 2):
-            cv2.line(frame, tuple(center[index]), tuple(center[index + 1]),
-                     (0, 0, 255), 2, cv2.LINE_AA)
+        if overlay.get("lanes_valid", False):
+            self._draw_polyline(frame, overlay.get("left", []),
+                                (0, 255, 0), 2)
+            self._draw_polyline(frame, overlay.get("right", []),
+                                (0, 255, 255), 2)
+        if overlay.get("center_valid", False):
+            center = overlay.get("center_line", [])
+            for index in range(0, len(center) - 1, 2):
+                cv2.line(frame, tuple(center[index]), tuple(center[index + 1]),
+                         (0, 0, 255), 2, cv2.LINE_AA)
         return frame
 
     def add_ai_overlay(self, frame, overlay):
@@ -364,9 +368,10 @@ class TakeoverConsole:
             overlay_matches = (
                 overlay is not None and
                 now - self.overlay_received_time <= 0.5 and
-                abs(self.last_frame_id - int(overlay.get("frame_id", 0))) <= 5
+                abs(self.last_frame_id - int(overlay.get("frame_id", 0))) <= 2
             )
-            if overlay_matches and self.lanes_enabled.get():
+            if (overlay_matches and not self.manual_mode and
+                    self.lanes_enabled.get()):
                 frame = self.add_real_lanes(frame, overlay)
             if overlay_matches and self.ai_enabled.get():
                 frame = self.add_ai_overlay(frame, overlay)
