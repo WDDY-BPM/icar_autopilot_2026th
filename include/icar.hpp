@@ -703,19 +703,35 @@ public:
         }
 
         //[07] 车辆运动控制（仅手动接管时跳过）
+        static auto lastSteeringUpdate = std::chrono::steady_clock::now();
+        static bool steeringClockInitialized = false;
+        const auto steeringNow = std::chrono::steady_clock::now();
+        float steeringDt = 1.0f / 30.0f;
+        if (steeringClockInitialized)
+            steeringDt = std::chrono::duration<float>(steeringNow - lastSteeringUpdate).count();
+        lastSteeringUpdate = steeringNow;
+        steeringClockInitialized = true;
+
         const bool automaticControlActive =
             startupGateReleased && !emergencyStopRequested &&
-            !fsmFactory.busy->isInManualTakeover() && params->autoRecoveryFrames <= 0;
+            !params->manualTakeover && params->autoRecoveryFrames <= 0;
         if (automaticControlActive)
         {
-            motion->poseControl(params);
+            motion->poseControl(params, steeringDt);
             motion->speedControl(params);
+        }
+        else if (params->manualTakeover && !emergencyStopRequested)
+        {
+            motion->resetControl();
+            params->ctrl.servo = motion->limitServoCommand(
+                params->ctrl.servo, steeringDt);
         }
         else
         {
+            // Startup gating and emergency/recovery stops must return to center
+            // immediately instead of passing through the normal slew limiter.
             motion->reset();
         }
-
         if (!emergencyStopRequested && params->autoRecoveryFrames > 0)
         {
             params->ctrl.stop = true;

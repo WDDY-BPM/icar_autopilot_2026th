@@ -18,6 +18,11 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIn("void reset()", motion)
         icar = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
         self.assertIn("motion->reset();", icar)
+        self.assertIn("(error - errorLast) / dt", motion)
+        self.assertIn("servoRatePerSecond * dt", motion)
+        self.assertIn("limitServoCommand(int targetServo, float dtSeconds)", motion)
+        self.assertIn("motion->poseControl(params, steeringDt)", icar)
+        self.assertIn("params->ctrl.servo = motion->limitServoCommand(", icar)
         self.assertIn("*steering = PWMSERVOMID + 300; // 左转", manual)
         self.assertIn("*steering = PWMSERVOMID - 300; // 右转", manual)
 

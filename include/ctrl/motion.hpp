@@ -37,57 +37,68 @@ public:
      *
      * @param center 智能车控制中心
      */
-    void poseControl(shared_ptr<Params> &params)
+    void poseControl(shared_ptr<Params> &params, float dtSeconds)
     {
-        constexpr float filterOldWeight = 0.6f;
-        constexpr float maxErrorStep = 12.0f;
-        constexpr int maxServoStep = 25;
-
+        constexpr float filterTimeConstant = 0.065f;
+        constexpr float maxErrorRate = 360.0f; // pixels per second
+        const float dt = sanitizeDt(dtSeconds);
         const float rawError = params->ctrl.center - COLSIMAGE / 2.0f;
+
         if (!controlInitialized)
         {
             filteredError = rawError;
             errorLast = rawError;
-            lastServo = PWMSERVOMID;
             controlInitialized = true;
         }
         else
         {
-            filteredError = filterOldWeight * filteredError +
-                            (1.0f - filterOldWeight) * rawError;
+            const float filterAlpha = 1.0f - std::exp(-dt / filterTimeConstant);
+            filteredError += filterAlpha * (rawError - filteredError);
         }
 
-        // Limit the real frame-to-frame error change. The old implementation
-        // replaced a threshold crossing with an even larger fixed jump.
+        const float maxErrorStep = maxErrorRate * dt;
         const float error = std::clamp(filteredError,
                                        errorLast - maxErrorStep,
                                        errorLast + maxErrorStep);
         params->config.turnP = abs(error) * params->config.runP2 + params->config.runP1;
+        const float derivative = (error - errorLast) / dt;
         const int pwmDiff = static_cast<int>(std::lround(
-            error * params->config.turnP +
-            (error - errorLast) * params->config.turnD));
+            error * params->config.turnP + derivative * params->config.turnD));
 
-        // Clamp in the signed domain before converting to uint16_t, then limit
-        // actuator slew so a single noisy frame cannot produce a steering kick.
-        int targetServo = std::clamp(PWMSERVOMID - pwmDiff,
-                                     PWMSERVOMIN, PWMSERVOMAX);
+        // Clamp in the signed domain before converting to uint16_t. Automatic
+        // and manual steering share the same time-based actuator rate limiter.
+        const int targetServo = std::clamp(PWMSERVOMID - pwmDiff,
+                                           PWMSERVOMIN, PWMSERVOMAX);
+        errorLast = error;
+        params->ctrl.servo = limitServoCommand(targetServo, dt);
+    }
+
+    uint16_t limitServoCommand(int targetServo, float dtSeconds)
+    {
+        constexpr float servoRatePerSecond = 750.0f;
+        const float dt = sanitizeDt(dtSeconds);
+        const int maxServoStep = std::max(1, static_cast<int>(
+            std::ceil(servoRatePerSecond * dt)));
+        targetServo = std::clamp(targetServo, PWMSERVOMIN, PWMSERVOMAX);
         targetServo = std::clamp(targetServo,
                                  lastServo - maxServoStep,
                                  lastServo + maxServoStep);
-
-        errorLast = error;
         lastServo = targetServo;
-        params->ctrl.servo = static_cast<uint16_t>(targetServo);
+        return static_cast<uint16_t>(targetServo);
     }
 
-    void reset()
+    void resetControl()
     {
         controlInitialized = false;
         filteredError = 0.0f;
         errorLast = 0.0f;
-        lastServo = PWMSERVOMID;
     }
 
+    void reset()
+    {
+        resetControl();
+        lastServo = PWMSERVOMID;
+    }
     /**
      * @brief 变加速控制
      *
@@ -242,6 +253,11 @@ public:
     }
 
 private:
+    static float sanitizeDt(float dtSeconds)
+    {
+        return std::clamp(dtSeconds, 0.005f, 0.1f);
+    }
+
     bool controlInitialized = false;
     float filteredError = 0.0f;
     float errorLast = 0.0f;

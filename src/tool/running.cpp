@@ -374,14 +374,25 @@ public:
         center->fitting(params);
 
         //[07] 车辆运动控制（手动接管或远程连接时跳过，保持远程控制值）
+        static auto lastSteeringUpdate = std::chrono::steady_clock::now();
+        static bool steeringClockInitialized = false;
+        const auto steeringNow = std::chrono::steady_clock::now();
+        float steeringDt = 1.0f / 30.0f;
+        if (steeringClockInitialized)
+            steeringDt = std::chrono::duration<float>(steeringNow - lastSteeringUpdate).count();
+        lastSteeringUpdate = steeringNow;
+        steeringClockInitialized = true;
+
         if (!fsmFactory.busy->isInManualTakeover() && !fsmFactory.manual->isConnected())
         {
-            motion->poseControl(params);
+            motion->poseControl(params, steeringDt);
             motion->speedControl(params);
         }
         else
         {
-            motion->reset();
+            motion->resetControl();
+            params->ctrl.servo = motion->limitServoCommand(
+                params->ctrl.servo, steeringDt);
         }
 
         //[08] 综合显示调试UI窗口
