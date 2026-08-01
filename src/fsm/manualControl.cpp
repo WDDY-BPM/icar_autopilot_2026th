@@ -187,11 +187,7 @@ void ManualControlThread::applyManualControl(float *speed, uint16_t *steering) {
 }
 
 bool ManualControlThread::checkForReturnKey() {
-    bool ret = manualControl.returnAuto;
-    if (ret) {
-        manualControl.returnAuto = false;
-    }
-    return ret;
+    return manualControl.returnAuto.exchange(false);
 }
 
 void ManualControlThread::disconnectClient() {
@@ -289,13 +285,14 @@ bool ManualControlThread::authenticateClient() {
     return true;
 }
 
-void ManualControlThread::resetManualControl(bool emergency) {
+void ManualControlThread::resetManualControl(bool emergency, bool preserveReturnAuto) {
     manualControl.forward = false;
     manualControl.backward = false;
     manualControl.left = false;
     manualControl.right = false;
     manualControl.emergencyStop = emergency;
-    manualControl.returnAuto = false;
+    if (!preserveReturnAuto)
+        manualControl.returnAuto = false;
     controlChanged = true;
 }
 void ManualControlThread::handleClientConnection() {
@@ -418,9 +415,19 @@ void ManualControlThread::processCommand(const std::string &cmd) {
         printf("[Manual] Return to auto command received\n");
         return;
     }
+    if (cmd == "PING\n") {
+        // Heartbeat/dead-man refresh only. Never consume the latched RETURN
+        // request or alter emergency-stop state.
+        manualControl.forward = false;
+        manualControl.backward = false;
+        manualControl.left = false;
+        manualControl.right = false;
+        controlChanged = true;
+        return;
+    }
     if (cmd == "CLEAR_STOP\n") {
         manualControl.emergencyStopRequested = false;
-        resetManualControl(false);
+        resetManualControl(false, true); // RETURN remains latched until main loop consumes it
         printf("[Manual] Latched emergency stop cleared\n");
         return;
     }
@@ -431,7 +438,6 @@ void ManualControlThread::processCommand(const std::string &cmd) {
         manualControl.right = false;
         manualControl.emergencyStop = true;
         manualControl.emergencyStopRequested = true;
-        manualControl.returnAuto = false;
         controlChanged = true;
         printf("[Manual] Stop command received\n");
         return;
@@ -443,7 +449,6 @@ void ManualControlThread::processCommand(const std::string &cmd) {
     manualControl.left = false;
     manualControl.right = false;
     manualControl.emergencyStop = false;
-    manualControl.returnAuto = false;
     for (char c : cmd) {
         switch (c) {
             case 'W': manualControl.forward = true; break;

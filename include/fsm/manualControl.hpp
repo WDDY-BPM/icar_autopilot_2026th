@@ -100,7 +100,7 @@ public:
 private:
     void run();
     bool authenticateClient();
-    void resetManualControl(bool emergency);
+    void resetManualControl(bool emergency, bool preserveReturnAuto = false);
     void handleClientConnection();
     void receiveCommands();
     void checkTimeout();

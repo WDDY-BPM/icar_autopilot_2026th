@@ -155,10 +155,13 @@ void FsmBusy::run(Mat &img)
                     break;
                 }
             }
-            if (leftVisible)
-                countRes = 0;
-            else
-                countRes++;
+            if (params->aiResultFresh)
+            {
+                if (leftVisible)
+                    countRes = 0;
+                else
+                    countRes++;
+            }
 
             if (countRes > 2 || exitTimeout > 15)
             { // 标志丢失或超时

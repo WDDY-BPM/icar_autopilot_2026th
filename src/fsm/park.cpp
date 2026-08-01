@@ -580,10 +580,13 @@ void FsmPark::run(Mat &img)
                 break;
             }
         }
-        if (leftSign) // 标志未丢失
-            countRes = 0;
-        else
-            countRes++;
+        if (params->aiResultFresh)
+        {
+            if (leftSign) // 标志未丢失
+                countRes = 0;
+            else
+                countRes++;
+        }
 
         if (timeout > 20 || countRes > 2) // 转向超时
         {
