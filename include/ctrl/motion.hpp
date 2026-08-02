@@ -25,6 +25,7 @@
 #include <numeric>
 #include "utils/tools.hpp"
 #include "utils/params.hpp"
+#include "ctrl/control_algorithms.hpp"
 
 using namespace std;
 
@@ -73,9 +74,9 @@ public:
         float servoRate = params->config.servoRate;
         if (params->ctrl.startupSteeringCount < params->config.startupRampFrames)
         {
-            targetServo = std::clamp(targetServo,
-                PWMSERVOMID - params->config.startupServoLimit,
-                PWMSERVOMID + params->config.startupServoLimit);
+            targetServo = control_algorithms::applyStartupServoLimit(
+                targetServo, PWMSERVOMID, params->config.startupServoLimit,
+                params->ctrl.startupSteeringCount, params->config.startupRampFrames);
             servoRate = params->config.startupServoRate;
             params->ctrl.startupSteeringCount++;
         }
@@ -156,21 +157,11 @@ public:
             desiredSpeed = std::min(desiredSpeed, params->config.velHigh);
         }
 
-        // Apply the launch envelope last, so CROSS/SLOW/etc. cannot bypass it.
-        const int rampFrames = std::max(1, params->config.startupRampFrames);
-        if (params->ctrl.countAcc < rampFrames)
-        {
-            params->ctrl.countAcc++;
-            const float ratio = static_cast<float>(params->ctrl.countAcc) /
-                                rampFrames;
-            const float rampSpeed = params->config.startupSpeed +
-                ratio * (params->config.velLow - params->config.startupSpeed);
-            params->ctrl.speed = std::min(desiredSpeed, rampSpeed);
-        }
-        else
-        {
-            params->ctrl.speed = desiredSpeed;
-        }
+        // Apply the launch envelope last, so every autonomous mode shares it.
+        params->ctrl.speed = control_algorithms::applyStartupSpeed(
+            desiredSpeed, params->ctrl.countAcc,
+            params->config.startupRampFrames, params->config.startupSpeed,
+            params->config.velLow);
 
         if (params->alertDecelCount > 0)
             params->ctrl.speed = std::max(0.0f, params->ctrl.speed - 0.1f);

@@ -116,11 +116,15 @@ class LaneControlBehaviorTests(unittest.TestCase):
         predeal = (ROOT / "src/ctrl/predeal.cpp").read_text(encoding="utf-8")
         self.assertIn("quality = LaneQuality{};", track)
         self.assertIn("initialStableRows >= 3", track)
-        self.assertIn("widthFilled.emplace_back(row, rightColumn - leftColumn)", track)
+        algorithms = (ROOT / "include/ctrl/control_algorithms.hpp").read_text(encoding="utf-8")
+        self.assertIn("widthFilled.emplace_back(row, rightColumn - leftColumn)", algorithms)
         self.assertIn("if (updateHistory)", center)
-        self.assertIn("std::min(desiredSpeed, rampSpeed)", motion)
+        self.assertIn("control_algorithms::applyStartupSpeed", motion)
         self.assertIn("mode == FsmMode::CROSS", center)
         self.assertIn("!params->laneSafetyStop", core)
+        self.assertIn("automaticControlActive && laneHold", core)
+        self.assertIn("params->track->allowOuterEnvelope = !forkMarkerActive", core)
+        self.assertIn("!allowCoherentEnvelope", track)
         self.assertLess(predeal.index("bitwise_not(imgBin, imgInv)"),
                         predeal.index("morphologyEx(imgInv, imgInv, MORPH_CLOSE"))
 

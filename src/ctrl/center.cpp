@@ -165,31 +165,14 @@ void Center::fitting(shared_ptr<Params> &params)
                                 params->track->quality.valid;
     if (strictLaneMode && !params->ctrl.parking && !params->manualTakeover)
     {
-        if (candidateValid)
-        {
-            laneInvalidFrames = 0;
-            if (recoveringLane)
-            {
-                laneRecoveryFrames++;
-                controlValid = laneRecoveryFrames >= 5;
-                if (controlValid)
-                    recoveringLane = false;
-            }
-            else
-            {
-                controlValid = true;
-            }
-            if (controlValid)
-                lastValidCenter = params->ctrl.center;
-            else
-                params->ctrl.center = lastValidCenter;
-        }
+        controlValid = control_algorithms::updateLaneRecovery(
+            laneRecoveryState, candidateValid, 5);
+        laneInvalidFrames = laneRecoveryState.invalidFrames;
+        laneRecoveryFrames = laneRecoveryState.recoveryFrames;
+        if (controlValid)
+            lastValidCenter = params->ctrl.center;
         else
         {
-            laneInvalidFrames++;
-            laneRecoveryFrames = 0;
-            recoveringLane = true;
-            controlValid = false;
             params->ctrl.center = lastValidCenter;
             if (laneInvalidFrames > 6)
                 params->ctrl.center = COLSIMAGE / 2;
@@ -197,12 +180,11 @@ void Center::fitting(shared_ptr<Params> &params)
     }
     else
     {
-        // FSM-generated parking/fork/construction paths use their own validity
-        // rules and must not be stopped by the strict normal-lane gate.
+        // FSM-generated parking/fork/construction paths use their own validity.
+        laneRecoveryState = control_algorithms::LaneRecoveryState{};
         controlValid = !params->ctrl.centerEdge.empty();
         laneInvalidFrames = 0;
         laneRecoveryFrames = 0;
-        recoveringLane = false;
         if (controlValid)
             lastValidCenter = params->ctrl.center;
     }

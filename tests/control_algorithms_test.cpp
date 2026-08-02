@@ -1,0 +1,39 @@
+#include "ctrl/control_algorithms.hpp"
+#include <cassert>
+#include <cmath>
+#include <vector>
+
+struct TestPoint
+{
+    int x;
+    int y;
+    TestPoint(int row, int column) : x(row), y(column) {}
+};
+
+int main()
+{
+    int count = 0;
+    const float crossStart = control_algorithms::applyStartupSpeed(
+        0.25f, count, 60, 0.10f, 0.30f);
+    assert(crossStart > 0.10f && crossStart < 0.104f);
+
+    assert(control_algorithms::applyStartupServoLimit(
+        1880, 1500, 160, 0, 60) == 1660);
+
+    control_algorithms::LaneRecoveryState lane;
+    for (int i = 0; i < 4; ++i)
+        assert(!control_algorithms::updateLaneRecovery(lane, false));
+    assert(lane.invalidFrames == 4);
+    for (int i = 0; i < 4; ++i)
+        assert(!control_algorithms::updateLaneRecovery(lane, true));
+    assert(control_algorithms::updateLaneRecovery(lane, true));
+
+    std::vector<TestPoint> left{{220, 40}, {216, 44}};
+    std::vector<TestPoint> right{{220, 280}, {216, 276}};
+    std::vector<TestPoint> width{{220, 240}, {216, 232}};
+    assert(control_algorithms::fillAlignedLaneGaps(left, right, width, 8));
+    assert(left.size() == 5 && right.size() == 5 && width.size() == 5);
+    for (std::size_t i = 0; i < left.size(); ++i)
+        assert(width[i].y == right[i].y - left[i].y);
+    return 0;
+}

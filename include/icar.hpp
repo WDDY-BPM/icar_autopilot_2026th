@@ -633,7 +633,20 @@ public:
         const bool lanesUpdatedThisFrame =
             !fsmFactory.busy->isInManualTakeover();
         if (lanesUpdatedThisFrame)
+        {
+            const auto containsFork = [](const std::vector<PredictResult> &results) {
+                return std::any_of(results.begin(), results.end(),
+                    [](const PredictResult &result) { return result.type == LABEL_FORK; });
+            };
+            bool forkMarkerActive = containsFork(params->results);
+            {
+                std::lock_guard<std::mutex> resultLock(mtxRes);
+                if (readyRes)
+                    forkMarkerActive = containsFork(latestResults);
+            }
+            params->track->allowOuterEnvelope = !forkMarkerActive;
             params->track->handle(imgBin);
+        }
         if (params->config.debug)
         {
             show->setNewWindow(1, "Bin", imgBin);
@@ -726,7 +739,8 @@ public:
         const bool automaticControlActive =
             startupGateReleased && !emergencyStopRequested &&
             !params->manualTakeover && params->autoRecoveryFrames <= 0;
-        if (automaticControlActive)
+        const bool laneHold = params->laneSafetyStop;
+        if (automaticControlActive && !laneHold)
         {
             motion->poseControl(params, steeringDt);
             motion->speedControl(params);
@@ -745,6 +759,13 @@ public:
                 else
                     params->ctrl.speed = 0.0f;
             }
+        }
+        else if (automaticControlActive && laneHold)
+        {
+            // Freeze both launch counters while lane safety is holding the car.
+            params->ctrl.speed = 0.0f;
+            params->ctrl.servo = PWMSERVOMID;
+            motion->reset();
         }
         else if (params->manualTakeover && !emergencyStopRequested)
         {

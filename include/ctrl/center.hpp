@@ -26,6 +26,7 @@
 #include <array>
 #include "utils/tools.hpp"
 #include "utils/params.hpp"
+#include "ctrl/control_algorithms.hpp"
 
 #define DIS_MOVE 48       // 偏移距离，对应赛道距离的一般，在我的打表软件中默认48像素对应20cm
 #define MAX_POINT_NUM 240 // 无需修改
@@ -65,5 +66,5 @@ private:
                                          bool updateHistory);
     std::array<float, ROWSIMAGE> laneWidthProfile{};
     int lastValidCenter = COLSIMAGE / 2;
-    bool recoveringLane = false;
+    control_algorithms::LaneRecoveryState laneRecoveryState;
 };

@@ -1,6 +1,18 @@
 cmake_minimum_required(VERSION 3.4...3.18)
 project(patrol_car)
 set(CMAKE_CXX_STANDARD 17)
+
+option(ICAR_BUILD_LOGIC_TESTS "Build hardware-independent control tests" OFF)
+option(ICAR_LOGIC_TESTS_ONLY "Build only hardware-independent control tests" OFF)
+if(ICAR_BUILD_LOGIC_TESTS OR ICAR_LOGIC_TESTS_ONLY)
+  enable_testing()
+  add_executable(control_algorithms_test tests/control_algorithms_test.cpp)
+  target_include_directories(control_algorithms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME control_algorithms_test COMMAND control_algorithms_test)
+endif()
+if(ICAR_LOGIC_TESTS_ONLY)
+  return()
+endif()
 set(CMAKE_CXX_FLAGS "-O3 -Wall -mcpu=native -flto -pthread")
 #关闭不同类型变量比较警告与未使用变量警告
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare")

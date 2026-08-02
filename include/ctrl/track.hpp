@@ -24,6 +24,7 @@
 #include <cmath>
 #include <numeric>
 #include "utils/tools.hpp"
+#include "ctrl/control_algorithms.hpp"
 
 using namespace cv;
 using namespace std;
@@ -53,6 +54,7 @@ public:
     uint16_t rowCutUp = 1;          // 图像顶部切行
     uint16_t rowCutBottom = 20;
     int maxGapRows = 8;
+    bool allowOuterEnvelope = true; // Disabled while an AI fork marker is active
     LaneQuality quality;
 
     void handle(Mat img);

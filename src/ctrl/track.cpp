@@ -59,6 +59,8 @@ void Track::handle(bool isResearch, uint16_t rowStart)
     int initialLeft = -1;
     int initialRight = -1;
     int initialStableRows = 0;
+    int previousInternalGap = -1;
+    int expandingGapRows = 0;
 
     if (rowCutUp > ROWSIMAGE / 4)
         rowCutUp = ROWSIMAGE / 4;
@@ -166,7 +168,30 @@ void Track::handle(bool isResearch, uint16_t rowStart)
             for (int i = 0; i < counterBlock; ++i)
                 considerInitial(startBlock[i], endBlock[i]);
             if (counterBlock > 1)
-                considerInitial(startBlock[0], endBlock[counterBlock - 1]);
+            {
+                int largestInternalGap = 0;
+                for (int i = 1; i < counterBlock; ++i)
+                    largestInternalGap = std::max(
+                        largestInternalGap, startBlock[i] - endBlock[i - 1]);
+                if (previousInternalGap >= 0 &&
+                    largestInternalGap > previousInternalGap + 4)
+                    expandingGapRows++;
+                else
+                    expandingGapRows = std::max(0, expandingGapRows - 1);
+                previousInternalGap = largestInternalGap;
+
+                // Arrow holes remain narrow; a fork island widens over rows.
+                const bool arrowLikeHole =
+                    largestInternalGap <= COLSIMAGE / 8 &&
+                    expandingGapRows < 2;
+                if (allowOuterEnvelope && arrowLikeHole)
+                    considerInitial(startBlock[0], endBlock[counterBlock - 1]);
+            }
+            else
+            {
+                previousInternalGap = -1;
+                expandingGapRows = 0;
+            }
 
             if (selectedLeft < 0)
             {
@@ -251,6 +276,19 @@ void Track::handle(bool isResearch, uint16_t rowStart)
                     selectedLeft = std::min(selectedLeft, startBlock[index]);
                     selectedRight = std::max(selectedRight, endBlock[index]);
                 }
+                int largestInternalGap = 0;
+                for (size_t i = 1; i < indexBlocks.size(); ++i)
+                    largestInternalGap = std::max(largestInternalGap,
+                        startBlock[indexBlocks[i]] - endBlock[indexBlocks[i - 1]]);
+                if (previousInternalGap >= 0 &&
+                    largestInternalGap > previousInternalGap + 4)
+                    expandingGapRows++;
+                else
+                    expandingGapRows = std::max(0, expandingGapRows - 1);
+                previousInternalGap = largestInternalGap;
+                const bool allowCoherentEnvelope = allowOuterEnvelope &&
+                    largestInternalGap <= COLSIMAGE / 8 &&
+                    expandingGapRows < 2;
 
                 const auto candidateAcceptable = [&](int left, int right)
                 {
@@ -264,7 +302,8 @@ void Track::handle(bool isResearch, uint16_t rowStart)
                            std::abs(width - previousWidth) <= allowedWidthChange;
                 };
 
-                if (!candidateAcceptable(selectedLeft, selectedRight))
+                if (!allowCoherentEnvelope ||
+                    !candidateAcceptable(selectedLeft, selectedRight))
                 {
                     float bestScore = std::numeric_limits<float>::max();
                     int bestIndex = -1;
@@ -336,53 +375,10 @@ void Track::handle(bool isResearch, uint16_t rowStart)
  */
 void Track::fillLaneGap()
 {
-    if (pointsEdgeLeft.size() < 2 ||
-        pointsEdgeLeft.size() != pointsEdgeRight.size() ||
-        pointsEdgeLeft.size() != widthBlock.size())
+    if (!control_algorithms::fillAlignedLaneGaps(
+            pointsEdgeLeft, pointsEdgeRight, widthBlock, maxGapRows))
         return;
 
-    vector<PointX> leftFilled;
-    vector<PointX> rightFilled;
-    vector<PointX> widthFilled;
-    leftFilled.reserve(pointsEdgeLeft.size() + 16);
-    rightFilled.reserve(pointsEdgeRight.size() + 16);
-    widthFilled.reserve(widthBlock.size() + 16);
-    leftFilled.push_back(pointsEdgeLeft.front());
-    rightFilled.push_back(pointsEdgeRight.front());
-    widthFilled.emplace_back(pointsEdgeLeft.front().x,
-        pointsEdgeRight.front().y - pointsEdgeLeft.front().y);
-
-    for (size_t i = 1; i < pointsEdgeLeft.size(); ++i)
-    {
-        const PointX previousLeft = pointsEdgeLeft[i - 1];
-        const PointX previousRight = pointsEdgeRight[i - 1];
-        const PointX currentLeft = pointsEdgeLeft[i];
-        const PointX currentRight = pointsEdgeRight[i];
-        const int rowGap = previousLeft.x - currentLeft.x;
-        if (previousRight.x == previousLeft.x &&
-            currentRight.x == currentLeft.x &&
-            rowGap > 1 && rowGap <= maxGapRows)
-        {
-            for (int row = previousLeft.x - 1; row > currentLeft.x; --row)
-            {
-                const float ratio = static_cast<float>(previousLeft.x - row) / rowGap;
-                const int leftColumn = static_cast<int>(std::lround(
-                    previousLeft.y + ratio * (currentLeft.y - previousLeft.y)));
-                const int rightColumn = static_cast<int>(std::lround(
-                    previousRight.y + ratio * (currentRight.y - previousRight.y)));
-                leftFilled.emplace_back(row, leftColumn);
-                rightFilled.emplace_back(row, rightColumn);
-                widthFilled.emplace_back(row, rightColumn - leftColumn);
-            }
-        }
-        leftFilled.push_back(currentLeft);
-        rightFilled.push_back(currentRight);
-        widthFilled.emplace_back(currentLeft.x, currentRight.y - currentLeft.y);
-    }
-
-    pointsEdgeLeft.swap(leftFilled);
-    pointsEdgeRight.swap(rightFilled);
-    widthBlock.swap(widthFilled);
     for (size_t i = 0; i < pointsEdgeLeft.size(); ++i)
     {
         pointsEdgeLeft[i].slope = 0.0f;
@@ -391,6 +387,7 @@ void Track::fillLaneGap()
         slopeCal(pointsEdgeRight, static_cast<int>(i));
     }
 }
+
 void Track::evaluateQuality()
 {
     quality = LaneQuality{};
