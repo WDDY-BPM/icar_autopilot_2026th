@@ -31,6 +31,17 @@ using namespace std;
 class Track
 {
 public:
+    struct LaneQuality
+    {
+        bool valid = false;
+        int commonRows = 0;
+        float widthMean = 0.0f;
+        float widthVariation = 1.0f;
+        float centerJump = 0.0f;
+        float edgeJump = 0.0f;
+        float confidence = 0.0f;
+        bool coversBottom = false;
+    };
     vector<PointX> pointsEdgeLeft;  // 赛道左边缘点集
     vector<PointX> pointsEdgeRight; // 赛道右边缘点集
     vector<PointX> widthBlock;      // 色块宽度=终-起（每行）
@@ -40,7 +51,9 @@ public:
     int validRowsLeft = 0;          // 边缘有效行数（左）
     int validRowsRight = 0;         // 边缘有效行数（右）
     uint16_t rowCutUp = 1;          // 图像顶部切行
-    uint16_t rowCutBottom = 20;     // 图像底部切行
+    uint16_t rowCutBottom = 20;
+    int maxGapRows = 8;
+    LaneQuality quality;
 
     void handle(Mat img);
     void handle(bool isResearch, uint16_t rowStart);
@@ -53,4 +66,7 @@ private:
     void slopeCal(vector<PointX> &edge, int index);
     void validRowsCal(void);
     int getMiddleValue(vector<int> vec);
+    void evaluateQuality();
+    float previousCenter = COLSIMAGE / 2.0f;
+    bool previousCenterValid = false;
 };

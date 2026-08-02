@@ -23,6 +23,7 @@
 
 #include <cmath>
 #include <numeric>
+#include <array>
 #include "utils/tools.hpp"
 #include "utils/params.hpp"
 
@@ -40,7 +41,10 @@ class Center
 public:
     uint16_t validRowsLeft = 0;  // 边缘有效行数（左）
     uint16_t validRowsRight = 0; // 边缘有效行数（右）
-    double sigmaCenter = 0;      // 中心点集的方差
+    double sigmaCenter = 0;
+    bool controlValid = false;
+    int laneInvalidFrames = 0;
+    int laneRecoveryFrames = 0;      // 中心点集的方差
 
     void fitting(shared_ptr<Params> &params);
     void drawImage(shared_ptr<Params> &params, Mat &img);
@@ -56,4 +60,9 @@ private:
     vector<PointX> centerCompute(vector<PointX> pointsEdge, int side);
     void validRowsCal(vector<PointX> pointsEdgeLeft, vector<PointX> pointsEdgeRight);
     bool derailmentCheck(vector<PointX> pointsEdgeLeft, vector<PointX> pointsEdgeRight);
+    vector<PointX> buildRowAlignedCenter(const vector<PointX> &left,
+                                         const vector<PointX> &right);
+    std::array<float, ROWSIMAGE> laneWidthProfile{};
+    int lastValidCenter = COLSIMAGE / 2;
+    bool recoveringLane = false;
 };

@@ -21,6 +21,7 @@
  */
 
 #include "ctrl/track.hpp"
+#include <limits>
 
 using namespace cv;
 using namespace std;
@@ -192,80 +193,100 @@ void Track::handle(bool isResearch, uint16_t rowStart)
                 widthBlock.emplace_back(row, endBlock[indexBlocks[0]] - startBlock[indexBlocks[0]]);
                 spurroadEnable = false;
             }
-            else if (indexBlocks.size() > 1) // 存在多个色块，则需要择优处理：选取与上一行最近的色块
+            else if (indexBlocks.size() > 1)
             {
-                int centerLast = COLSIMAGE / 2;
-                if (pointsEdgeRight.size() > 0 && pointsEdgeLeft.size() > 0)
-                    centerLast = (pointsEdgeRight[pointsEdgeRight.size() - 1].y + pointsEdgeLeft[pointsEdgeLeft.size() - 1].y) / 2; // 上一行色块的中心点横坐标
-                int centerThis = (startBlock[indexBlocks[0]] + endBlock[indexBlocks[0]]) / 2;                                       // 当前行色块的中心点横坐标
-                int differBlocks = abs(centerThis - centerLast);                                                                    // 上下行色块的中心距离
-                int indexGoalBlock = 0;                                                                                             // 目标色块的编号
-                int startBlockNear = startBlock[indexBlocks[0]];                                                                    // 搜索与上一行最近的色块起点
-                int endBlockNear = endBlock[indexBlocks[0]];                                                                        // 搜索与上一行最近的色块终点
+                const int previousLeft = pointsEdgeLeft.back().y;
+                const int previousRight = pointsEdgeRight.back().y;
+                const int previousCenter = (previousLeft + previousRight) / 2;
+                const int previousWidth = previousRight - previousLeft;
 
-                for (int i = 1; i < indexBlocks.size(); i++) // 搜索与上一行最近的色块编号
+                // Keep internal arrow/crosswalk holes from becoming fake outer
+                // boundaries by evaluating one coherent road candidate.
+                int selectedLeft = COLSIMAGE;
+                int selectedRight = 0;
+                for (int index : indexBlocks)
                 {
-                    centerThis = (startBlock[indexBlocks[i]] + endBlock[indexBlocks[i]]) / 2;
-                    if (abs(centerThis - centerLast) < differBlocks)
-                    {
-                        differBlocks = abs(centerThis - centerLast);
-                        indexGoalBlock = i;
-                    }
-                    // 搜索与上一行最近的边缘起点和终点
-                    if (abs(pointsEdgeLeft[pointsEdgeLeft.size() - 1].y - startBlock[indexBlocks[i]]) <
-                        abs(pointsEdgeLeft[pointsEdgeLeft.size() - 1].y - startBlockNear))
-                    {
-                        startBlockNear = startBlock[indexBlocks[i]];
-                    }
-                    if (abs(pointsEdgeRight[pointsEdgeRight.size() - 1].y - endBlock[indexBlocks[i]]) <
-                        abs(pointsEdgeRight[pointsEdgeRight.size() - 1].y - endBlockNear))
-                    {
-                        endBlockNear = endBlock[indexBlocks[i]];
-                    }
+                    selectedLeft = std::min(selectedLeft, startBlock[index]);
+                    selectedRight = std::max(selectedRight, endBlock[index]);
                 }
 
-                // 检索最佳的起点与终点
-                if (abs(pointsEdgeLeft[pointsEdgeLeft.size() - 1].y - startBlock[indexBlocks[indexGoalBlock]]) <
-                    abs(pointsEdgeLeft[pointsEdgeLeft.size() - 1].y - startBlockNear))
+                const auto candidateAcceptable = [&](int left, int right)
                 {
-                    startBlockNear = startBlock[indexBlocks[indexGoalBlock]];
-                }
-                if (abs(pointsEdgeRight[pointsEdgeRight.size() - 1].y - endBlock[indexBlocks[indexGoalBlock]]) <
-                    abs(pointsEdgeRight[pointsEdgeRight.size() - 1].y - endBlockNear))
+                    const int width = right - left;
+                    const int center = (left + right) / 2;
+                    const int allowedWidthChange = std::max(8, previousWidth / 4);
+                    const int overlap = std::min(right, previousRight) -
+                                        std::max(left, previousLeft);
+                    return width >= COLSIMAGE / 10 && overlap >= 0 &&
+                           std::abs(center - previousCenter) <= 25 &&
+                           std::abs(width - previousWidth) <= allowedWidthChange;
+                };
+
+                if (!candidateAcceptable(selectedLeft, selectedRight))
                 {
-                    endBlockNear = endBlock[indexBlocks[indexGoalBlock]];
+                    float bestScore = std::numeric_limits<float>::max();
+                    int bestIndex = -1;
+                    for (int index : indexBlocks)
+                    {
+                        const int left = startBlock[index];
+                        const int right = endBlock[index];
+                        const int width = right - left;
+                        const int center = (left + right) / 2;
+                        const int overlap = std::max(0,
+                            std::min(right, previousRight) -
+                            std::max(left, previousLeft));
+                        if (!candidateAcceptable(left, right))
+                            continue;
+                        const float score =
+                            2.0f * std::abs(center - previousCenter) +
+                            std::abs(width - previousWidth) - 3.0f * overlap;
+                        if (score < bestScore)
+                        {
+                            bestScore = score;
+                            bestIndex = index;
+                        }
+                    }
+                    if (bestIndex < 0)
+                    {
+                        pointSpurroad.x = row;
+                        pointSpurroad.y = endBlock[indexBlocks.front()];
+                        if (!spurroadEnable)
+                        {
+                            spurroad.push_back(pointSpurroad);
+                            spurroadEnable = true;
+                        }
+                        continue;
+                    }
+                    selectedLeft = startBlock[bestIndex];
+                    selectedRight = endBlock[bestIndex];
                 }
 
-                if (endBlockNear - startBlockNear < COLSIMAGE / 10)
-                {
-                    continue;
-                }
-                PointX tmp_point(row, startBlockNear);
-                pointsEdgeLeft.push_back(tmp_point);
-                tmp_point.y = endBlockNear;
-                pointsEdgeRight.push_back(tmp_point);
-                widthBlock.emplace_back(row, endBlockNear - startBlockNear);
+                pointsEdgeLeft.emplace_back(row, selectedLeft);
+                pointsEdgeRight.emplace_back(row, selectedRight);
+                widthBlock.emplace_back(row, selectedRight - selectedLeft);
                 slopeCal(pointsEdgeLeft, pointsEdgeLeft.size() - 1);
                 slopeCal(pointsEdgeRight, pointsEdgeRight.size() - 1);
                 counterSearchRows++;
 
-                //-------------------------------<岔路信息提取>----------------------------------------
                 pointSpurroad.x = row;
-                pointSpurroad.y = endBlock[indexBlocks[0]];
+                pointSpurroad.y = endBlock[indexBlocks.front()];
                 if (!spurroadEnable)
                 {
                     spurroad.push_back(pointSpurroad);
                     spurroadEnable = true;
                 }
-                //------------------------------------------------------------------------------------
             }
         }
     }
+
+    fillEdgeGap(pointsEdgeLeft);
+    fillEdgeGap(pointsEdgeRight);
 
     stdevLeft = stdevEdgeCal(pointsEdgeLeft, ROWSIMAGE); // 计算边缘方差
     stdevRight = stdevEdgeCal(pointsEdgeRight, ROWSIMAGE);
 
     validRowsCal(); // 有效行计算
+    evaluateQuality();
 }
 
 /**
@@ -274,23 +295,105 @@ void Track::handle(bool isResearch, uint16_t rowStart)
  */
 void Track::fillEdgeGap(vector<PointX> &edge)
 {
-    if (edge.size() < 2) return;
-    for (size_t i = 1; i < edge.size(); i++)
+    if (edge.size() < 2)
+        return;
+
+    vector<PointX> filled;
+    filled.reserve(edge.size() + 16);
+    filled.push_back(edge.front());
+    for (size_t i = 1; i < edge.size(); ++i)
     {
-        int rowGap = edge[i].x - edge[i - 1].x;
-        if (rowGap > 1) // 行不连续 → 有缺口
+        const PointX previous = edge[i - 1];
+        const PointX current = edge[i];
+        const int rowGap = previous.x - current.x;
+        if (rowGap > 1 && rowGap <= maxGapRows)
         {
-            for (int r = edge[i - 1].x + 1; r < edge[i].x; r++)
+            for (int row = previous.x - 1; row > current.x; --row)
             {
-                float t = (float)(r - edge[i - 1].x) / rowGap;
-                int col = edge[i - 1].y + (edge[i].y - edge[i - 1].y) * t;
-                edge.insert(edge.begin() + i, PointX(r, col));
-                i++;
+                const float ratio = static_cast<float>(previous.x - row) / rowGap;
+                const int col = static_cast<int>(std::lround(
+                    previous.y + ratio * (current.y - previous.y)));
+                filled.emplace_back(row, col);
             }
         }
+        filled.push_back(current);
     }
+    edge.swap(filled);
 }
 
+void Track::evaluateQuality()
+{
+    quality = LaneQuality{};
+    vector<int> leftByRow(ROWSIMAGE, -1);
+    vector<int> rightByRow(ROWSIMAGE, -1);
+    for (const auto &point : pointsEdgeLeft)
+        if (point.x >= 0 && point.x < ROWSIMAGE)
+            leftByRow[point.x] = point.y;
+    for (const auto &point : pointsEdgeRight)
+        if (point.x >= 0 && point.x < ROWSIMAGE)
+            rightByRow[point.x] = point.y;
+
+    vector<float> widths;
+    float centerSum = 0.0f;
+    float maximumEdgeJump = 0.0f;
+    int previousLeft = -1;
+    int previousRight = -1;
+    int nearestRow = 0;
+    for (int row = 0; row < ROWSIMAGE; ++row)
+    {
+        if (leftByRow[row] < 0 || rightByRow[row] < 0 ||
+            rightByRow[row] <= leftByRow[row])
+            continue;
+        const float width = rightByRow[row] - leftByRow[row];
+        widths.push_back(width);
+        centerSum += (leftByRow[row] + rightByRow[row]) * 0.5f;
+        nearestRow = std::max(nearestRow, row);
+        if (previousLeft >= 0)
+        {
+            maximumEdgeJump = std::max(maximumEdgeJump,
+                static_cast<float>(std::abs(leftByRow[row] - previousLeft)));
+            maximumEdgeJump = std::max(maximumEdgeJump,
+                static_cast<float>(std::abs(rightByRow[row] - previousRight)));
+        }
+        previousLeft = leftByRow[row];
+        previousRight = rightByRow[row];
+    }
+
+    quality.commonRows = static_cast<int>(widths.size());
+    quality.edgeJump = maximumEdgeJump;
+    quality.coversBottom = nearestRow >= ROWSIMAGE - rowCutBottom - 4;
+    if (widths.empty())
+        return;
+
+    quality.widthMean = std::accumulate(widths.begin(), widths.end(), 0.0f) /
+                        widths.size();
+    float relativeWidthChange = 0.0f;
+    for (size_t i = 1; i < widths.size(); ++i)
+        relativeWidthChange += std::abs(widths[i] - widths[i - 1]) /
+                               std::max(1.0f, widths[i - 1]);
+    quality.widthVariation = widths.size() > 1
+        ? relativeWidthChange / (widths.size() - 1)
+        : 1.0f;
+
+    const float currentCenter = centerSum / widths.size();
+    quality.centerJump = previousCenterValid
+        ? std::abs(currentCenter - previousCenter) : 0.0f;
+    previousCenter = currentCenter;
+    previousCenterValid = true;
+
+    const float coverageScore = std::min(1.0f, quality.commonRows / 50.0f);
+    const float widthScore = std::max(0.0f, 1.0f - quality.widthVariation / 0.25f);
+    const float centerScore = std::max(0.0f, 1.0f - quality.centerJump / 20.0f);
+    const float edgeScore = std::max(0.0f, 1.0f - quality.edgeJump / 40.0f);
+    quality.confidence = 0.30f * coverageScore + 0.25f * widthScore +
+                         0.20f * centerScore + 0.15f * edgeScore +
+                         (quality.coversBottom ? 0.10f : 0.0f);
+    quality.valid = quality.commonRows >= 20 && quality.coversBottom &&
+                    quality.widthVariation <= 0.20f &&
+                    quality.centerJump <= 15.0f &&
+                    quality.edgeJump <= 30.0f &&
+                    quality.confidence >= 0.70f;
+}
 /**
  * @brief 显示赛道线识别结果
  *

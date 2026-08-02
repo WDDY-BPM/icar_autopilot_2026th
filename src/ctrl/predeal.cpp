@@ -59,25 +59,42 @@ Predeal::Predeal(int bin)
  */
 cv::Mat Predeal::binaryzation(cv::Mat &img)
 {
-    cv::Mat imgGray, imgBin;
-    cvtColor(img, imgGray, COLOR_BGR2GRAY); // RGB转灰度图
+    cv::Mat imgGray, blurred, imgBin;
+    cvtColor(img, imgGray, COLOR_BGR2GRAY);
+    GaussianBlur(imgGray, blurred, Size(5, 5), 0.0);
 
+    int thresholdValue = binary;
     if (binary < 0)
-        threshold(imgGray, imgBin, 0, 255, THRESH_OTSU); //  采用大津法二值化
+    {
+        // Estimate illumination from the road-dominant lower/central ROI, then
+        // smooth it over time so reflections cannot change the whole mask in
+        // one frame. Camera exposure/calibration settings remain untouched.
+        const int roiX = blurred.cols / 8;
+        const int roiY = blurred.rows / 3;
+        const Rect roadRoi(roiX, roiY,
+                           blurred.cols - 2 * roiX,
+                           blurred.rows - roiY);
+        cv::Mat unused;
+        const float currentThreshold = static_cast<float>(threshold(
+            blurred(roadRoi), unused, 0, 255, THRESH_BINARY | THRESH_OTSU));
+        filteredThreshold = filteredThreshold < 0.0f
+            ? currentThreshold
+            : 0.85f * filteredThreshold + 0.15f * currentThreshold;
+        thresholdValue = static_cast<int>(std::lround(filteredThreshold));
+    }
     else
     {
-        if (binary > 255)
-            binary = 255;
-        threshold(imgGray, imgBin, binary, 255, THRESH_BINARY); // 固定阈值方法
+        thresholdValue = std::clamp(binary, 0, 255);
     }
 
-    // 图像转换
-    Mat imgInv = Mat::zeros(imgBin.size(), imgBin.type());
-    bitwise_not(imgBin, imgInv);
+    threshold(blurred, imgBin, thresholdValue, 255, THRESH_BINARY);
+    morphologyEx(imgBin, imgBin, MORPH_CLOSE,
+                 getStructuringElement(MORPH_RECT, Size(3, 3)));
 
+    cv::Mat imgInv;
+    bitwise_not(imgBin, imgInv);
     return imgInv;
 }
-
 /**
  * @brief 矫正图像
  *

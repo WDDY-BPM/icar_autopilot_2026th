@@ -53,40 +53,15 @@ void Center::fitting(shared_ptr<Params> &params)
             params->track->pointsEdgeRight.resize(validRowsRight);
         }
 
-        if (params->track->pointsEdgeLeft.size() > 4 && params->track->pointsEdgeRight.size() > 4) // 通过双边缘有效点的差来判断赛道类型
+        if (params->track->pointsEdgeLeft.size() > 4 &&
+            params->track->pointsEdgeRight.size() > 4)
         {
-            v_center[0] = {
-                (params->track->pointsEdgeLeft[0].x + params->track->pointsEdgeRight[0].x) / 2,
-                (params->track->pointsEdgeLeft[0].y + params->track->pointsEdgeRight[0].y) / 2};
-
-            v_center[1] = {
-                (params->track->pointsEdgeLeft[params->track->pointsEdgeLeft.size() / 3].x +
-                 params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() / 3].x) /
-                    2,
-                (params->track->pointsEdgeLeft[params->track->pointsEdgeLeft.size() / 3].y +
-                 params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() / 3].y) /
-                    2};
-
-            v_center[2] = {
-                (params->track->pointsEdgeLeft[params->track->pointsEdgeLeft.size() * 2 / 3].x +
-                 params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() * 2 / 3].x) /
-                    2,
-                (params->track->pointsEdgeLeft[params->track->pointsEdgeLeft.size() * 2 / 3].y +
-                 params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() * 2 / 3].y) /
-                    2};
-
-            v_center[3] = {
-                (params->track->pointsEdgeLeft[params->track->pointsEdgeLeft.size() * 0.9].x +
-                 params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() * 0.9].x) /
-                    2,
-                (params->track->pointsEdgeLeft[params->track->pointsEdgeLeft.size() * 0.9].y +
-                 params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() * 0.9].y) /
-                    2};
-
-            params->ctrl.centerEdge = Bezier(0.03, v_center);
+            params->ctrl.centerEdge = buildRowAlignedCenter(
+                params->track->pointsEdgeLeft,
+                params->track->pointsEdgeRight);
             style = "STRIGHT";
         }
-        // 左单边
+        // Left single edge
         else if ((params->track->pointsEdgeLeft.size() > 0 && params->track->pointsEdgeRight.size() <= 4) ||
                  (params->track->pointsEdgeLeft.size() > 0 && params->track->pointsEdgeRight.size() > 0 &&
                   params->track->pointsEdgeLeft[0].x - params->track->pointsEdgeRight[0].x > ROWSIMAGE / 2))
@@ -179,6 +154,53 @@ void Center::fitting(shared_ptr<Params> &params)
     else
         sigmaCenter = 1000;
 
+    const bool strictLaneMode = params->mode == FsmMode::NORMAL ||
+                                params->mode == FsmMode::CURVE;
+    const bool candidateValid = params->ctrl.centerEdge.size() >= 20 &&
+                                params->track->quality.valid;
+    if (strictLaneMode && !params->ctrl.parking && !params->manualTakeover)
+    {
+        if (candidateValid)
+        {
+            laneInvalidFrames = 0;
+            if (recoveringLane)
+            {
+                laneRecoveryFrames++;
+                controlValid = laneRecoveryFrames >= 5;
+                if (controlValid)
+                    recoveringLane = false;
+            }
+            else
+            {
+                controlValid = true;
+            }
+            if (controlValid)
+                lastValidCenter = params->ctrl.center;
+            else
+                params->ctrl.center = lastValidCenter;
+        }
+        else
+        {
+            laneInvalidFrames++;
+            laneRecoveryFrames = 0;
+            recoveringLane = true;
+            controlValid = false;
+            params->ctrl.center = lastValidCenter;
+            if (laneInvalidFrames > 6)
+                params->ctrl.center = COLSIMAGE / 2;
+        }
+    }
+    else
+    {
+        // FSM-generated parking/fork/construction paths use their own validity
+        // rules and must not be stopped by the strict normal-lane gate.
+        controlValid = !params->ctrl.centerEdge.empty();
+        laneInvalidFrames = 0;
+        laneRecoveryFrames = 0;
+        recoveringLane = false;
+        if (controlValid)
+            lastValidCenter = params->ctrl.center;
+    }
     // 车辆冲出赛道检测（手动接管/仿真模式时禁用）
     if (!params->ctrl.parking && !params->manualTakeover && !params->config.debug)
         if (derailmentCheck(params->track->pointsEdgeLeft, params->track->pointsEdgeRight))
@@ -344,91 +366,69 @@ uint16_t Center::searchBreakRightDown(vector<PointX> pointsEdgeRight)
  * @param side 单边类型：左边0/右边1
  * @return vector<PointX>
  */
-vector<PointX> Center::centerCompute(vector<PointX> pointsEdge, int side)
+vector<PointX> Center::buildRowAlignedCenter(const vector<PointX> &left,
+                                             const vector<PointX> &right)
 {
-    int step = 4;                    // 间隔尺度
-    int offsetWidth = COLSIMAGE / 2; // 首行偏移量
-    int offsetHeight = 0;            // 纵向偏移量
+    std::array<int, ROWSIMAGE> leftByRow;
+    std::array<int, ROWSIMAGE> rightByRow;
+    leftByRow.fill(-1);
+    rightByRow.fill(-1);
+    for (const auto &point : left)
+        if (point.x >= 0 && point.x < ROWSIMAGE)
+            leftByRow[point.x] = point.y;
+    for (const auto &point : right)
+        if (point.x >= 0 && point.x < ROWSIMAGE)
+            rightByRow[point.x] = point.y;
 
-    vector<PointX> center; // 控制中心集合
-
-    if (side == 0) // 左边缘
+    vector<PointX> center;
+    center.reserve(ROWSIMAGE);
+    for (int row = ROWSIMAGE - 1; row >= 0; --row)
     {
-        uint16_t counter = 0, rowStart = 0;
-        for (int i = 0; i < pointsEdge.size(); i++) // 删除底部无效行
-        {
-            if (pointsEdge[i].y > 1)
-            {
-                counter++;
-                if (counter > 2)
-                {
-                    rowStart = i - 2;
-                    break;
-                }
-            }
-            else
-                counter = 0;
-        }
-
-        offsetHeight = pointsEdge[rowStart].x - pointsEdge[0].x;
-        counter = 0;
-        for (int i = rowStart; i < pointsEdge.size(); i += step)
-        {
-            int py = pointsEdge[i].y + offsetWidth;
-            if (py > COLSIMAGE - 1)
-            {
-                counter++;
-                if (counter > 2)
-                    break;
-            }
-            else
-            {
-                counter = 0;
-                center.emplace_back(pointsEdge[i].x - offsetHeight, py);
-            }
-        }
-    }
-    else if (side == 1) // 右边沿
-    {
-        uint16_t counter = 0, rowStart = 0;
-        for (int i = 0; i < pointsEdge.size(); i++) // 删除底部无效行
-        {
-            if (pointsEdge[i].y < COLSIMAGE - 1)
-            {
-                counter++;
-                if (counter > 2)
-                {
-                    rowStart = i - 2;
-                    break;
-                }
-            }
-            else
-                counter = 0;
-        }
-
-        offsetHeight = pointsEdge[rowStart].x - pointsEdge[0].x;
-        counter = 0;
-        for (int i = rowStart; i < pointsEdge.size(); i += step)
-        {
-            int py = pointsEdge[i].y - offsetWidth;
-            if (py < 1)
-            {
-                counter++;
-                if (counter > 2)
-                    break;
-            }
-            else
-            {
-                counter = 0;
-                center.emplace_back(pointsEdge[i].x - offsetHeight, py);
-            }
-        }
+        if (leftByRow[row] < 0 || rightByRow[row] <= leftByRow[row])
+            continue;
+        const float measuredWidth = rightByRow[row] - leftByRow[row];
+        laneWidthProfile[row] = laneWidthProfile[row] > 1.0f
+            ? 0.8f * laneWidthProfile[row] + 0.2f * measuredWidth
+            : measuredWidth;
+        center.emplace_back(row,
+            static_cast<int>(std::lround((leftByRow[row] + rightByRow[row]) * 0.5f)));
     }
 
+    // Remove isolated horizontal spikes without changing row alignment.
+    if (center.size() >= 5)
+    {
+        vector<PointX> filtered = center;
+        for (size_t i = 2; i + 2 < center.size(); ++i)
+        {
+            std::array<int, 5> columns = {
+                center[i - 2].y, center[i - 1].y, center[i].y,
+                center[i + 1].y, center[i + 2].y};
+            std::sort(columns.begin(), columns.end());
+            filtered[i].y = columns[2];
+        }
+        center.swap(filtered);
+    }
     return center;
-    // return Bezier(0.2,center);
 }
 
+vector<PointX> Center::centerCompute(vector<PointX> pointsEdge, int side)
+{
+    vector<PointX> center;
+    center.reserve(pointsEdge.size() / 2);
+    for (size_t i = 0; i < pointsEdge.size(); i += 2)
+    {
+        const int row = pointsEdge[i].x;
+        if (row < 0 || row >= ROWSIMAGE || laneWidthProfile[row] <= 1.0f)
+            continue;
+        const float halfWidth = laneWidthProfile[row] * 0.5f;
+        const int column = side == 0
+            ? static_cast<int>(std::lround(pointsEdge[i].y + halfWidth))
+            : static_cast<int>(std::lround(pointsEdge[i].y - halfWidth));
+        if (column > 0 && column < COLSIMAGE)
+            center.emplace_back(row, column);
+    }
+    return center;
+}
 /**
  * @brief 边缘有效行计算：左/右
  *

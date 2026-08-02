@@ -392,7 +392,7 @@ public:
         {
             motion->resetControl();
             params->ctrl.servo = motion->limitServoCommand(
-                params->ctrl.servo, steeringDt);
+                params->ctrl.servo, steeringDt, params->config.servoRate);
         }
 
         //[08] 综合显示调试UI窗口

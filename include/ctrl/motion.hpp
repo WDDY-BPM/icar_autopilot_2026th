@@ -39,43 +39,52 @@ public:
      */
     void poseControl(shared_ptr<Params> &params, float dtSeconds)
     {
-        constexpr float filterTimeConstant = 0.065f;
-        constexpr float maxErrorRate = 360.0f; // pixels per second
         const float dt = sanitizeDt(dtSeconds);
         const float rawError = params->ctrl.center - COLSIMAGE / 2.0f;
 
         if (!controlInitialized)
         {
-            filteredError = rawError;
-            errorLast = rawError;
+            // Build the first steering command from neutral through the normal
+            // error-rate limiter instead of accepting a full first-frame error.
+            filteredError = 0.0f;
+            errorLast = 0.0f;
             controlInitialized = true;
         }
         else
         {
-            const float filterAlpha = 1.0f - std::exp(-dt / filterTimeConstant);
+            const float filterAlpha = 1.0f - std::exp(-dt / params->config.steeringFilterTau);
             filteredError += filterAlpha * (rawError - filteredError);
         }
 
-        const float maxErrorStep = maxErrorRate * dt;
+        const float maxErrorStep = params->config.maxErrorRate * dt;
         const float error = std::clamp(filteredError,
                                        errorLast - maxErrorStep,
                                        errorLast + maxErrorStep);
-        params->config.turnP = abs(error) * params->config.runP2 + params->config.runP1;
+        const float currentP = std::abs(error) * params->config.runP2 +
+                               params->config.runP1;
         const float derivative = (error - errorLast) / dt;
         const int pwmDiff = static_cast<int>(std::lround(
-            error * params->config.turnP + derivative * params->config.turnD));
+            error * currentP + derivative * params->config.turnD));
 
         // Clamp in the signed domain before converting to uint16_t. Automatic
         // and manual steering share the same time-based actuator rate limiter.
-        const int targetServo = std::clamp(PWMSERVOMID - pwmDiff,
-                                           PWMSERVOMIN, PWMSERVOMAX);
+        int targetServo = std::clamp(PWMSERVOMID - pwmDiff,
+                                     PWMSERVOMIN, PWMSERVOMAX);
+        float servoRate = params->config.servoRate;
+        if (params->ctrl.countAcc < params->config.startupRampFrames)
+        {
+            targetServo = std::clamp(targetServo,
+                PWMSERVOMID - params->config.startupServoLimit,
+                PWMSERVOMID + params->config.startupServoLimit);
+            servoRate = params->config.startupServoRate;
+        }
         errorLast = error;
-        params->ctrl.servo = limitServoCommand(targetServo, dt);
+        params->ctrl.servo = limitServoCommand(targetServo, dt, servoRate);
     }
 
-    uint16_t limitServoCommand(int targetServo, float dtSeconds)
+    uint16_t limitServoCommand(int targetServo, float dtSeconds,
+                                 float servoRatePerSecond = 750.0f)
     {
-        constexpr float servoRatePerSecond = 750.0f;
         const float dt = sanitizeDt(dtSeconds);
         const int maxServoStep = std::max(1, static_cast<int>(
             std::ceil(servoRatePerSecond * dt)));
@@ -156,12 +165,13 @@ public:
             params->ctrl.speed = params->config.velSlow;
             return;
         }
-        else if (params->ctrl.countAcc < 50)
+        else if (params->ctrl.countAcc < params->config.startupRampFrames)
         {
             // Start gently after the physical start cone is removed.
             params->ctrl.countAcc++;
-            const float startSpeed = std::min(params->config.velLow, 0.20f);
-            const float ratio = static_cast<float>(params->ctrl.countAcc) / 50.0f;
+            const float startSpeed = std::min(params->config.velLow, params->config.startupSpeed);
+            const float ratio = static_cast<float>(params->ctrl.countAcc) /
+                                params->config.startupRampFrames;
             params->ctrl.speed = startSpeed + ratio * (params->config.velLow - startSpeed);
             return;
         }

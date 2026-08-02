@@ -92,8 +92,16 @@ struct Config
     float velYfork = 0.7;                               // Y型岔路口速度: m/s
     float runP1 = 2.2;                                  // 比例系数：直线控制量
     float runP2 = 0.007;                                // 动态P变化系数
-    float turnP = 3.5;                                  // 比例系数：转弯控制量
-    float turnD = 0.027;                                  // 微分系数：转弯控制量
+    float turnD = 0.027;
+    float steeringFilterTau = 0.065f;
+    float maxErrorRate = 360.0f;
+    float servoRate = 750.0f;
+    float startupServoRate = 400.0f;
+    int startupServoLimit = 160;
+    int startupStableFrames = 12;
+    int startupRampFrames = 60;
+    float startupSpeed = 0.10f;
+    int maxGapRows = 8;                                  // 微分系数：转弯控制量
     bool debug = false;                                 // 调试模式使能
     bool saveImg = false;                               // 存图使能
     bool saveIpm = false;                               // 存储IPM图像
@@ -157,7 +165,7 @@ struct Config
     bool obstacle = true; // 障碍物避障使能（锥桶/行人）
 
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(Config, velLow, velHigh, velSlow, velPark, velCurve, velBusy, velStop, velCross, velYfork,
-                                   runP1, runP2, turnP, turnD, debug, saveImg, saveIpm, rowCutUp, rowCutBottom,
+                                   runP1, runP2, turnD, steeringFilterTau, maxErrorRate, servoRate, startupServoRate, startupServoLimit, startupStableFrames, startupRampFrames, startupSpeed, maxGapRows, debug, saveImg, saveIpm, rowCutUp, rowCutBottom,
                                    overlap, score, binary, model, video, alertTarget, totalLaps, fork, fine, park, spot, curve, busy, slow, stop, cross, yfork, station);
 };
 
@@ -198,8 +206,16 @@ public:
             config.velYfork = configs["通用配置参数"].value("velYfork", 0.7);
             config.runP1 = configs["通用配置参数"]["runP1"];
             config.runP2 = configs["通用配置参数"]["runP2"];
-            config.turnP = configs["通用配置参数"]["turnP"];
             config.turnD = configs["通用配置参数"]["turnD"];
+            config.steeringFilterTau = configs["通用配置参数"].value("steeringFilterTau", 0.065f);
+            config.maxErrorRate = configs["通用配置参数"].value("maxErrorRate", 360.0f);
+            config.servoRate = configs["通用配置参数"].value("servoRate", 750.0f);
+            config.startupServoRate = configs["通用配置参数"].value("startupServoRate", 400.0f);
+            config.startupServoLimit = configs["通用配置参数"].value("startupServoLimit", 160);
+            config.startupStableFrames = configs["通用配置参数"].value("startupStableFrames", 12);
+            config.startupRampFrames = configs["通用配置参数"].value("startupRampFrames", 60);
+            config.startupSpeed = configs["通用配置参数"].value("startupSpeed", 0.10f);
+            config.maxGapRows = configs["通用配置参数"].value("maxGapRows", 8);
             config.debug = configs["通用配置参数"]["debug"];
             config.saveImg = configs["通用配置参数"]["saveImg"];
             config.saveIpm = configs["通用配置参数"]["saveIpm"];
@@ -300,7 +316,8 @@ public:
         modeLast = FsmMode::NORMAL;                // 初始化控制模式
         track = make_shared<Track>();              // 赛道线处理
         track->rowCutUp = config.rowCutUp;         // 图像顶部切行（前瞻距离）
-        track->rowCutBottom = config.rowCutBottom; // 图像底部切行（盲区距离）
+        track->rowCutBottom = config.rowCutBottom;
+        track->maxGapRows = config.maxGapRows; // 图像底部切行（盲区距离）
 
         // 初始化圈数和斑马线通过状态
         totalLaps = std::max(1, std::min(config.totalLaps, 3));

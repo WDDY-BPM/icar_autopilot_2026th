@@ -368,7 +368,7 @@ class TakeoverConsole:
             overlay_matches = (
                 overlay is not None and
                 now - self.overlay_received_time <= 0.5 and
-                abs(self.last_frame_id - int(overlay.get("frame_id", 0))) <= 2
+                abs(self.last_frame_id - int(overlay.get("frame_id", 0))) <= 4
             )
             if (overlay_matches and not self.manual_mode and
                     self.lanes_enabled.get()):

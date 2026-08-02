@@ -108,14 +108,17 @@ private:
             }
         }
 
-        const bool laneValid =
-            params->track->pointsEdgeLeft.size() >= 30 &&
-            params->track->pointsEdgeRight.size() >= 30;
+        const auto &laneQuality = params->track->quality;
+        const bool laneValid = laneQuality.valid &&
+            laneQuality.commonRows >= 30 &&
+            laneQuality.confidence >= 0.75f &&
+            laneQuality.centerJump <= 8.0f &&
+            laneQuality.widthVariation <= 0.15f;
         startupLaneValidCount = laneValid ? startupLaneValidCount + 1 : 0;
 
         if (!params->config.requireStartCone)
         {
-            if (startupLaneValidCount >= 10)
+            if (startupLaneValidCount >= params->config.startupStableFrames)
             {
                 startupGateState = StartupGateState::RELEASED;
                 params->ctrl.countAcc = 0;
@@ -144,7 +147,7 @@ private:
         else if (receivedNewAiResult)
         {
             startupConeMissingCount = coneDetected ? 0 : startupConeMissingCount + 1;
-            if (startupConeMissingCount >= 5 && startupLaneValidCount >= 10)
+            if (startupConeMissingCount >= 5 && startupLaneValidCount >= params->config.startupStableFrames)
             {
                 startupGateState = StartupGateState::RELEASED;
                 params->ctrl.countAcc = 0;
@@ -689,10 +692,7 @@ public:
             params->ctrl.servo = PWMSERVOMID;
         }
 
-        // Always publish current control mode. Video was already queued directly
-        // after camera capture so slow control processing cannot interrupt it.
-        fsmFactory.manual->updateVehicleState(
-            params->ctrl.speed, params->ctrl.servo, params->manualTakeover);
+
         //[06] Calculate the lane control center in autonomous mode.
         bool centerUpdatedThisFrame = false;
         if (startupGateReleased && !emergencyStopRequested &&
@@ -719,12 +719,23 @@ public:
         {
             motion->poseControl(params, steeringDt);
             motion->speedControl(params);
+
+            const bool strictLaneMode = params->mode == FsmMode::NORMAL ||
+                                        params->mode == FsmMode::CURVE;
+            if (strictLaneMode && !center->controlValid)
+            {
+                if (center->laneInvalidFrames > 0 &&
+                    center->laneInvalidFrames <= 3)
+                    params->ctrl.speed = std::min(params->ctrl.speed, 0.12f);
+                else
+                    params->ctrl.speed = 0.0f;
+            }
         }
         else if (params->manualTakeover && !emergencyStopRequested)
         {
             motion->resetControl();
             params->ctrl.servo = motion->limitServoCommand(
-                params->ctrl.servo, steeringDt);
+                params->ctrl.servo, steeringDt, params->config.servoRate);
         }
         else
         {
@@ -756,6 +767,10 @@ public:
             params->ctrl.servo = PWMSERVOMID;
         }
 
+        // Publish the final command after automatic/manual limiting and all
+        // emergency/startup overrides, so telemetry is not one frame stale.
+        fsmFactory.manual->updateVehicleState(
+            params->ctrl.speed, params->ctrl.servo, params->manualTakeover);
         // Construct and publish overlays at no more than 12.5 Hz. This avoids
         // allocating and serializing JSON on every 30 Hz control iteration.
         const auto overlayNow = std::chrono::steady_clock::now();
@@ -764,8 +779,12 @@ public:
         {
             lastOverlayBuilt = overlayNow;
             const bool lanesValid = lanesUpdatedThisFrame &&
+                                    params->track->quality.valid &&
+                                    params->track->quality.confidence >= 0.70f &&
                                     !params->manualTakeover;
             const bool centerValid = centerUpdatedThisFrame &&
+                                     center->controlValid &&
+                                     params->ctrl.centerEdge.size() >= 20 &&
                                      !params->manualTakeover;
             nlohmann::json overlay;
             overlay["frame_id"] = currentFrameId;
@@ -787,7 +806,10 @@ public:
                 {"valid_left", lanesValid ? center->validRowsLeft : 0},
                 {"valid_right", lanesValid ? center->validRowsRight : 0},
                 {"sigma_center", centerValid ? center->sigmaCenter : 0.0},
-                {"line_area", centerValid ? params->ctrl.lineArea : 0}
+                {"line_area", centerValid ? params->ctrl.lineArea : 0},
+                {"lane_confidence", params->track->quality.confidence},
+                {"common_rows", params->track->quality.commonRows},
+                {"invalid_frames", center->laneInvalidFrames}
             };
 
             auto samplePoints = [](const std::vector<PointX> &points) {
