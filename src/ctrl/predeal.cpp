@@ -88,11 +88,10 @@ cv::Mat Predeal::binaryzation(cv::Mat &img)
     }
 
     threshold(blurred, imgBin, thresholdValue, 255, THRESH_BINARY);
-    morphologyEx(imgBin, imgBin, MORPH_CLOSE,
-                 getStructuringElement(MORPH_RECT, Size(3, 3)));
-
     cv::Mat imgInv;
     bitwise_not(imgBin, imgInv);
+    morphologyEx(imgInv, imgInv, MORPH_CLOSE,
+                 getStructuringElement(MORPH_RECT, Size(3, 3)));
     return imgInv;
 }
 /**

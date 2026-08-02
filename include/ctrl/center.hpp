@@ -61,7 +61,8 @@ private:
     void validRowsCal(vector<PointX> pointsEdgeLeft, vector<PointX> pointsEdgeRight);
     bool derailmentCheck(vector<PointX> pointsEdgeLeft, vector<PointX> pointsEdgeRight);
     vector<PointX> buildRowAlignedCenter(const vector<PointX> &left,
-                                         const vector<PointX> &right);
+                                         const vector<PointX> &right,
+                                         bool updateHistory);
     std::array<float, ROWSIMAGE> laneWidthProfile{};
     int lastValidCenter = COLSIMAGE / 2;
     bool recoveringLane = false;

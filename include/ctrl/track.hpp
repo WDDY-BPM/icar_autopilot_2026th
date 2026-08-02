@@ -59,7 +59,7 @@ public:
     void handle(bool isResearch, uint16_t rowStart);
     void drawImage(Mat &img);
     double stdevEdgeCal(vector<PointX> &v_edge, int img_height);
-    void fillEdgeGap(vector<PointX> &edge); // 填补边线缺口（如施工区出口）
+    void fillLaneGap(); // Jointly fill short gaps in both edges and width data
 
 private:
     Mat imgShare; // 赛道搜索图像

@@ -122,6 +122,7 @@ private:
             {
                 startupGateState = StartupGateState::RELEASED;
                 params->ctrl.countAcc = 0;
+                params->ctrl.startupSteeringCount = 0;
                 params->ctrl.stop = false;
                 std::cout << "[Startup] Cone gate disabled; stable lane confirmed. AUTO released." << std::endl;
                 return true;
@@ -151,6 +152,7 @@ private:
             {
                 startupGateState = StartupGateState::RELEASED;
                 params->ctrl.countAcc = 0;
+                params->ctrl.startupSteeringCount = 0;
                 params->ctrl.stop = false;
                 std::cout << "[Startup] Cone removed and lane stable. AUTO released." << std::endl;
                 return true;
@@ -678,7 +680,8 @@ public:
             emergencyStopWasActive = false;
         }
 
-        if (startupGateReleased && !emergencyStopRequested && params->autoRecoveryFrames <= 0)
+        if (startupGateReleased && !emergencyStopRequested &&
+            params->autoRecoveryFrames <= 0 && !params->laneSafetyStop)
             runFsm(imgBin);
 
         // 同步手动接管状态（runFsm中endManualTakeover可能改变了状态，但params->manualTakeover未更新）
@@ -700,6 +703,14 @@ public:
         {
             center->fitting(params);
             centerUpdatedThisFrame = true;
+            const bool safetyLaneMode = params->mode == FsmMode::NORMAL ||
+                                        params->mode == FsmMode::CURVE ||
+                                        params->mode == FsmMode::CROSS ||
+                                        params->mode == FsmMode::STOP ||
+                                        params->mode == FsmMode::SLOW ||
+                                        params->mode == FsmMode::STATION;
+            params->laneSafetyStop = safetyLaneMode && !center->controlValid &&
+                (center->laneInvalidFrames >= 4 || center->laneRecoveryFrames > 0);
         }
 
         //[07] 车辆运动控制（仅手动接管时跳过）
@@ -721,7 +732,11 @@ public:
             motion->speedControl(params);
 
             const bool strictLaneMode = params->mode == FsmMode::NORMAL ||
-                                        params->mode == FsmMode::CURVE;
+                                        params->mode == FsmMode::CURVE ||
+                                        params->mode == FsmMode::CROSS ||
+                                        params->mode == FsmMode::STOP ||
+                                        params->mode == FsmMode::SLOW ||
+                                        params->mode == FsmMode::STATION;
             if (strictLaneMode && !center->controlValid)
             {
                 if (center->laneInvalidFrames > 0 &&
@@ -733,6 +748,7 @@ public:
         }
         else if (params->manualTakeover && !emergencyStopRequested)
         {
+            params->laneSafetyStop = false;
             motion->resetControl();
             params->ctrl.servo = motion->limitServoCommand(
                 params->ctrl.servo, steeringDt, params->config.servoRate);

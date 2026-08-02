@@ -71,12 +71,13 @@ public:
         int targetServo = std::clamp(PWMSERVOMID - pwmDiff,
                                      PWMSERVOMIN, PWMSERVOMAX);
         float servoRate = params->config.servoRate;
-        if (params->ctrl.countAcc < params->config.startupRampFrames)
+        if (params->ctrl.startupSteeringCount < params->config.startupRampFrames)
         {
             targetServo = std::clamp(targetServo,
                 PWMSERVOMID - params->config.startupServoLimit,
                 PWMSERVOMID + params->config.startupServoLimit);
             servoRate = params->config.startupServoRate;
+            params->ctrl.startupSteeringCount++;
         }
         errorLast = error;
         params->ctrl.servo = limitServoCommand(targetServo, dt, servoRate);
@@ -115,88 +116,65 @@ public:
      */
     void speedControl(shared_ptr<Params> &params)
     {
-        if (params->ctrl.stop) // 停车
+        if (params->ctrl.stop)
         {
-            params->ctrl.speed = 0.0;
+            params->ctrl.speed = 0.0f;
             return;
         }
-        if (params->ctrl.back) // 倒车(停车场)
+        if (params->ctrl.back)
         {
             params->ctrl.speed = -params->config.velPark;
             return;
         }
-        if (params->mode == FsmMode::STOP) // 停车区速度
+
+        float desiredSpeed = params->config.velLow;
+        if (params->mode == FsmMode::STOP)
+            desiredSpeed = params->config.velStop;
+        else if (params->mode == FsmMode::PARK)
+            desiredSpeed = params->config.velPark;
+        else if (params->mode == FsmMode::CROSS)
+            desiredSpeed = params->config.velCross;
+        else if (params->mode == FsmMode::STATION)
+            desiredSpeed = params->config.velSlow;
+        else if (params->mode == FsmMode::BUSY || params->busyZone)
+            desiredSpeed = params->config.velBusy;
+        else if (params->mode == FsmMode::CURVE)
+            desiredSpeed = params->config.velCurve;
+        else if (params->mode == FsmMode::YFORK)
+            desiredSpeed = params->config.velYfork;
+        else if (params->ctrl.slow)
+            desiredSpeed = params->config.velSlow;
+        else
         {
-            params->ctrl.speed = params->config.velStop;
-            return;
+            int line = params->ctrl.lineArea;
+            const float upper = ROWSIMAGE * 0.35f;
+            line = std::max(line - 20, 0);
+            line = std::min(line, static_cast<int>(upper));
+            desiredSpeed = params->config.velLow +
+                std::pow((upper - line) / upper, 3) *
+                (params->config.velHigh - params->config.velLow);
+            desiredSpeed = std::min(desiredSpeed, params->config.velHigh);
         }
-        else if (params->mode == FsmMode::PARK) // 停车场速度
+
+        // Apply the launch envelope last, so CROSS/SLOW/etc. cannot bypass it.
+        const int rampFrames = std::max(1, params->config.startupRampFrames);
+        if (params->ctrl.countAcc < rampFrames)
         {
-            params->ctrl.speed = params->config.velPark;
-            return;
-        }
-        else if (params->mode == FsmMode::CROSS) // 斑马线速度
-        {
-            params->ctrl.speed = params->config.velCross;
-            return;
-        }
-        else if (params->mode == FsmMode::STATION) // 停靠站速度
-        {
-            params->ctrl.speed = params->config.velSlow;
-            return;
-        }
-        else if (params->mode == FsmMode::BUSY || params->busyZone) // 施工区速度（含退出手动接管后）
-        {
-            params->ctrl.speed = params->config.velBusy;
-            return;
-        }
-        else if (params->mode == FsmMode::CURVE) // 连续弯道速度
-        {
-            params->ctrl.speed = params->config.velCurve;
-            return;
-        }
-        else if (params->mode == FsmMode::YFORK) // Y型岔路口速度
-        {
-            params->ctrl.speed = params->config.velYfork;
-            return;
-        }
-        else if (params->ctrl.slow) // 减速区速度
-        {
-            params->ctrl.speed = params->config.velSlow;
-            return;
-        }
-        else if (params->ctrl.countAcc < params->config.startupRampFrames)
-        {
-            // Start gently after the physical start cone is removed.
             params->ctrl.countAcc++;
-            const float startSpeed = std::min(params->config.velLow, params->config.startupSpeed);
             const float ratio = static_cast<float>(params->ctrl.countAcc) /
-                                params->config.startupRampFrames;
-            params->ctrl.speed = startSpeed + ratio * (params->config.velLow - startSpeed);
-            return;
+                                rampFrames;
+            const float rampSpeed = params->config.startupSpeed +
+                ratio * (params->config.velLow - params->config.startupSpeed);
+            params->ctrl.speed = std::min(desiredSpeed, rampSpeed);
         }
-
-        int line = params->ctrl.lineArea; // 动态速度，返回点越高，速度越大，线性变化
-
-        // 控制率
-        uint8_t controlLow = 3;   // 速度控制下限
-        uint8_t controlMid = 5;   // 控制率
-        uint8_t controlHigh = 10; // 速度控制上限
-
-        float upper = ROWSIMAGE * 0.35; // 84
-        line = std::max(line - 20, 0);
-        if (line > upper)
-            line = upper;
-
-        params->ctrl.speed = params->config.velLow +
-                             std::pow(float(upper - line) / (upper), 3) * (params->config.velHigh - params->config.velLow);
-        if (params->ctrl.speed > params->config.velHigh)
-            params->ctrl.speed = params->config.velHigh;
+        else
+        {
+            params->ctrl.speed = desiredSpeed;
+        }
 
         if (params->alertDecelCount > 0)
             params->ctrl.speed = std::max(0.0f, params->ctrl.speed - 0.1f);
     }
-
     /**
      * @brief 显示赛道线识别结果
      *

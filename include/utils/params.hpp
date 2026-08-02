@@ -70,7 +70,8 @@ struct Control
     int lineArea = 0;             // 面积规划行序号
     bool fitting = false;         // 控制中心拟合标志(停车场专用)
     bool parking = false;         // 停车场特殊模式
-    int countAcc = 500;           // 缓加速计数器
+    int countAcc = 500;           // Speed launch-envelope counter
+    int startupSteeringCount = 500; // Independent startup steering limiter
     int outlineCooldown = 0;      // outlineCheck冷却计数器（停车场出库后暂时禁用）
     bool yforkReset = false;      // Y型岔路复位标志（park退出时设置）
 };
@@ -346,7 +347,8 @@ public:
     int yforkBranch = 0;                // yfork分支：0=无, 1=左, 2=右
     bool busyZone = false;              // 施工区标志（station据此调整检测参数）
     bool takeoverJustEnded = false;     // 手动接管刚结束
-    int autoRecoveryFrames = 0;         // 切回自动后等待新车道线的停车帧数
+    int autoRecoveryFrames = 0;         // Automatic-control recovery hold
+    bool laneSafetyStop = false;        // Latch FSM while lane recovery is incomplete
     int alertCountdown = 0;             // 蜂鸣器报警倒计时（帧数）
     int alertDecelCount = 0;            // 报警目标减速倒计时（帧数）
     int busyAlertCountdown = 0;         // 施工区蜂鸣器倒计时（帧数）

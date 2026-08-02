@@ -606,7 +606,7 @@ void FsmPark::run(Mat &img)
         if (exitTimedOut || countRes > 2) // 转向超时
         {
             const bool exitConfirmed = countRes > 2;
-            params->ctrl.countAcc = 50;        // 跳过缓加速，直接恢复速度
+            params->ctrl.countAcc = params->config.startupRampFrames;        // 跳过缓加速，直接恢复速度
             params->ctrl.outlineCooldown = 90; // 出库后约4.5秒内禁用outlineCheck
             params->ctrl.yforkReset = true;    // 通知yfork复位，防止残留forkSeen误触发
             if (exitConfirmed)

@@ -58,7 +58,8 @@ void Center::fitting(shared_ptr<Params> &params)
         {
             params->ctrl.centerEdge = buildRowAlignedCenter(
                 params->track->pointsEdgeLeft,
-                params->track->pointsEdgeRight);
+                params->track->pointsEdgeRight,
+                params->track->quality.valid);
             style = "STRIGHT";
         }
         // Left single edge
@@ -155,7 +156,11 @@ void Center::fitting(shared_ptr<Params> &params)
         sigmaCenter = 1000;
 
     const bool strictLaneMode = params->mode == FsmMode::NORMAL ||
-                                params->mode == FsmMode::CURVE;
+                                params->mode == FsmMode::CURVE ||
+                                params->mode == FsmMode::CROSS ||
+                                params->mode == FsmMode::STOP ||
+                                params->mode == FsmMode::SLOW ||
+                                params->mode == FsmMode::STATION;
     const bool candidateValid = params->ctrl.centerEdge.size() >= 20 &&
                                 params->track->quality.valid;
     if (strictLaneMode && !params->ctrl.parking && !params->manualTakeover)
@@ -367,7 +372,8 @@ uint16_t Center::searchBreakRightDown(vector<PointX> pointsEdgeRight)
  * @return vector<PointX>
  */
 vector<PointX> Center::buildRowAlignedCenter(const vector<PointX> &left,
-                                             const vector<PointX> &right)
+                                             const vector<PointX> &right,
+                                             bool updateHistory)
 {
     std::array<int, ROWSIMAGE> leftByRow;
     std::array<int, ROWSIMAGE> rightByRow;
@@ -387,9 +393,10 @@ vector<PointX> Center::buildRowAlignedCenter(const vector<PointX> &left,
         if (leftByRow[row] < 0 || rightByRow[row] <= leftByRow[row])
             continue;
         const float measuredWidth = rightByRow[row] - leftByRow[row];
-        laneWidthProfile[row] = laneWidthProfile[row] > 1.0f
-            ? 0.8f * laneWidthProfile[row] + 0.2f * measuredWidth
-            : measuredWidth;
+        if (updateHistory)
+            laneWidthProfile[row] = laneWidthProfile[row] > 1.0f
+                ? 0.8f * laneWidthProfile[row] + 0.2f * measuredWidth
+                : measuredWidth;
         center.emplace_back(row,
             static_cast<int>(std::lround((leftByRow[row] + rightByRow[row]) * 0.5f)));
     }

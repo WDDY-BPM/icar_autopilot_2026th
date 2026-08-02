@@ -88,7 +88,7 @@ class RouteTaskInvariantTests(unittest.TestCase):
     def test_emergency_stop_freezes_all_fsm_progress(self):
         source = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
         self.assertIn(
-            "if (startupGateReleased && !emergencyStopRequested && params->autoRecoveryFrames <= 0)\n            runFsm(imgBin);",
+            "params->autoRecoveryFrames <= 0 && !params->laneSafetyStop)\n            runFsm(imgBin);",
             source,
         )
 

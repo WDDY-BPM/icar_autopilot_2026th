@@ -45,6 +45,9 @@ void Track::handle(Mat img)
  */
 void Track::handle(bool isResearch, uint16_t rowStart)
 {
+    // A failed search must never leave the previous frame marked valid.
+    if (!isResearch)
+        quality = LaneQuality{};
     bool flagStartBlock = true;                    // 搜索到色块起始行的标志（行）
     int counterSearchRows = pointsEdgeLeft.size(); // 搜索行计数
     int startBlock[30];                            // 色块起点（行）
@@ -53,6 +56,9 @@ void Track::handle(bool isResearch, uint16_t rowStart)
     PointX pointSpurroad;                          // 岔路坐标
     int counterSpurroad = 0;                       // 岔路识别标志
     bool spurroadEnable = false;
+    int initialLeft = -1;
+    int initialRight = -1;
+    int initialStableRows = 0;
 
     if (rowCutUp > ROWSIMAGE / 4)
         rowCutUp = ROWSIMAGE / 4;
@@ -119,39 +125,75 @@ void Track::handle(bool isResearch, uint16_t rowStart)
                 endBlock[counterBlock++] = COLSIMAGE - 1;
         }
 
-        int widthBlocks = 0; // 仅在确认存在色块后初始化
-        int indexWidestBlock = 0;                      // 最宽色块的序号
-        if (flagStartBlock)                            // 起始行做特殊处理
+        if (flagStartBlock)
         {
             if (row < ROWSIMAGE / 3)
-                return;
+                break;
             if (counterBlock == 0)
             {
+                initialStableRows = 0;
                 continue;
             }
-            widthBlocks = endBlock[0] - startBlock[0];
-            for (int i = 1; i < counterBlock; i++) // 搜索最宽色块
-            {
-                int tmp_width = endBlock[i] - startBlock[i];
-                if (tmp_width > widthBlocks)
+
+            // Evaluate both individual blocks and their outer envelope. The
+            // envelope represents one road split by an arrow or crosswalk.
+            int selectedLeft = -1;
+            int selectedRight = -1;
+            float bestScore = std::numeric_limits<float>::max();
+            auto considerInitial = [&](int left, int right) {
+                const int width = right - left;
+                if (width <= 0)
+                    return;
+                int limitWidth = static_cast<int>((COLSIMAGE - (ROWSIMAGE - row)) * 0.65f);
+                if (row < ROWSIMAGE * 0.75f)
+                    limitWidth = static_cast<int>(COLSIMAGE * 0.5f);
+                if (width <= limitWidth)
+                    return;
+                const int center = (left + right) / 2;
+                const int referenceCenter = initialLeft >= 0
+                    ? (initialLeft + initialRight) / 2 : COLSIMAGE / 2;
+                const int referenceWidth = initialLeft >= 0
+                    ? initialRight - initialLeft : width;
+                const float score = std::abs(center - referenceCenter) +
+                    0.35f * std::abs(width - referenceWidth);
+                if (score < bestScore)
                 {
-                    widthBlocks = tmp_width;
-                    indexWidestBlock = i;
+                    bestScore = score;
+                    selectedLeft = left;
+                    selectedRight = right;
                 }
+            };
+            for (int i = 0; i < counterBlock; ++i)
+                considerInitial(startBlock[i], endBlock[i]);
+            if (counterBlock > 1)
+                considerInitial(startBlock[0], endBlock[counterBlock - 1]);
+
+            if (selectedLeft < 0)
+            {
+                initialStableRows = 0;
+                continue;
             }
+            const int selectedCenter = (selectedLeft + selectedRight) / 2;
+            const int selectedWidth = selectedRight - selectedLeft;
+            bool coherent = true;
+            if (initialLeft >= 0)
+            {
+                const int previousCenter = (initialLeft + initialRight) / 2;
+                const int previousWidth = initialRight - initialLeft;
+                coherent = std::abs(selectedCenter - previousCenter) <= 15 &&
+                    std::abs(selectedWidth - previousWidth) <=
+                        std::max(1, static_cast<int>(previousWidth * 0.20f));
+            }
+            initialStableRows = coherent ? initialStableRows + 1 : 1;
+            initialLeft = selectedLeft;
+            initialRight = selectedRight;
 
-            int limitWidthBlock = (COLSIMAGE - (ROWSIMAGE - row)) * 0.65; // 首行色块宽度限制（不能太小）
-            if (row < ROWSIMAGE * 0.75)
-                limitWidthBlock = COLSIMAGE * 0.5; // 首行色块宽度限制（不能太小）
-
-            if (widthBlocks > limitWidthBlock) // 满足首行宽度要求
+            if (initialStableRows >= 3)
             {
                 flagStartBlock = false;
-                PointX pointTmp(row, startBlock[indexWidestBlock]);
-                pointsEdgeLeft.push_back(pointTmp);
-                pointTmp.y = endBlock[indexWidestBlock];
-                pointsEdgeRight.push_back(pointTmp);
-                widthBlock.emplace_back(row, endBlock[indexWidestBlock] - startBlock[indexWidestBlock]);
+                pointsEdgeLeft.emplace_back(row, selectedLeft);
+                pointsEdgeRight.emplace_back(row, selectedRight);
+                widthBlock.emplace_back(row, selectedWidth);
                 counterSearchRows++;
             }
             spurroadEnable = false;
@@ -279,8 +321,7 @@ void Track::handle(bool isResearch, uint16_t rowStart)
         }
     }
 
-    fillEdgeGap(pointsEdgeLeft);
-    fillEdgeGap(pointsEdgeRight);
+    fillLaneGap();
 
     stdevLeft = stdevEdgeCal(pointsEdgeLeft, ROWSIMAGE); // 计算边缘方差
     stdevRight = stdevEdgeCal(pointsEdgeRight, ROWSIMAGE);
@@ -293,34 +334,63 @@ void Track::handle(bool isResearch, uint16_t rowStart)
  * @brief 填补边线缺口：当某行没有边线点时，用前后两行插值补上
  *        解决施工区出口等位置赛道边线断开导致丢线的问题
  */
-void Track::fillEdgeGap(vector<PointX> &edge)
+void Track::fillLaneGap()
 {
-    if (edge.size() < 2)
+    if (pointsEdgeLeft.size() < 2 ||
+        pointsEdgeLeft.size() != pointsEdgeRight.size() ||
+        pointsEdgeLeft.size() != widthBlock.size())
         return;
 
-    vector<PointX> filled;
-    filled.reserve(edge.size() + 16);
-    filled.push_back(edge.front());
-    for (size_t i = 1; i < edge.size(); ++i)
+    vector<PointX> leftFilled;
+    vector<PointX> rightFilled;
+    vector<PointX> widthFilled;
+    leftFilled.reserve(pointsEdgeLeft.size() + 16);
+    rightFilled.reserve(pointsEdgeRight.size() + 16);
+    widthFilled.reserve(widthBlock.size() + 16);
+    leftFilled.push_back(pointsEdgeLeft.front());
+    rightFilled.push_back(pointsEdgeRight.front());
+    widthFilled.emplace_back(pointsEdgeLeft.front().x,
+        pointsEdgeRight.front().y - pointsEdgeLeft.front().y);
+
+    for (size_t i = 1; i < pointsEdgeLeft.size(); ++i)
     {
-        const PointX previous = edge[i - 1];
-        const PointX current = edge[i];
-        const int rowGap = previous.x - current.x;
-        if (rowGap > 1 && rowGap <= maxGapRows)
+        const PointX previousLeft = pointsEdgeLeft[i - 1];
+        const PointX previousRight = pointsEdgeRight[i - 1];
+        const PointX currentLeft = pointsEdgeLeft[i];
+        const PointX currentRight = pointsEdgeRight[i];
+        const int rowGap = previousLeft.x - currentLeft.x;
+        if (previousRight.x == previousLeft.x &&
+            currentRight.x == currentLeft.x &&
+            rowGap > 1 && rowGap <= maxGapRows)
         {
-            for (int row = previous.x - 1; row > current.x; --row)
+            for (int row = previousLeft.x - 1; row > currentLeft.x; --row)
             {
-                const float ratio = static_cast<float>(previous.x - row) / rowGap;
-                const int col = static_cast<int>(std::lround(
-                    previous.y + ratio * (current.y - previous.y)));
-                filled.emplace_back(row, col);
+                const float ratio = static_cast<float>(previousLeft.x - row) / rowGap;
+                const int leftColumn = static_cast<int>(std::lround(
+                    previousLeft.y + ratio * (currentLeft.y - previousLeft.y)));
+                const int rightColumn = static_cast<int>(std::lround(
+                    previousRight.y + ratio * (currentRight.y - previousRight.y)));
+                leftFilled.emplace_back(row, leftColumn);
+                rightFilled.emplace_back(row, rightColumn);
+                widthFilled.emplace_back(row, rightColumn - leftColumn);
             }
         }
-        filled.push_back(current);
+        leftFilled.push_back(currentLeft);
+        rightFilled.push_back(currentRight);
+        widthFilled.emplace_back(currentLeft.x, currentRight.y - currentLeft.y);
     }
-    edge.swap(filled);
-}
 
+    pointsEdgeLeft.swap(leftFilled);
+    pointsEdgeRight.swap(rightFilled);
+    widthBlock.swap(widthFilled);
+    for (size_t i = 0; i < pointsEdgeLeft.size(); ++i)
+    {
+        pointsEdgeLeft[i].slope = 0.0f;
+        pointsEdgeRight[i].slope = 0.0f;
+        slopeCal(pointsEdgeLeft, static_cast<int>(i));
+        slopeCal(pointsEdgeRight, static_cast<int>(i));
+    }
+}
 void Track::evaluateQuality()
 {
     quality = LaneQuality{};
