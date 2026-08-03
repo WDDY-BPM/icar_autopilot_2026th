@@ -107,9 +107,21 @@ void FsmStop::run(Mat &img)
             }
         }
         if (countRec > 2)
+        {
             setStep(Step::STOP);
-        else if (countSes >= 10 || timeout > 50)
+        }
+        else if (countSes >= 10)
+        {
+            // Consecutive fresh AI results confirm the earlier gate was false.
             setStep(Step::NONE);
+        }
+        else if (timeout > 50)
+        {
+            // Loss of AI updates is not evidence that a closed gate is gone.
+            setStep(Step::STOP);
+            params->ctrl.stop = true;
+            params->ctrl.speed = 0.0f;
+        }
         break;
     }
 

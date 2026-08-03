@@ -121,6 +121,13 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIsNotNone(stopped)
         self.assertIn("if (!params->aiResultFresh)", none.group(0))
         self.assertIn("if (params->aiResultFresh)", enable.group(0))
+        self.assertIn("else if (countSes >= 10)", enable.group(0))
+        stale_timeout = enable.group(0).index("else if (timeout > 50)")
+        stale_branch = enable.group(0)[stale_timeout:]
+        self.assertIn("setStep(Step::STOP)", stale_branch)
+        self.assertIn("params->ctrl.stop = true", stale_branch)
+        self.assertIn("params->ctrl.speed = 0.0f", stale_branch)
+        self.assertNotIn("setStep(Step::NONE)", stale_branch)
         self.assertIn("if (!params->aiResultFresh)", stopped.group(0))
         self.assertIn("params->ctrl.stop = true", stopped.group(0))
         self.assertNotIn("timeout", stopped.group(0))
