@@ -77,6 +77,7 @@ private:
     int lastLap = 0; // 上一圈号（检测圈变更时复位FSM）
     bool emergencyStopWasActive = false;
     int previousFinalServo = PWMSERVOMID;
+    control_algorithms::SingleLaneSpeedLimitState singleLaneSpeedLimit;
     std::chrono::steady_clock::time_point lastOverlayBuilt{};
 
     // 全局共享数据链
@@ -589,6 +590,8 @@ public:
                 params->ctrl.stop = true;
                 params->ctrl.speed = 0.0f;
                 params->ctrl.servo = PWMSERVOMID;
+                previousFinalServo = PWMSERVOMID;
+                motion->reset();
                 client->carControl(0.0f, PWMSERVOMID);
                 return;
             }
@@ -599,6 +602,8 @@ public:
                 params->ctrl.stop = true;
                 params->ctrl.speed = 0.0f;
                 params->ctrl.servo = PWMSERVOMID;
+                previousFinalServo = PWMSERVOMID;
+                motion->reset();
                 client->carControl(0.0f, PWMSERVOMID);
                 return;
             }
@@ -756,6 +761,12 @@ public:
                                         params->mode == FsmMode::STOP ||
                                         params->mode == FsmMode::SLOW ||
                                         params->mode == FsmMode::STATION;
+            if (control_algorithms::updateSingleLaneSpeedLimit(
+                    singleLaneSpeedLimit, strictLaneMode, center->controlValid,
+                    params->track->quality.leftReliable,
+                    params->track->quality.rightReliable, 5))
+                params->ctrl.speed = std::min(params->ctrl.speed, 0.15f);
+
             if (strictLaneMode && !center->controlValid &&
                 center->laneInvalidFrames > 0 &&
                 center->laneInvalidFrames <= 6)

@@ -14,6 +14,12 @@ struct LaneRecoveryState
     bool controlValid = true;
 };
 
+struct SingleLaneSpeedLimitState
+{
+    bool active = false;
+    int dualLaneRecoveryFrames = 0;
+};
+
 struct EdgeReliability
 {
     bool reliable = false;
@@ -92,6 +98,34 @@ inline bool updateLaneRecovery(LaneRecoveryState &state, bool candidateValid,
         state.controlValid = false;
     }
     return state.controlValid;
+}
+
+inline bool updateSingleLaneSpeedLimit(SingleLaneSpeedLimitState &state,
+                                       bool strictLaneMode, bool controlValid,
+                                       bool leftReliable, bool rightReliable,
+                                       int requiredDualLaneFrames = 5)
+{
+    if (!strictLaneMode)
+    {
+        state = SingleLaneSpeedLimitState{};
+        return false;
+    }
+    const bool singleLaneControl = controlValid &&
+        (leftReliable != rightReliable);
+    const bool dualLaneControl = controlValid && leftReliable && rightReliable;
+    if (singleLaneControl)
+    {
+        state.active = true;
+        state.dualLaneRecoveryFrames = 0;
+    }
+    else if (state.active)
+    {
+        state.dualLaneRecoveryFrames = dualLaneControl
+            ? state.dualLaneRecoveryFrames + 1 : 0;
+        if (state.dualLaneRecoveryFrames >= std::max(1, requiredDualLaneFrames))
+            state = SingleLaneSpeedLimitState{};
+    }
+    return state.active;
 }
 
 inline float applyStartupSpeed(float desiredSpeed, int &count,

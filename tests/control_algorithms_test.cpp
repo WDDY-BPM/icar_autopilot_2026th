@@ -31,6 +31,24 @@ int main()
         assert(!control_algorithms::updateLaneRecovery(lane, true));
     assert(control_algorithms::updateLaneRecovery(lane, true));
 
+    control_algorithms::SingleLaneSpeedLimitState speedLimit;
+    assert(control_algorithms::updateSingleLaneSpeedLimit(
+        speedLimit, true, true, true, false));
+    for (int i = 0; i < 4; ++i)
+        assert(control_algorithms::updateSingleLaneSpeedLimit(
+            speedLimit, true, true, true, true));
+    assert(speedLimit.dualLaneRecoveryFrames == 4);
+    assert(!control_algorithms::updateSingleLaneSpeedLimit(
+        speedLimit, true, true, true, true));
+    assert(!speedLimit.active);
+    assert(control_algorithms::updateSingleLaneSpeedLimit(
+        speedLimit, true, true, false, true));
+    assert(control_algorithms::updateSingleLaneSpeedLimit(
+        speedLimit, true, false, false, false));
+    assert(speedLimit.dualLaneRecoveryFrames == 0);
+    assert(!control_algorithms::updateSingleLaneSpeedLimit(
+        speedLimit, false, true, false, true));
+
     std::vector<TestPoint> goodLeft;
     std::vector<TestPoint> stuckLeft;
     for (int row = 220; row >= 190; --row)
