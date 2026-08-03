@@ -1,0 +1,17 @@
+.tools/
+.vscode/
+EWARM/settings/
+MDK-ARM/78678678/
+MDK-ARM/*.uvguix.*
+MDK-ARM/*.log
+MDK-ARM/*.lst
+*.axf
+*.bin
+*.crf
+*.d
+*.dep
+*.hex
+*.lnp
+*.map
+*.o
+
