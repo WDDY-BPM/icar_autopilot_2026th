@@ -33,9 +33,9 @@ class VisualParserTests(unittest.TestCase):
 
     def test_parses_label_from_nested_json_string(self):
         response = {
-            "data": {
-                "answer": '{"description": "The detected scene is busy."}'
-            }
+            "outputs": [
+                {"text": '{"description": "The detected scene is busy."}'},
+            ]
         }
         self.assertEqual("busy", self.visual._parse_result(response))
 
@@ -48,10 +48,20 @@ class VisualParserTests(unittest.TestCase):
             "limit",
             self.visual._match_label("没有斜线，这是限速标志"),
         )
+    def test_ignores_echoed_prompt_outside_output_fields(self):
+        response = {
+            "query": "请区分限速(limit)和解除限速(unlimit)",
+            "result": {
+                "outputs": [
+                    {"name": "result_text", "value": "limit"},
+                ]
+            },
+        }
+        self.assertEqual("limit", self.visual._parse_result(response))
     def test_parses_direct_nested_label(self):
         self.assertEqual(
             "cone",
-            self.visual._parse_result({"data": {"prediction": "cone"}}),
+            self.visual._parse_result({"outputs": [{"result": "cone"}]}),
         )
 
 

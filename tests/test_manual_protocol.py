@@ -27,7 +27,8 @@ class ManualProtocolTests(unittest.TestCase):
             return_auto = False
 
         returned = command_body("RETURN")
-        if "manualControl.returnAuto = true" in returned:
+        manual_mode = True
+        if "manualControl.returnAuto = manualMode" in returned:
             return_auto = True
 
         ping = command_body("PING")
@@ -58,6 +59,17 @@ class ManualProtocolTests(unittest.TestCase):
         self.assertIsNotNone(return_branch)
         self.assertIn("fsmFactory.busy->endManualTakeover();", return_branch.group("body"))
 
+    def test_return_in_auto_does_not_leave_stale_request(self):
+        returned = command_body("RETURN")
+        self.assertIn("manualControl.returnAuto = manualMode", returned)
+        manual_mode = False
+        return_auto = manual_mode
+        manual_mode = True
+        check_for_return_key = return_auto
+        return_auto = False
+        self.assertTrue(manual_mode)
+        self.assertFalse(check_for_return_key)
+        self.assertFalse(return_auto)
     def test_return_bypasses_auto_mode_gate(self):
         gate = SOURCE.index('if (cmd != "PING\\n"')
         handler = SOURCE.index('if (cmd == "RETURN\\n")')

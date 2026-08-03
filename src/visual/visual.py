@@ -169,67 +169,66 @@ class VisualLLM:
             return None
 
     def _parse_result(self, result: dict) -> Optional[str]:
-        """解析 API 返回结果，提取场景标签"""
+        """Extract labels only from documented output containers and fields."""
         outputs = []
-        # 兼容两种结构: result.result.outputs 或 顶层 outputs
         inner_result = result.get("result")
         if isinstance(inner_result, dict):
-            outputs = inner_result.get("outputs", [])
-        if not outputs:
-            outputs = result.get("outputs", [])
+            nested_outputs = inner_result.get("outputs")
+            if isinstance(nested_outputs, list):
+                outputs.extend(nested_outputs)
+        top_outputs = result.get("outputs")
+        if isinstance(top_outputs, list):
+            outputs.extend(top_outputs)
 
-        raw_text = None
-        for out in outputs:
-            if not isinstance(out, dict) or out.get("name") != "output":
+        output_fields = ("value", "text", "result", "output")
+        nested_fields = ("参数描述", "description", "识别结果", "标签",
+                         "场景", "label", "result", "output", "text")
+        for output in outputs:
+            if not isinstance(output, dict):
                 continue
-            val = out.get("value", "")
-            if not isinstance(val, str) or not val:
-                continue
+            for field in output_fields:
+                value = output.get(field)
+                if not isinstance(value, str) or not value.strip():
+                    continue
+                candidates = []
+                try:
+                    decoded = json.loads(value)
+                    if isinstance(decoded, dict):
+                        candidates.extend(
+                            decoded[key] for key in nested_fields
+                            if isinstance(decoded.get(key), str)
+                        )
+                    elif isinstance(decoded, str):
+                        candidates.append(decoded)
+                except json.JSONDecodeError:
+                    candidates.append(value)
+                for candidate in candidates:
+                    label = self._match_label(candidate, warn=False)
+                    if label:
+                        return label
 
-            # 尝试解析为 JSON（老格式：{"参数描述": "限速"}）
-            try:
-                inner = json.loads(val)
-                if isinstance(inner, dict):
-                    for field in ["参数描述", "description", "识别结果", "标签", "场景", "label", "result", "output"]:
-                        if field in inner and isinstance(inner[field], str):
-                            raw_text = inner[field]
-                            break
-                    if not raw_text:
-                        raw_text = json.dumps(inner, ensure_ascii=False)
-                elif isinstance(inner, str):
-                    raw_text = inner
-            except json.JSONDecodeError:
-                # 纯字符串标签，如 "limit" / "cone"
-                raw_text = val
-            break
-
-        # 兜底：result 字段直接是字符串
-        if not raw_text and isinstance(inner_result, str):
-            raw_text = inner_result
-
-        # 最后兜底：递归搜索
-        if not raw_text:
-            return self._find_label(result)
-
-        return self._match_label(raw_text)
-
+        if isinstance(inner_result, str):
+            return self._match_label(inner_result)
+        return None
     @staticmethod
     def _term_is_affirmed(text: str, term: str) -> bool:
-        """Return true when at least one occurrence is not locally negated."""
+        """Return true when an occurrence is not directly negated."""
         lowered = text.lower()
         term_lower = term.lower()
-        negations = ("不是", "并非", "没有", "无", "未见", "不存在", "不含",
-                     "缺少", "no ", "not ", "without ", "isn't ", "is not ")
+        chinese_negations = ("不是", "并非", "没有", "无", "未见", "不存在", "不含")
+        english_negations = ("no", "not", "without", "isn't", "is not")
         start = 0
         while True:
             index = lowered.find(term_lower, start)
             if index < 0:
                 return False
-            prefix = lowered[max(0, index - 12):index]
-            clause_start = max(
-                (prefix.rfind(mark) for mark in ",，。;；:："), default=-1)
-            prefix = prefix[clause_start + 1:]
-            if not any(token in prefix for token in negations):
+            prefix = lowered[:index].rstrip()
+            chinese_negated = any(prefix.endswith(token) for token in chinese_negations)
+            english_negated = any(
+                re.search(rf"(?:^|\s){re.escape(token)}\s*$", prefix)
+                for token in english_negations
+            )
+            if not chinese_negated and not english_negated:
                 return True
             start = index + len(term_lower)
     def _match_label(self, text: str, warn: bool = True) -> Optional[str]:
@@ -263,30 +262,6 @@ class VisualLLM:
 
         if warn:
             print(f"{COUT_YELLOW}[VisualLLM] 未能匹配标签，原始文本: {text}{COUT_REST}")
-        return None
-
-    def _find_label(self, obj) -> Optional[str]:
-        """递归查找字典中是否有匹配的标签值"""
-        if isinstance(obj, dict):
-            for v in obj.values():
-                if isinstance(v, str):
-                    found = self._match_label(v, warn=False)
-                    if found:
-                        return found
-                found = self._find_label(v)
-                if found:
-                    return found
-        elif isinstance(obj, list):
-            for item in obj:
-                found = self._find_label(item)
-                if found:
-                    return found
-        elif isinstance(obj, str):
-            try:
-                parsed = json.loads(obj)
-                return self._find_label(parsed)
-            except (json.JSONDecodeError, TypeError):
-                return self._match_label(obj, warn=False)
         return None
 
     def _confirm_limit_unlimit(self, image_path: str) -> Optional[str]:

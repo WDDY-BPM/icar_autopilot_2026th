@@ -450,7 +450,7 @@ void ManualControlThread::processCommand(const std::string &cmd) {
     }
     // 处理特殊命令
     if (cmd == "RETURN\n") {
-        manualControl.returnAuto = true;
+        manualControl.returnAuto = manualMode;
         controlChanged = true;
         printf("[Manual] Return to auto command received\n");
         return;

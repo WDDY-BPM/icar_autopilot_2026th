@@ -68,6 +68,8 @@ void FsmSlow::run(Mat &img)
     case Step::NONE: // AI标志检测
 
         params->ctrl.slow = false; // 清除慢行标志
+        if (!params->aiResultFresh)
+            break;
         for (int i = 0; i < params->results.size(); i++)
         {
             if (params->results[i].type == LABEL_LIMIT) // AI识别标志
@@ -97,54 +99,44 @@ void FsmSlow::run(Mat &img)
     {
         timeout++;
         params->ctrl.slow = true;
-
-        bool seenUnlimit = false;
-        for (int i = 0; i < params->results.size(); i++)
-        {
-            if (params->results[i].type == LABEL_LIMIT) // AI识别标志
-            {
-                if (params->results[i].height < 100 && params->results[i].width < 80 &&
-                    (params->results[i].y + params->results[i].height) > ROWSIMAGE * 0.2) // 标志位置过滤
-                {
-                    timeout = 0;
-                }
-            }
-            if (params->results[i].type == LABEL_UNLIMIT) // AI识别标志
-            {
-                if (params->results[i].height < 100 && params->results[i].width < 80 &&
-                    (params->results[i].y + params->results[i].height) > ROWSIMAGE * 0.2) // 标志位置过滤
-                {
-                    countRec++;
-                    seenUnlimit = true;
-                    break;
-                }
-            }
-        }
-
         if (timeout >= ENABLE_TIMEOUT_FRAMES)
         {
             setStep(Step::NONE);
             params->ctrl.slow = false;
             break;
         }
-        // UNLIMIT确认(countRec>=2)后，消失连续3帧则退出慢行区
+
+        if (!params->aiResultFresh)
+            break;
+
+        bool seenUnlimit = false;
+        for (int i = 0; i < params->results.size(); i++)
+        {
+            if (params->results[i].type == LABEL_UNLIMIT &&
+                params->results[i].height < 100 && params->results[i].width < 80 &&
+                (params->results[i].y + params->results[i].height) > ROWSIMAGE * 0.2)
+            {
+                countRec++;
+                seenUnlimit = true;
+                break;
+            }
+        }
+
+        // UNLIMIT确认(countRec>=2)后，消失连续3个新AI结果则退出慢行区
         if (countRec >= 2)
         {
             if (seenUnlimit)
             {
-                unlimitDelay = 0; // 还在视野内，重置丢失计数
+                unlimitDelay = 0;
             }
-            else
+            else if (++unlimitDelay > 3)
             {
-                unlimitDelay++; // UNLIMIT消失，累计丢失帧数
-                if (unlimitDelay > 3)
-                    setStep(Step::NONE);
+                setStep(Step::NONE);
             }
         }
-        else if (countRec > 0) // 未确认前的场次计数器防抖
+        else if (countRec > 0)
         {
-            countSes++;
-            if (countSes >= 5)
+            if (++countSes >= 5)
             {
                 countRec = 0;
                 countSes = 0;
@@ -152,7 +144,6 @@ void FsmSlow::run(Mat &img)
         }
         break;
     }
-
     default:
         break;
     }
