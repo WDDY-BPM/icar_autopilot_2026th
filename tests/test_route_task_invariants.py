@@ -121,9 +121,10 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIsNotNone(stopped)
         self.assertIn("if (!params->aiResultFresh)", none.group(0))
         self.assertIn("if (params->aiResultFresh)", enable.group(0))
-        self.assertIn("if (params->aiResultFresh)", stopped.group(0))
+        self.assertIn("if (!params->aiResultFresh)", stopped.group(0))
         self.assertIn("params->ctrl.stop = true", stopped.group(0))
-        self.assertIn("timeout > 150", stopped.group(0))
+        self.assertNotIn("timeout", stopped.group(0))
+        self.assertIn("countSes >= 30", stopped.group(0))
 
     def test_fork_computed_sizes_and_gradients_are_guarded(self):
         source = (ROOT / "src" / "fsm" / "fork.cpp").read_text(encoding="utf-8")
@@ -140,6 +141,17 @@ class RouteTaskInvariantTests(unittest.TestCase):
             "resize(params->track->pointsEdgeRight[0].x - TempPoint.x + 1)",
             source,
         )
+        exit_repair_start = source.index("vector<PointX> repair0{lastForkR}")
+        handle = source.index("params->track->handle(true, edgeCount)", exit_repair_start)
+        collect = source.index("repair0.push_back(params->track->pointsEdgeRight[i])", handle)
+        truncate = source.index(
+            "pointsEdgeRight.resize(static_cast<size_t>(edgeCount))", collect)
+        smooth = source.index("repair0 = smoothLine(repair0)", truncate)
+        append = source.index("pointsEdgeRight.push_back(point)", smooth)
+        self.assertLess(handle, collect)
+        self.assertLess(collect, truncate)
+        self.assertLess(truncate, smooth)
+        self.assertLess(smooth, append)
     def test_passenger_wait_states_stop_the_vehicle(self):
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
         station = (ROOT / "src" / "fsm" / "station.cpp").read_text(encoding="utf-8")

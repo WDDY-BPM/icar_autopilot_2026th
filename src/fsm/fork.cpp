@@ -530,6 +530,12 @@ bool FsmFork::handle(Mat &img, int type)
                 params->track->pointsEdgeLeft.resize(static_cast<size_t>(edgeCount));
                 params->track->pointsEdgeRight.resize(static_cast<size_t>(edgeCount));
                 params->track->handle(true, edgeCount);
+                for (int i = edgeCount;
+                     i < static_cast<int>(params->track->pointsEdgeRight.size()); i++)
+                {
+                    repair0.push_back(params->track->pointsEdgeRight[i]);
+                }
+                params->track->pointsEdgeRight.resize(static_cast<size_t>(edgeCount));
                 repair0 = smoothLine(repair0);
                 for (const auto &point : repair0)
                     params->track->pointsEdgeRight.push_back(point);

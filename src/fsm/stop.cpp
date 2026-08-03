@@ -115,22 +115,20 @@ void FsmStop::run(Mat &img)
 
     case Step::STOP:
     {
-        params->ctrl.stop = true; // parking control remains active every frame
-        timeout++;
-        if (params->aiResultFresh)
+        params->ctrl.stop = true; // fail safe: stale AI must never open the gate
+        if (!params->aiResultFresh)
+            break;
+
+        countSes++;
+        for (int i = 0; i < params->results.size(); i++)
         {
-            timeout = 0;
-            countSes++;
-            for (int i = 0; i < params->results.size(); i++)
+            if (params->results[i].type == LABEL_GATE)
             {
-                if (params->results[i].type == LABEL_GATE)
-                {
-                    countSes = 0;
-                    break;
-                }
+                countSes = 0;
+                break;
             }
         }
-        if (countSes >= 30 || timeout > 150)
+        if (countSes >= 30)
         {
             setStep(Step::NONE);
             params->ctrl.stop = false;
