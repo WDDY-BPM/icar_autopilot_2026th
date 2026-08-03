@@ -70,6 +70,12 @@ void Center::fitting(shared_ptr<Params> &params)
 
     sigmaCenter = 0;
     params->ctrl.center = COLSIMAGE / 2; // 控制中心
+    nearCenter = COLSIMAGE / 2;
+    farCenter = COLSIMAGE / 2;
+    nearCenterSamples = 0;
+    farCenterSamples = 0;
+    nearCenterValid = false;
+    farCenterValid = false;
     const bool visionLaneMode = !params->ctrl.fitting &&
         (params->mode == FsmMode::NORMAL || params->mode == FsmMode::CURVE ||
          params->mode == FsmMode::CROSS || params->mode == FsmMode::STOP ||
@@ -158,19 +164,27 @@ void Center::fitting(shared_ptr<Params> &params)
         }
     }
 
+    bool controlWindowValid = true;
     if (visionLaneMode)
     {
-        double weightedSum = 0.0;
-        double weightSum = 0.0;
-        for (const auto &p : params->ctrl.centerEdge)
+        const auto centers = control_algorithms::calculateLaneControlCenters(
+            params->ctrl.centerEdge, COLSIMAGE / 2.0f);
+        nearCenterSamples = centers.nearSamples;
+        farCenterSamples = centers.farSamples;
+        nearCenterValid = centers.nearValid;
+        farCenterValid = centers.farValid;
+        if (nearCenterValid)
+            nearCenter = static_cast<int>(std::lround(centers.nearCenter));
+        if (farCenterValid)
+            farCenter = static_cast<int>(std::lround(centers.farCenter));
+
+        controlWindowValid = nearCenterValid;
+        if (controlWindowValid)
         {
-            if (p.x < 80 || p.x > 210) continue;
-            const int weight = std::max(10, 80 - std::abs(p.x - 150));
-            weightedSum += p.y * weight;
-            weightSum += weight;
+            params->ctrl.center = std::clamp(
+                static_cast<int>(std::lround(centers.controlCenter)),
+                0, COLSIMAGE - 1);
         }
-        if (weightSum > 0.0)
-            params->ctrl.center = static_cast<int>(std::lround(weightedSum / weightSum));
     }
     else
     {
@@ -219,7 +233,8 @@ void Center::fitting(shared_ptr<Params> &params)
         (params->track->quality.leftReliable != params->track->quality.rightReliable) &&
         laneWidthProfileReady() && params->ctrl.centerEdge.size() >= 20 &&
         singleCenterContinuous;
-    const bool candidateValid = params->ctrl.centerEdge.size() >= 20 &&
+    const bool candidateValid = controlWindowValid &&
+                                params->ctrl.centerEdge.size() >= 20 &&
                                 (bothValid || singleValid);
     if (strictLaneMode && !params->ctrl.parking && !params->manualTakeover)
     {

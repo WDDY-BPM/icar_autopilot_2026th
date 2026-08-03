@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import unittest
 
 
@@ -141,6 +142,30 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn('value("startupServoRate", 300.0f)', params)
         self.assertIn('value("startupServoLimit", 120)', params)
 
+    def test_normal_lane_speed_uses_centerline_curvature(self):
+        motion = (ROOT / 'include/ctrl/motion.hpp').read_text(encoding='utf-8')
+        center = (ROOT / 'src/ctrl/center.cpp').read_text(encoding='utf-8')
+        algorithms = (ROOT / 'include/ctrl/control_algorithms.hpp').read_text(
+            encoding='utf-8')
+        core = (ROOT / 'include/icar.hpp').read_text(encoding='utf-8')
+        client = (ROOT / 'tools/manual_control_client.py').read_text(
+            encoding='utf-8')
+        self.assertIn('control_algorithms::calculateCenterlineSpeed', motion)
+        self.assertNotIn('params->ctrl.lineArea', motion)
+        self.assertIn('control_algorithms::calculateLaneControlCenters', center)
+        self.assertIn('const bool candidateValid = controlWindowValid', center)
+        self.assertIn('180, 220, 205, 26', algorithms)
+        self.assertIn('120, 175, 145, 31', algorithms)
+        self.assertIn('near_center', core)
+        self.assertIn('nearErr=%+d farErr=%+d ctrlErr=%+d', client)
+
+    def test_lane_center_validation_speeds_are_conservative(self):
+        config = json.loads((ROOT / 'res/config.json').read_text(
+            encoding='utf-8'))['通用配置参数']
+        self.assertEqual(config['velLow'], 0.18)
+        self.assertEqual(config['velHigh'], 0.20)
+        self.assertEqual(config['velCurve'], 0.18)
+
     def test_startup_single_lane_remains_locked(self):
         core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
         track = (ROOT / "src/ctrl/track.cpp").read_text(encoding="utf-8")
@@ -161,7 +186,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("widthFilled.emplace_back(row, rightColumn - leftColumn)", algorithms)
         self.assertIn("if (updateHistory)", center)
         self.assertIn("laneWidthProfileReady()", center)
-        self.assertIn("p.x < 80 || p.x > 210", center)
+        self.assertIn("controlWindowValid", center)
         self.assertIn("control_algorithms::applyStartupSpeed", motion)
         self.assertIn("mode == FsmMode::CROSS", center)
         self.assertIn("!params->laneSafetyStop", core)

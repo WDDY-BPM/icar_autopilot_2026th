@@ -20,6 +20,31 @@ struct SingleLaneSpeedLimitState
     int dualLaneRecoveryFrames = 0;
 };
 
+struct CenterlineSpeedResult
+{
+    bool valid = false;
+    float curveStrength = 0.0f;
+    float speed = 0.0f;
+};
+
+struct CenterWindowResult
+{
+    float column = 0.0f;
+    int samples = 0;
+    bool valid = false;
+};
+
+struct LaneControlCenters
+{
+    float nearCenter = 0.0f;
+    float farCenter = 0.0f;
+    float controlCenter = 0.0f;
+    int nearSamples = 0;
+    int farSamples = 0;
+    bool nearValid = false;
+    bool farValid = false;
+};
+
 struct EdgeReliability
 {
     bool reliable = false;
@@ -128,9 +153,122 @@ inline bool updateSingleLaneSpeedLimit(SingleLaneSpeedLimitState &state,
     return state.active;
 }
 
+template <typename Point>
+inline CenterWindowResult calculateCenterWindow(
+    const std::vector<Point> &centerline, float defaultCenter,
+    int rowBegin, int rowEnd, int peakRow, int peakWeight,
+    int minimumSamples)
+{
+    CenterWindowResult result;
+    result.column = defaultCenter;
+    if (rowBegin > rowEnd)
+        return result;
+
+    double weightedSum = 0.0;
+    double weightSum = 0.0;
+    for (const auto &point : centerline)
+    {
+        if (point.x < rowBegin || point.x > rowEnd)
+            continue;
+        const int weight = std::max(
+            1, peakWeight - std::abs(point.x - peakRow));
+        weightedSum += static_cast<double>(point.y) * weight;
+        weightSum += weight;
+        result.samples++;
+    }
+
+    minimumSamples = std::max(1, minimumSamples);
+    if (result.samples >= minimumSamples && weightSum > 0.0)
+    {
+        result.column = static_cast<float>(weightedSum / weightSum);
+        result.valid = true;
+    }
+    return result;
+}
+
+template <typename Point>
+inline LaneControlCenters calculateLaneControlCenters(
+    const std::vector<Point> &centerline, float defaultCenter,
+    float nearBlend = 0.80f, int minimumSamples = 8)
+{
+    const auto near = calculateCenterWindow(
+        centerline, defaultCenter, 180, 220, 205, 26, minimumSamples);
+    const auto far = calculateCenterWindow(
+        centerline, defaultCenter, 120, 175, 145, 31, minimumSamples);
+
+    LaneControlCenters result;
+    result.nearCenter = near.column;
+    result.farCenter = far.column;
+    result.controlCenter = defaultCenter;
+    result.nearSamples = near.samples;
+    result.farSamples = far.samples;
+    result.nearValid = near.valid;
+    result.farValid = far.valid;
+    if (!near.valid)
+        return result;
+
+    result.controlCenter = near.column;
+    if (far.valid)
+    {
+        nearBlend = std::clamp(nearBlend, 0.0f, 1.0f);
+        result.controlCenter = nearBlend * near.column +
+            (1.0f - nearBlend) * far.column;
+    }
+    return result;
+}
+
+template <typename Point>
+inline CenterlineSpeedResult calculateCenterlineSpeed(
+    const std::vector<Point> &centerline, float highSpeed, float curveSpeed,
+    int farRowBegin = 90, int farRowEnd = 130,
+    int nearRowBegin = 170, int nearRowEnd = 210,
+    float straightStrength = 8.0f, float fullCurveStrength = 35.0f,
+    int minimumBandPoints = 3)
+{
+    CenterlineSpeedResult result;
+    // Missing geometry must not silently restore full speed.
+    const float safeCurveSpeed = std::min(highSpeed, curveSpeed);
+    result.speed = safeCurveSpeed;
+    if (farRowBegin > farRowEnd || nearRowBegin > nearRowEnd ||
+        fullCurveStrength <= straightStrength)
+        return result;
+
+    double farSum = 0.0;
+    double nearSum = 0.0;
+    int farCount = 0;
+    int nearCount = 0;
+    for (const auto &point : centerline)
+    {
+        if (point.x >= farRowBegin && point.x <= farRowEnd)
+        {
+            farSum += point.y;
+            farCount++;
+        }
+        if (point.x >= nearRowBegin && point.x <= nearRowEnd)
+        {
+            nearSum += point.y;
+            nearCount++;
+        }
+    }
+
+    minimumBandPoints = std::max(1, minimumBandPoints);
+    if (farCount < minimumBandPoints || nearCount < minimumBandPoints)
+        return result;
+
+    const float farCenter = static_cast<float>(farSum / farCount);
+    const float nearCenter = static_cast<float>(nearSum / nearCount);
+    result.curveStrength = std::abs(farCenter - nearCenter);
+    const float curveRatio = std::clamp(
+        (result.curveStrength - straightStrength) /
+            (fullCurveStrength - straightStrength),
+        0.0f, 1.0f);
+    result.speed = highSpeed + curveRatio * (safeCurveSpeed - highSpeed);
+    result.valid = true;
+    return result;
+}
+
 inline float applyStartupSpeed(float desiredSpeed, int &count,
-                               int rampFrames, float startupSpeed,
-                               float normalLowSpeed)
+                               int rampFrames, float startupSpeed)
 {
     rampFrames = std::max(1, rampFrames);
     if (count >= rampFrames)
@@ -138,7 +276,7 @@ inline float applyStartupSpeed(float desiredSpeed, int &count,
     count++;
     const float ratio = static_cast<float>(count) / rampFrames;
     const float rampSpeed = startupSpeed +
-        ratio * (normalLowSpeed - startupSpeed);
+        ratio * (desiredSpeed - startupSpeed);
     return std::min(desiredSpeed, rampSpeed);
 }
 

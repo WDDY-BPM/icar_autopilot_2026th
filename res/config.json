@@ -1,10 +1,10 @@
 {
   "通用配置参数": {
-    "velLow": 0.25,
-    "velHigh": 0.35,
+    "velLow": 0.18,
+    "velHigh": 0.20,
     "velSlow": 0.2,
     "velPark": 0.25,
-    "velCurve": 0.25,
+    "velCurve": 0.18,
     "velBusy": 0.25,
     "velStop": 0.25,
     "velCross": 0.25,
@@ -105,11 +105,11 @@
     "obstacle": true
   },
   "参数说明": {
-    "velLow": "智能车最低速度: 0.25m/s",
-    "velHigh": "智能车最高速度: 0.35m/s",
+    "velLow": "智能车最低速度: 0.18m/s",
+    "velHigh": "智能车最高速度: 0.20m/s",
     "velSlow": "慢性区速度: 0.2m/s",
     "velPark": "停车场速度: 0.25m/s",
-    "velCurve": "连续弯道速度: 1.0m/s",
+    "velCurve": "连续弯道速度: 0.18m/s",
     "velBusy": "施工区速度: 0.25m/s",
     "velStop": "停车区速度: 0.25m/s",
     "velCross": "斑马线速度: 0.25m/s",

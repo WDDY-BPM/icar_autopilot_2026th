@@ -45,7 +45,13 @@ public:
     double sigmaCenter = 0;
     bool controlValid = false;
     int laneInvalidFrames = 0;
-    int laneRecoveryFrames = 0;      // 中心点集的方差
+    int laneRecoveryFrames = 0;
+    int nearCenter = COLSIMAGE / 2;
+    int farCenter = COLSIMAGE / 2;
+    int nearCenterSamples = 0;
+    int farCenterSamples = 0;
+    bool nearCenterValid = false;
+    bool farCenterValid = false;
 
     void fitting(shared_ptr<Params> &params);
     void observeLaneWidth(const vector<PointX> &left, const vector<PointX> &right,

@@ -869,6 +869,14 @@ public:
                 {"valid_right", rightOverlayValid ? center->validRowsRight : 0},
                 {"sigma_center", centerValid ? center->sigmaCenter : 0.0},
                 {"line_area", centerValid ? params->ctrl.lineArea : 0},
+                {"near_center", center->nearCenterValid ? center->nearCenter : -1},
+                {"far_center", center->farCenterValid ? center->farCenter : -1},
+                {"near_error", center->nearCenterValid
+                    ? center->nearCenter - COLSIMAGE / 2 : 0},
+                {"far_error", center->farCenterValid
+                    ? center->farCenter - COLSIMAGE / 2 : 0},
+                {"near_samples", center->nearCenterSamples},
+                {"far_samples", center->farCenterSamples},
                 {"lane_confidence", params->track->quality.confidence},
                 {"common_rows", params->track->quality.commonRows},
                 {"invalid_frames", center->laneInvalidFrames},

@@ -153,21 +153,17 @@ public:
             desiredSpeed = params->config.velSlow;
         else
         {
-            int line = params->ctrl.lineArea;
-            const float upper = ROWSIMAGE * 0.35f;
-            line = std::max(line - 20, 0);
-            line = std::min(line, static_cast<int>(upper));
-            desiredSpeed = params->config.velLow +
-                std::pow((upper - line) / upper, 3) *
-                (params->config.velHigh - params->config.velLow);
-            desiredSpeed = std::min(desiredSpeed, params->config.velHigh);
+            const auto curveSpeed =
+                control_algorithms::calculateCenterlineSpeed(
+                    params->ctrl.centerEdge, params->config.velHigh,
+                    params->config.velCurve);
+            desiredSpeed = curveSpeed.speed;
         }
 
         // Apply the launch envelope last, so every autonomous mode shares it.
         params->ctrl.speed = control_algorithms::applyStartupSpeed(
             desiredSpeed, params->ctrl.countAcc,
-            params->config.startupRampFrames, params->config.startupSpeed,
-            params->config.velLow);
+            params->config.startupRampFrames, params->config.startupSpeed);
 
         if (params->alertDecelCount > 0)
             params->ctrl.speed = std::max(0.0f, params->ctrl.speed - 0.1f);
