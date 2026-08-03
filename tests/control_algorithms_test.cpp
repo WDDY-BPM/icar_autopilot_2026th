@@ -20,6 +20,9 @@ int main()
     assert(control_algorithms::applyStartupServoLimit(
         1880, 1500, 160, 0, 60) == 1660);
 
+    assert(control_algorithms::isSingleLaneCenterContinuous(175, 160));
+    assert(!control_algorithms::isSingleLaneCenterContinuous(176, 160));
+
     control_algorithms::LaneRecoveryState lane;
     for (int i = 0; i < 4; ++i)
         assert(!control_algorithms::updateLaneRecovery(lane, false));

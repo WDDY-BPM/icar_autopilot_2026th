@@ -76,6 +76,7 @@ private:
 
     int lastLap = 0; // 上一圈号（检测圈变更时复位FSM）
     bool emergencyStopWasActive = false;
+    int previousFinalServo = PWMSERVOMID;
     std::chrono::steady_clock::time_point lastOverlayBuilt{};
 
     // 全局共享数据链
@@ -743,7 +744,6 @@ public:
             startupGateReleased && !emergencyStopRequested &&
             !params->manualTakeover && params->autoRecoveryFrames <= 0;
         const bool laneHold = params->laneSafetyStop;
-        static int lastValidLaneServo = PWMSERVOMID;
         static bool laneHoldWasActive = false;
         if (automaticControlActive && !laneHold)
         {
@@ -756,15 +756,12 @@ public:
                                         params->mode == FsmMode::STOP ||
                                         params->mode == FsmMode::SLOW ||
                                         params->mode == FsmMode::STATION;
-            if (strictLaneMode && center->controlValid)
-            {
-                lastValidLaneServo = params->ctrl.servo;
-            }
-            else if (strictLaneMode && center->laneInvalidFrames > 0 &&
-                     center->laneInvalidFrames <= 6)
+            if (strictLaneMode && !center->controlValid &&
+                center->laneInvalidFrames > 0 &&
+                center->laneInvalidFrames <= 6)
             {
                 params->ctrl.speed = std::min(params->ctrl.speed, 0.10f);
-                params->ctrl.servo = motion->syncServoCommand(lastValidLaneServo);
+                params->ctrl.servo = motion->syncServoCommand(previousFinalServo);
             }
         }
         else if (automaticControlActive && laneHold)
@@ -815,6 +812,8 @@ public:
             params->ctrl.servo = PWMSERVOMID;
         }
 
+        previousFinalServo = params->ctrl.servo;
+
         // Publish the final command after automatic/manual limiting and all
         // emergency/startup overrides, so telemetry is not one frame stale.
         fsmFactory.manual->updateVehicleState(
@@ -826,10 +825,13 @@ public:
             overlayNow - lastOverlayBuilt >= std::chrono::milliseconds(80))
         {
             lastOverlayBuilt = overlayNow;
-            const bool lanesValid = lanesUpdatedThisFrame &&
-                                    params->track->quality.valid &&
-                                    params->track->quality.confidence >= 0.70f &&
-                                    !params->manualTakeover;
+            const bool leftOverlayValid = lanesUpdatedThisFrame &&
+                                          params->track->quality.leftReliable &&
+                                          !params->manualTakeover;
+            const bool rightOverlayValid = lanesUpdatedThisFrame &&
+                                           params->track->quality.rightReliable &&
+                                           !params->manualTakeover;
+            const bool lanesValid = leftOverlayValid || rightOverlayValid;
             const bool centerValid = centerUpdatedThisFrame &&
                                      center->controlValid &&
                                      params->ctrl.centerEdge.size() >= 20 &&
@@ -849,10 +851,10 @@ public:
             overlay["center_valid"] = centerValid;
             overlay["center_frame_id"] = centerValid ? currentFrameId : 0;
             overlay["edge"] = {
-                {"left_count", lanesValid ? params->track->pointsEdgeLeft.size() : 0},
-                {"right_count", lanesValid ? params->track->pointsEdgeRight.size() : 0},
-                {"valid_left", lanesValid ? center->validRowsLeft : 0},
-                {"valid_right", lanesValid ? center->validRowsRight : 0},
+                {"left_count", leftOverlayValid ? params->track->pointsEdgeLeft.size() : 0},
+                {"right_count", rightOverlayValid ? params->track->pointsEdgeRight.size() : 0},
+                {"valid_left", leftOverlayValid ? center->validRowsLeft : 0},
+                {"valid_right", rightOverlayValid ? center->validRowsRight : 0},
                 {"sigma_center", centerValid ? center->sigmaCenter : 0.0},
                 {"line_area", centerValid ? params->ctrl.lineArea : 0},
                 {"lane_confidence", params->track->quality.confidence},
@@ -873,10 +875,10 @@ public:
                     sampled.push_back({points.back().y, points.back().x});
                 return sampled;
             };
-            overlay["left"] = lanesValid
+            overlay["left"] = leftOverlayValid
                 ? samplePoints(params->track->pointsEdgeLeft)
                 : nlohmann::json::array();
-            overlay["right"] = lanesValid
+            overlay["right"] = rightOverlayValid
                 ? samplePoints(params->track->pointsEdgeRight)
                 : nlohmann::json::array();
             overlay["center_line"] = centerValid

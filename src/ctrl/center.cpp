@@ -212,9 +212,13 @@ void Center::fitting(shared_ptr<Params> &params)
     const bool bothValid = params->track->quality.leftReliable &&
                            params->track->quality.rightReliable &&
                            params->track->quality.valid;
+    const bool singleCenterContinuous =
+        control_algorithms::isSingleLaneCenterContinuous(
+            params->ctrl.center, lastValidLaneCenter, 15);
     const bool singleValid =
         (params->track->quality.leftReliable != params->track->quality.rightReliable) &&
-        laneWidthProfileReady();
+        laneWidthProfileReady() && params->ctrl.centerEdge.size() >= 20 &&
+        singleCenterContinuous;
     const bool candidateValid = params->ctrl.centerEdge.size() >= 20 &&
                                 (bothValid || singleValid);
     if (strictLaneMode && !params->ctrl.parking && !params->manualTakeover)
@@ -224,10 +228,13 @@ void Center::fitting(shared_ptr<Params> &params)
         laneInvalidFrames = laneRecoveryState.invalidFrames;
         laneRecoveryFrames = laneRecoveryState.recoveryFrames;
         if (controlValid)
+        {
             lastValidCenter = params->ctrl.center;
+            lastValidLaneCenter = params->ctrl.center;
+        }
         else
         {
-            params->ctrl.center = lastValidCenter;
+            params->ctrl.center = lastValidLaneCenter;
             if (laneInvalidFrames > 6)
                 params->ctrl.center = COLSIMAGE / 2;
         }

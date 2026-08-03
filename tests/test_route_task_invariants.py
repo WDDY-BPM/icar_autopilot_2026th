@@ -42,7 +42,8 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIn("laneWidthProfileReady()", center)
         self.assertIn("laneInvalidFrames <= 6", core)
         self.assertIn("control_algorithms::updateLaneRecovery", center)
-        self.assertIn("params->track->quality.confidence >= 0.70f", core)
+        self.assertIn("params->track->quality.leftReliable", core)
+        self.assertIn("params->track->quality.rightReliable", core)
         self.assertIn("0.85f * filteredThreshold", predeal)
         self.assertIn("MORPH_CLOSE", predeal)
     def test_cross_requires_current_lap_task(self):

@@ -59,6 +59,13 @@ inline EdgeReliability assessEdgeReliability(const std::vector<Point> &edge,
     return result;
 }
 
+inline bool isSingleLaneCenterContinuous(int currentCenter,
+                                         int lastValidLaneCenter,
+                                         int maximumJump = 15)
+{
+    return std::abs(currentCenter - lastValidLaneCenter) <= maximumJump;
+}
+
 inline bool updateLaneRecovery(LaneRecoveryState &state, bool candidateValid,
                                int requiredRecoveryFrames = 5)
 {

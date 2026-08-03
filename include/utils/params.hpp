@@ -210,9 +210,9 @@ public:
             config.turnD = configs["通用配置参数"]["turnD"];
             config.steeringFilterTau = configs["通用配置参数"].value("steeringFilterTau", 0.065f);
             config.maxErrorRate = configs["通用配置参数"].value("maxErrorRate", 360.0f);
-            config.servoRate = configs["通用配置参数"].value("servoRate", 750.0f);
-            config.startupServoRate = configs["通用配置参数"].value("startupServoRate", 400.0f);
-            config.startupServoLimit = configs["通用配置参数"].value("startupServoLimit", 160);
+            config.servoRate = configs["通用配置参数"].value("servoRate", 600.0f);
+            config.startupServoRate = configs["通用配置参数"].value("startupServoRate", 300.0f);
+            config.startupServoLimit = configs["通用配置参数"].value("startupServoLimit", 120);
             config.startupStableFrames = configs["通用配置参数"].value("startupStableFrames", 12);
             config.startupRampFrames = configs["通用配置参数"].value("startupRampFrames", 60);
             config.startupSpeed = configs["通用配置参数"].value("startupSpeed", 0.10f);

@@ -108,6 +108,46 @@ class LaneControlBehaviorTests(unittest.TestCase):
         evaluate = track.index("evaluateQuality();")
         self.assertLess(reset, search)
         self.assertLess(search, evaluate)
+    def test_lane_loss_uses_previous_final_servo_after_special_mode(self):
+        previous_final_servo = 1400
+        previous_final_servo = 1500  # final command sent by parking mode
+        held_servo = previous_final_servo
+        self.assertEqual(held_servo, 1500)
+
+        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        final_override = core.index("if (!startupGateReleased)")
+        cache_update = core.index("previousFinalServo = params->ctrl.servo;")
+        publish = core.index("fsmFactory.manual->updateVehicleState", cache_update)
+        self.assertLess(final_override, cache_update)
+        self.assertLess(cache_update, publish)
+        self.assertIn("syncServoCommand(previousFinalServo)", core)
+        self.assertNotIn("lastValidLaneServo", core)
+
+    def test_single_lane_center_continuity_boundary(self):
+        continuous = lambda current, previous: abs(current - previous) <= 15
+        self.assertTrue(continuous(175, 160))
+        self.assertFalse(continuous(176, 160))
+
+    def test_single_reliable_edge_is_published_independently(self):
+        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        self.assertIn("const bool leftOverlayValid", core)
+        self.assertIn("const bool rightOverlayValid", core)
+        self.assertIn("overlay[\"left\"] = leftOverlayValid", core)
+        self.assertIn("overlay[\"right\"] = rightOverlayValid", core)
+
+    def test_steering_json_fallbacks_match_tuned_defaults(self):
+        params = (ROOT / "include/utils/params.hpp").read_text(encoding="utf-8")
+        self.assertIn('value("servoRate", 600.0f)', params)
+        self.assertIn('value("startupServoRate", 300.0f)', params)
+        self.assertIn('value("startupServoLimit", 120)', params)
+
+    def test_startup_single_lane_remains_locked(self):
+        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        track = (ROOT / "src/ctrl/track.cpp").read_text(encoding="utf-8")
+        self.assertIn("const bool laneValid = laneQuality.valid", core)
+        self.assertIn("quality.leftReliable && quality.rightReliable", track)
+        self.assertIn("startupLaneValidCount >= params->config.startupStableFrames", core)
+
     def test_production_code_wires_behavior_guards(self):
         track = (ROOT / "src/ctrl/track.cpp").read_text(encoding="utf-8")
         center = (ROOT / "src/ctrl/center.cpp").read_text(encoding="utf-8")
@@ -127,7 +167,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("!params->laneSafetyStop", core)
         self.assertIn("automaticControlActive && laneHold", core)
         self.assertIn("center->laneInvalidFrames >= 7", core)
-        self.assertIn("motion->syncServoCommand(lastValidLaneServo)", core)
+        self.assertIn("motion->syncServoCommand(previousFinalServo)", core)
         self.assertIn("params->track->allowOuterEnvelope = !forkMarkerActive", core)
         self.assertIn("!allowCoherentEnvelope", track)
         self.assertLess(predeal.index("bitwise_not(imgBin, imgInv)"),

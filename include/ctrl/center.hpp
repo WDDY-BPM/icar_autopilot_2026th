@@ -71,5 +71,6 @@ private:
     std::array<uint16_t, ROWSIMAGE> laneWidthSamples{};
     int laneWidthObservationFrames = 0;
     int lastValidCenter = COLSIMAGE / 2;
+    int lastValidLaneCenter = COLSIMAGE / 2;
     control_algorithms::LaneRecoveryState laneRecoveryState;
 };
