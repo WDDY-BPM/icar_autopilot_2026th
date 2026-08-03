@@ -42,6 +42,12 @@ public:
         float edgeJump = 0.0f;
         float confidence = 0.0f;
         bool coversBottom = false;
+        bool leftReliable = false;
+        bool rightReliable = false;
+        float leftBorderRatio = 1.0f;
+        float rightBorderRatio = 1.0f;
+        int leftLongestBorderRun = 0;
+        int rightLongestBorderRun = 0;
     };
     vector<PointX> pointsEdgeLeft;  // 赛道左边缘点集
     vector<PointX> pointsEdgeRight; // 赛道右边缘点集

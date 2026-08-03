@@ -28,6 +28,22 @@ int main()
         assert(!control_algorithms::updateLaneRecovery(lane, true));
     assert(control_algorithms::updateLaneRecovery(lane, true));
 
+    std::vector<TestPoint> goodLeft;
+    std::vector<TestPoint> stuckLeft;
+    for (int row = 220; row >= 190; --row)
+    {
+        goodLeft.emplace_back(row, 40 + (220 - row) / 3);
+        stuckLeft.emplace_back(row, 0);
+    }
+    const auto goodReliability = control_algorithms::assessEdgeReliability(
+        goodLeft, true, 320, 240, 20);
+    const auto stuckReliability = control_algorithms::assessEdgeReliability(
+        stuckLeft, true, 320, 240, 20);
+    assert(goodReliability.reliable);
+    assert(!stuckReliability.reliable);
+    assert(stuckReliability.borderRatio > 0.99f);
+    assert(stuckReliability.longestBorderRun == 31);
+
     std::vector<TestPoint> left{{220, 40}, {216, 44}};
     std::vector<TestPoint> right{{220, 280}, {216, 276}};
     std::vector<TestPoint> width{{220, 240}, {216, 232}};

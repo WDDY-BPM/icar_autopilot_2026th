@@ -30,13 +30,56 @@ using namespace std;
  *
  * @param params
  */
+void Center::observeLaneWidth(const vector<PointX> &left,
+                              const vector<PointX> &right,
+                              bool measurementValid)
+{
+    if (!measurementValid) return;
+    std::array<int, ROWSIMAGE> leftByRow;
+    std::array<int, ROWSIMAGE> rightByRow;
+    leftByRow.fill(-1);
+    rightByRow.fill(-1);
+    for (const auto &point : left)
+        if (point.x >= 0 && point.x < ROWSIMAGE) leftByRow[point.x] = point.y;
+    for (const auto &point : right)
+        if (point.x >= 0 && point.x < ROWSIMAGE) rightByRow[point.x] = point.y;
+    int observedRows = 0;
+    for (int row = 0; row < ROWSIMAGE; ++row)
+    {
+        if (leftByRow[row] < 0 || rightByRow[row] <= leftByRow[row]) continue;
+        const float measuredWidth = rightByRow[row] - leftByRow[row];
+        laneWidthProfile[row] = laneWidthProfile[row] > 1.0f
+            ? 0.8f * laneWidthProfile[row] + 0.2f * measuredWidth
+            : measuredWidth;
+        laneWidthSamples[row] = std::min<uint16_t>(laneWidthSamples[row] + 1, 1000);
+        observedRows++;
+    }
+    if (observedRows >= 30) laneWidthObservationFrames++;
+}
+
+bool Center::laneWidthProfileReady() const
+{
+    const int readyRows = static_cast<int>(std::count_if(
+        laneWidthSamples.begin(), laneWidthSamples.end(),
+        [](uint16_t samples) { return samples >= 3; }));
+    return laneWidthObservationFrames >= 10 && readyRows >= 40;
+}
+
 void Center::fitting(shared_ptr<Params> &params)
 {
 
     sigmaCenter = 0;
     params->ctrl.center = COLSIMAGE / 2; // 控制中心
+    const bool visionLaneMode = !params->ctrl.fitting &&
+        (params->mode == FsmMode::NORMAL || params->mode == FsmMode::CURVE ||
+         params->mode == FsmMode::CROSS || params->mode == FsmMode::STOP ||
+         params->mode == FsmMode::SLOW || params->mode == FsmMode::STATION);
     if (!params->ctrl.fitting)           // 除停车场特殊绘制
     {
+        if (visionLaneMode && !params->track->quality.leftReliable)
+            params->track->pointsEdgeLeft.clear();
+        if (visionLaneMode && !params->track->quality.rightReliable)
+            params->track->pointsEdgeRight.clear();
         params->ctrl.centerEdge.clear();
         vector<PointX> v_center(4); // 三阶贝塞尔曲线
         style = "STRIGHT";
@@ -59,7 +102,7 @@ void Center::fitting(shared_ptr<Params> &params)
             params->ctrl.centerEdge = buildRowAlignedCenter(
                 params->track->pointsEdgeLeft,
                 params->track->pointsEdgeRight,
-                params->track->quality.valid);
+                false);
             style = "STRIGHT";
         }
         // Left single edge
@@ -115,26 +158,31 @@ void Center::fitting(shared_ptr<Params> &params)
         }
     }
 
-    // 加权控制中心计算
-    int controlNum = 1;
-    for (auto p : params->ctrl.centerEdge)
+    if (visionLaneMode)
     {
-        if (p.x < ROWSIMAGE / 2)
+        double weightedSum = 0.0;
+        double weightSum = 0.0;
+        for (const auto &p : params->ctrl.centerEdge)
         {
-            controlNum += ROWSIMAGE / 2;
-            params->ctrl.center += p.y * ROWSIMAGE / 2;
+            if (p.x < 80 || p.x > 210) continue;
+            const int weight = std::max(10, 80 - std::abs(p.x - 150));
+            weightedSum += p.y * weight;
+            weightSum += weight;
         }
-        else
-        {
-            controlNum += (ROWSIMAGE - p.x);
-            params->ctrl.center += p.y * (ROWSIMAGE - p.x);
-        }
+        if (weightSum > 0.0)
+            params->ctrl.center = static_cast<int>(std::lround(weightedSum / weightSum));
     }
-    if (controlNum > 1)
+    else
     {
-        params->ctrl.center = params->ctrl.center / controlNum;
+        int controlNum = 1;
+        for (const auto &p : params->ctrl.centerEdge)
+        {
+            const int weight = p.x < ROWSIMAGE / 2 ? ROWSIMAGE / 2 : ROWSIMAGE - p.x;
+            controlNum += weight;
+            params->ctrl.center += p.y * weight;
+        }
+        if (controlNum > 1) params->ctrl.center /= controlNum;
     }
-
     if (params->ctrl.center > COLSIMAGE)
         params->ctrl.center = COLSIMAGE;
     else if (params->ctrl.center < 0)
@@ -161,8 +209,14 @@ void Center::fitting(shared_ptr<Params> &params)
                                 params->mode == FsmMode::STOP ||
                                 params->mode == FsmMode::SLOW ||
                                 params->mode == FsmMode::STATION;
+    const bool bothValid = params->track->quality.leftReliable &&
+                           params->track->quality.rightReliable &&
+                           params->track->quality.valid;
+    const bool singleValid =
+        (params->track->quality.leftReliable != params->track->quality.rightReliable) &&
+        laneWidthProfileReady();
     const bool candidateValid = params->ctrl.centerEdge.size() >= 20 &&
-                                params->track->quality.valid;
+                                (bothValid || singleValid);
     if (strictLaneMode && !params->ctrl.parking && !params->manualTakeover)
     {
         controlValid = control_algorithms::updateLaneRecovery(

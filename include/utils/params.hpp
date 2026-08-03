@@ -96,9 +96,9 @@ struct Config
     float turnD = 0.027;
     float steeringFilterTau = 0.065f;
     float maxErrorRate = 360.0f;
-    float servoRate = 750.0f;
-    float startupServoRate = 400.0f;
-    int startupServoLimit = 160;
+    float servoRate = 600.0f;
+    float startupServoRate = 300.0f;
+    int startupServoLimit = 120;
     int startupStableFrames = 12;
     int startupRampFrames = 60;
     float startupSpeed = 0.10f;
@@ -106,7 +106,7 @@ struct Config
     bool debug = false;                                 // 调试模式使能
     bool saveImg = false;                               // 存图使能
     bool saveIpm = false;                               // 存储IPM图像
-    uint16_t rowCutUp = 10;                             // 图像顶部切行
+    uint16_t rowCutUp = 40;                             // 图像顶部切行
     uint16_t rowCutBottom = 20;                         // 图像底部切行
     float overlap = 0.3;                                // 智能车与车道线重合度(%)
     float score = 0.2;                                  // AI检测置信度

@@ -391,6 +391,16 @@ void Track::fillLaneGap()
 void Track::evaluateQuality()
 {
     quality = LaneQuality{};
+    const auto leftReliability = control_algorithms::assessEdgeReliability(
+        pointsEdgeLeft, true, COLSIMAGE, ROWSIMAGE, rowCutBottom);
+    const auto rightReliability = control_algorithms::assessEdgeReliability(
+        pointsEdgeRight, false, COLSIMAGE, ROWSIMAGE, rowCutBottom);
+    quality.leftReliable = leftReliability.reliable;
+    quality.rightReliable = rightReliability.reliable;
+    quality.leftBorderRatio = leftReliability.borderRatio;
+    quality.rightBorderRatio = rightReliability.borderRatio;
+    quality.leftLongestBorderRun = leftReliability.longestBorderRun;
+    quality.rightLongestBorderRun = rightReliability.longestBorderRun;
     vector<int> leftByRow(ROWSIMAGE, -1);
     vector<int> rightByRow(ROWSIMAGE, -1);
     for (const auto &point : pointsEdgeLeft)
@@ -455,7 +465,8 @@ void Track::evaluateQuality()
     quality.confidence = 0.30f * coverageScore + 0.25f * widthScore +
                          0.20f * centerScore + 0.15f * edgeScore +
                          (quality.coversBottom ? 0.10f : 0.0f);
-    quality.valid = quality.commonRows >= 20 && quality.coversBottom &&
+    quality.valid = quality.leftReliable && quality.rightReliable &&
+                    quality.commonRows >= 20 && quality.coversBottom &&
                     quality.widthVariation <= 0.20f &&
                     quality.centerJump <= 15.0f &&
                     quality.edgeJump <= 30.0f &&

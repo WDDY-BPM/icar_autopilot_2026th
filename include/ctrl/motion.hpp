@@ -98,6 +98,12 @@ public:
         return static_cast<uint16_t>(targetServo);
     }
 
+    uint16_t syncServoCommand(int servo)
+    {
+        lastServo = std::clamp(servo, PWMSERVOMIN, PWMSERVOMAX);
+        return static_cast<uint16_t>(lastServo);
+    }
+
     void resetControl()
     {
         controlInitialized = false;

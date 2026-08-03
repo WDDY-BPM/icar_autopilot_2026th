@@ -33,7 +33,7 @@ def lane_guard(valid_sequence):
             recovery = 0
             recovering = True
             control_valid = False
-        speed_state = "normal" if control_valid else ("slow" if 0 < invalid <= 3 else "stop")
+        speed_state = "normal" if control_valid else ("slow" if 0 < invalid <= 6 else "stop")
         output.append((control_valid, invalid, recovery, speed_state))
     return output
 
@@ -77,9 +77,9 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertEqual(len(left), len(widths))
         self.assertTrue(all(w == r[1] - l[1] for l, r, (_, w) in zip(left, right, widths)))
 
-    def test_lane_loss_slows_three_frames_and_stops_fourth(self):
-        states = lane_guard([False, False, False, False])
-        self.assertEqual([state[3] for state in states], ["slow", "slow", "slow", "stop"])
+    def test_lane_loss_holds_six_frames_and_stops_seventh(self):
+        states = lane_guard([False] * 7)
+        self.assertEqual([state[3] for state in states], ["slow"] * 6 + ["stop"])
 
     def test_lane_recovery_requires_five_frames(self):
         states = lane_guard([False] * 4 + [True] * 5)
@@ -115,14 +115,19 @@ class LaneControlBehaviorTests(unittest.TestCase):
         core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
         predeal = (ROOT / "src/ctrl/predeal.cpp").read_text(encoding="utf-8")
         self.assertIn("quality = LaneQuality{};", track)
+        self.assertIn("assessEdgeReliability", track)
         self.assertIn("initialStableRows >= 3", track)
         algorithms = (ROOT / "include/ctrl/control_algorithms.hpp").read_text(encoding="utf-8")
         self.assertIn("widthFilled.emplace_back(row, rightColumn - leftColumn)", algorithms)
         self.assertIn("if (updateHistory)", center)
+        self.assertIn("laneWidthProfileReady()", center)
+        self.assertIn("p.x < 80 || p.x > 210", center)
         self.assertIn("control_algorithms::applyStartupSpeed", motion)
         self.assertIn("mode == FsmMode::CROSS", center)
         self.assertIn("!params->laneSafetyStop", core)
         self.assertIn("automaticControlActive && laneHold", core)
+        self.assertIn("center->laneInvalidFrames >= 7", core)
+        self.assertIn("motion->syncServoCommand(lastValidLaneServo)", core)
         self.assertIn("params->track->allowOuterEnvelope = !forkMarkerActive", core)
         self.assertIn("!allowCoherentEnvelope", track)
         self.assertLess(predeal.index("bitwise_not(imgBin, imgInv)"),

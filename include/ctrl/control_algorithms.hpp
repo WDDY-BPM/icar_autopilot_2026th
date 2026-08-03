@@ -14,6 +14,51 @@ struct LaneRecoveryState
     bool controlValid = true;
 };
 
+struct EdgeReliability
+{
+    bool reliable = false;
+    int pointCount = 0;
+    int longestBorderRun = 0;
+    float borderRatio = 1.0f;
+    float maximumJump = 0.0f;
+    bool coversBottom = false;
+};
+
+template <typename Point>
+inline EdgeReliability assessEdgeReliability(const std::vector<Point> &edge,
+                                             bool leftEdge, int imageWidth,
+                                             int imageHeight, int rowCutBottom)
+{
+    EdgeReliability result;
+    result.pointCount = static_cast<int>(edge.size());
+    if (edge.empty()) return result;
+    int borderPoints = 0, currentBorderRun = 0, nearestRow = 0;
+    int previousColumn = edge.front().y;
+    for (std::size_t i = 0; i < edge.size(); ++i)
+    {
+        const auto &point = edge[i];
+        nearestRow = std::max(nearestRow, point.x);
+        if (i > 0)
+            result.maximumJump = std::max(result.maximumJump,
+                static_cast<float>(std::abs(point.y - previousColumn)));
+        previousColumn = point.y;
+        const bool onBorder = leftEdge ? point.y <= 2 : point.y >= imageWidth - 3;
+        if (onBorder)
+        {
+            borderPoints++;
+            currentBorderRun++;
+            result.longestBorderRun = std::max(result.longestBorderRun, currentBorderRun);
+        }
+        else currentBorderRun = 0;
+    }
+    result.borderRatio = static_cast<float>(borderPoints) / edge.size();
+    result.coversBottom = nearestRow >= imageHeight - rowCutBottom - 4;
+    const bool borderFailure = result.borderRatio > 0.25f && result.longestBorderRun >= 8;
+    result.reliable = result.pointCount >= 20 && result.coversBottom &&
+                      result.maximumJump <= 30.0f && !borderFailure;
+    return result;
+}
+
 inline bool updateLaneRecovery(LaneRecoveryState &state, bool candidateValid,
                                int requiredRecoveryFrames = 5)
 {

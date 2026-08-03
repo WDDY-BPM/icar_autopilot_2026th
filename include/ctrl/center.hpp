@@ -48,6 +48,9 @@ public:
     int laneRecoveryFrames = 0;      // 中心点集的方差
 
     void fitting(shared_ptr<Params> &params);
+    void observeLaneWidth(const vector<PointX> &left, const vector<PointX> &right,
+                          bool measurementValid);
+    bool laneWidthProfileReady() const;
     void drawImage(shared_ptr<Params> &params, Mat &img);
 
 private:
@@ -65,6 +68,8 @@ private:
                                          const vector<PointX> &right,
                                          bool updateHistory);
     std::array<float, ROWSIMAGE> laneWidthProfile{};
+    std::array<uint16_t, ROWSIMAGE> laneWidthSamples{};
+    int laneWidthObservationFrames = 0;
     int lastValidCenter = COLSIMAGE / 2;
     control_algorithms::LaneRecoveryState laneRecoveryState;
 };

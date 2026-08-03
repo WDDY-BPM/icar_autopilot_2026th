@@ -646,6 +646,9 @@ public:
             }
             params->track->allowOuterEnvelope = !forkMarkerActive;
             params->track->handle(imgBin);
+            center->observeLaneWidth(params->track->pointsEdgeLeft,
+                                     params->track->pointsEdgeRight,
+                                     params->track->quality.valid);
         }
         if (params->config.debug)
         {
@@ -723,7 +726,7 @@ public:
                                         params->mode == FsmMode::SLOW ||
                                         params->mode == FsmMode::STATION;
             params->laneSafetyStop = safetyLaneMode && !center->controlValid &&
-                (center->laneInvalidFrames >= 4 || center->laneRecoveryFrames > 0);
+                (center->laneInvalidFrames >= 7 || center->laneRecoveryFrames > 0);
         }
 
         //[07] 车辆运动控制（仅手动接管时跳过）
@@ -740,6 +743,8 @@ public:
             startupGateReleased && !emergencyStopRequested &&
             !params->manualTakeover && params->autoRecoveryFrames <= 0;
         const bool laneHold = params->laneSafetyStop;
+        static int lastValidLaneServo = PWMSERVOMID;
+        static bool laneHoldWasActive = false;
         if (automaticControlActive && !laneHold)
         {
             motion->poseControl(params, steeringDt);
@@ -751,21 +756,26 @@ public:
                                         params->mode == FsmMode::STOP ||
                                         params->mode == FsmMode::SLOW ||
                                         params->mode == FsmMode::STATION;
-            if (strictLaneMode && !center->controlValid)
+            if (strictLaneMode && center->controlValid)
             {
-                if (center->laneInvalidFrames > 0 &&
-                    center->laneInvalidFrames <= 3)
-                    params->ctrl.speed = std::min(params->ctrl.speed, 0.12f);
-                else
-                    params->ctrl.speed = 0.0f;
+                lastValidLaneServo = params->ctrl.servo;
+            }
+            else if (strictLaneMode && center->laneInvalidFrames > 0 &&
+                     center->laneInvalidFrames <= 6)
+            {
+                params->ctrl.speed = std::min(params->ctrl.speed, 0.10f);
+                params->ctrl.servo = motion->syncServoCommand(lastValidLaneServo);
             }
         }
         else if (automaticControlActive && laneHold)
         {
-            // Freeze both launch counters while lane safety is holding the car.
+            if (!laneHoldWasActive)
+                params->ctrl.countAcc = 0;
             params->ctrl.speed = 0.0f;
-            params->ctrl.servo = PWMSERVOMID;
-            motion->reset();
+            params->ctrl.servo = motion->limitServoCommand(
+                PWMSERVOMID, steeringDt, 250.0f);
+            if (std::abs(static_cast<int>(params->ctrl.servo) - PWMSERVOMID) <= 3)
+                motion->resetControl();
         }
         else if (params->manualTakeover && !emergencyStopRequested)
         {
@@ -780,6 +790,7 @@ public:
             // immediately instead of passing through the normal slew limiter.
             motion->reset();
         }
+        laneHoldWasActive = automaticControlActive && laneHold;
         if (!emergencyStopRequested && params->autoRecoveryFrames > 0)
         {
             params->ctrl.stop = true;
@@ -846,7 +857,11 @@ public:
                 {"line_area", centerValid ? params->ctrl.lineArea : 0},
                 {"lane_confidence", params->track->quality.confidence},
                 {"common_rows", params->track->quality.commonRows},
-                {"invalid_frames", center->laneInvalidFrames}
+                {"invalid_frames", center->laneInvalidFrames},
+                {"left_reliable", params->track->quality.leftReliable},
+                {"right_reliable", params->track->quality.rightReliable},
+                {"left_border_ratio", params->track->quality.leftBorderRatio},
+                {"right_border_ratio", params->track->quality.rightBorderRatio}
             };
 
             auto samplePoints = [](const std::vector<PointX> &points) {
