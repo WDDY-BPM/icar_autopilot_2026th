@@ -135,9 +135,12 @@ bool FsmFork::handle(Mat &img, int type)
                     return false;
                 }
             }
-            if (leftFilletDown.slope && leftFilletUp.slope && posInRange(gradientCal(leftFilletDown, leftFilletUp), -1, 0))
+            if (leftFilletDown.slope && leftFilletUp.slope &&
+                leftFilletDown.x != leftFilletUp.x &&
+                posInRange(gradientCal(leftFilletDown, leftFilletUp), -1, 0))
             { // 直行不转弯
-                if (posInRange(gradientCal(leftFilletDown, leftFilletUp), -1, 0))
+                if (leftFilletDown.x != leftFilletUp.x &&
+                    posInRange(gradientCal(leftFilletDown, leftFilletUp), -1, 0))
                 {
                     // 找到上下拐点且斜率符合要求
                     double k = gradientCal(leftFilletDown, leftFilletUp);
@@ -204,7 +207,9 @@ bool FsmFork::handle(Mat &img, int type)
                     LastFlag = 1; // 如果没有找到有效拐点就以上一次的拐点为基准补线
                 }
                 leftFilletUp = searchFilletLeftUp(params->track->pointsEdgeLeft, leftFilletDown);
-                if (leftFilletUp.slope < leftFilletDown.slope || !posInRange(gradientCal(leftFilletDown, leftFilletUp), -1, 0)) // 下拐点不可能比上点高
+                if (leftFilletUp.slope < leftFilletDown.slope ||
+                    leftFilletDown.x == leftFilletUp.x ||
+                    !posInRange(gradientCal(leftFilletDown, leftFilletUp), -1, 0)) // 下拐点不可能比上点高
                 {
                     leftFilletDown = lastForkL;
                     LastFlag = 1;
@@ -252,7 +257,7 @@ bool FsmFork::handle(Mat &img, int type)
                 }
                 if (!type || ((FirstRS > 10 || FirstRS == -1) && (FirstLS > 40 || FirstLS == -1)))
                 {                           // 直行不转弯
-                    if (leftFilletUp.slope) // 此阶段只要找到上拐点即可开始补线
+                    if (leftFilletUp.slope && leftFilletDown.x != leftFilletUp.x) // 此阶段只要找到上拐点即可开始补线
                     {
                         // 找到上下拐点且斜率符合要求
                         double k = gradientCal(leftFilletDown, leftFilletUp);
@@ -280,6 +285,12 @@ bool FsmFork::handle(Mat &img, int type)
                             x_end = kkk;
                             break;
                         }
+                    }
+                    if (x_end <= 0 ||
+                        static_cast<size_t>(x_end) >= params->track->pointsEdgeLeft.size())
+                    {
+                        step = Step::END;
+                        return true;
                     }
                     PointX startPoint = params->track->pointsEdgeRight[0]; // 补线：起点
                     PointX midPoint1;
@@ -354,7 +365,12 @@ bool FsmFork::handle(Mat &img, int type)
                 counterFork = 0;
                 return true;
             }
-            if (!lastLFlag && !lastRFlag && leftFilletDown.slope > 10 && Right_Fillet_DOWN.slope > 10 && !repairing)
+            if (!lastLFlag && !lastRFlag && leftFilletDown.slope > 10 &&
+                Right_Fillet_DOWN.slope > 10 && !repairing &&
+                static_cast<size_t>(leftFilletDown.slope) < params->track->pointsEdgeLeft.size() &&
+                static_cast<size_t>(Right_Fillet_DOWN.slope) < params->track->pointsEdgeRight.size() &&
+                leftFilletDown.x != params->track->pointsEdgeLeft[leftFilletDown.slope - 10].x &&
+                Right_Fillet_DOWN.x != params->track->pointsEdgeRight[Right_Fillet_DOWN.slope - 10].x)
             { // 距离弯道距离相对较远，先补直线便于接近
                 // 将拐点上方使用直线进行补齐
                 double k = gradientCal(leftFilletDown, params->track->pointsEdgeLeft[leftFilletDown.slope - 10]);
@@ -391,10 +407,16 @@ bool FsmFork::handle(Mat &img, int type)
                 midPoint2 = PointX(startPoint.x - 30, startPoint.y - 15); // 补线：中点
                 vector<PointX> input = {startPoint, midPoint2, midPoint1, endPoint};
                 vector<PointX> b_modify = Bezier(0.01, input);
-                params->track->pointsEdgeRight.resize(Right_Fillet_DOWN.slope);
+                if (Right_Fillet_DOWN.slope <= 0 ||
+                    static_cast<size_t>(Right_Fillet_DOWN.slope) > params->track->pointsEdgeRight.size())
+                {
+                    step = Step::END;
+                    return true;
+                }
+                params->track->pointsEdgeRight.resize(static_cast<size_t>(Right_Fillet_DOWN.slope));
                 if (lastRFlag && Right_Fillet_DOWN.slope < 15)
                 {
-                    if (b_modify.size() > 3)
+                    if (b_modify.size() > 3 && b_modify[0].x != b_modify[3].x)
                     {
                         double k = gradientCal(b_modify[0], b_modify[3]);
                         double b = b_modify[0].y - k * b_modify[0].x;
@@ -430,7 +452,13 @@ bool FsmFork::handle(Mat &img, int type)
                     if (params->track->pointsEdgeLeft[i].y < 3)
                     {
                         endPoint = params->track->pointsEdgeLeft[i];
-                        params->track->pointsEdgeLeft.resize(i);
+                        if (i <= 0)
+                        {
+                            step = Step::END;
+                            return true;
+                        }
+                        params->track->pointsEdgeLeft.resize(static_cast<size_t>(i));
+                        break;
                     }
                 }
                 repair0.resize(0);
@@ -476,28 +504,35 @@ bool FsmFork::handle(Mat &img, int type)
             else
             {
                 // 找到上下拐点且斜率符合要求
+                if (params->track->pointsEdgeRight.empty() ||
+                    params->track->pointsEdgeLeft.empty() ||
+                    params->track->pointsEdgeRight[0].x == lastForkR.x)
+                {
+                    step = Step::END;
+                    return true;
+                }
+                const int edgeCount =
+                    params->track->pointsEdgeRight[0].x - lastForkR.x + 1;
+                if (edgeCount <= 0 || edgeCount > ROWSIMAGE ||
+                    static_cast<size_t>(edgeCount) > params->track->pointsEdgeRight.size())
+                {
+                    step = Step::END;
+                    return true;
+                }
                 double k = gradientCal(params->track->pointsEdgeRight[0], lastForkR);
-                double b = params->track->pointsEdgeRight[0].y - k * params->track->pointsEdgeRight[0].x;
-                int startIndex = 0;
-                for (int i = startIndex; i <= params->track->pointsEdgeRight[0].x - lastForkR.x; i++)
-                {
-                    params->track->pointsEdgeRight[i].y = (int)(k * params->track->pointsEdgeRight[i].x + b);
-                }
-                vector<PointX> repair0;
-                repair0.push_back(lastForkR);
-                params->track->pointsEdgeLeft.resize(params->track->pointsEdgeRight[0].x - lastForkR.x + 1);
-                params->track->pointsEdgeRight.resize(params->track->pointsEdgeRight[0].x - lastForkR.x + 1); // 类似种树问题，从0开始到index结束
-                params->track->handle(true, params->track->pointsEdgeRight[0].x - lastForkR.x + 1);
-                for (int i = params->track->pointsEdgeRight[0].x - lastForkR.x + 1; i < params->track->pointsEdgeRight.size(); i++) // 从重搜第一点开始存储
-                {
-                    repair0.push_back(params->track->pointsEdgeRight[i]);
-                }
-                params->track->pointsEdgeRight.resize(params->track->pointsEdgeRight[0].x - lastForkR.x + 1);
+                double b = params->track->pointsEdgeRight[0].y -
+                           k * params->track->pointsEdgeRight[0].x;
+                for (int i = 0; i < edgeCount; i++)
+                    params->track->pointsEdgeRight[i].y =
+                        static_cast<int>(k * params->track->pointsEdgeRight[i].x + b);
+
+                vector<PointX> repair0{lastForkR};
+                params->track->pointsEdgeLeft.resize(static_cast<size_t>(edgeCount));
+                params->track->pointsEdgeRight.resize(static_cast<size_t>(edgeCount));
+                params->track->handle(true, edgeCount);
                 repair0 = smoothLine(repair0);
-                for (int i = 0; i < repair0.size(); i++)
-                {
-                    params->track->pointsEdgeRight.push_back(repair0[i]);
-                }
+                for (const auto &point : repair0)
+                    params->track->pointsEdgeRight.push_back(point);
                 return true;
             }
         }
@@ -555,10 +590,16 @@ bool FsmFork::handle(Mat &img, int type)
                 vector<PointX> input = {startPoint, midPoint2, midPoint1, endPoint};
                 vector<PointX> b_modify = Bezier(0.01, input); // 拟定右边第一段补线
                 // 对右边界进行处理
-                params->track->pointsEdgeRight.resize(Right_Fillet_DOWN.slope);
+                if (Right_Fillet_DOWN.slope <= 0 ||
+                    static_cast<size_t>(Right_Fillet_DOWN.slope) > params->track->pointsEdgeRight.size())
+                {
+                    step = Step::END;
+                    return true;
+                }
+                params->track->pointsEdgeRight.resize(static_cast<size_t>(Right_Fillet_DOWN.slope));
                 if (Right_Fillet_DOWN.slope < 15)
                 {
-                    if (b_modify.size() > 3)
+                    if (b_modify.size() > 3 && b_modify[0].x != b_modify[3].x)
                     {
                         double k = gradientCal(b_modify[0], b_modify[3]);
                         double b = b_modify[0].y - k * b_modify[0].x;
@@ -598,7 +639,13 @@ bool FsmFork::handle(Mat &img, int type)
                         if (params->track->pointsEdgeLeft[i].y < 3)
                         {
                             endPoint = params->track->pointsEdgeLeft[i];
-                            params->track->pointsEdgeLeft.resize(i);
+                            if (i <= 0)
+                            {
+                                step = Step::END;
+                                return true;
+                            }
+                            params->track->pointsEdgeLeft.resize(static_cast<size_t>(i));
+                            break;
                         }
                     }
                     // 找到track.pointsEdgeLeft最上面点上方第一个白到黑的跳变点加入到repair0队列中
@@ -641,31 +688,65 @@ bool FsmFork::handle(Mat &img, int type)
                             break;
                         }
                     }
-                    int sizeLNow = params->track->pointsEdgeLeft.size();
-                    params->track->pointsEdgeLeft.resize(params->track->pointsEdgeRight[0].x - TempPoint.x + 1);
-                    for (int i = sizeLNow; i < params->track->pointsEdgeLeft.size(); i++)
-                    { // 如果有左侧点被错误补出
-                        if (params->track->pointsEdgeLeft[i].x == 0)
+                    if (params->track->pointsEdgeLeft.empty() ||
+                        params->track->pointsEdgeRight.empty())
+                    {
+                        step = Step::END;
+                        return true;
+                    }
+                    const int targetEdgeCount =
+                        params->track->pointsEdgeRight[0].x - TempPoint.x + 1;
+                    if (targetEdgeCount <= 0 || targetEdgeCount > ROWSIMAGE)
+                    {
+                        step = Step::END;
+                        return true;
+                    }
+
+                    const int sizeLNow =
+                        static_cast<int>(params->track->pointsEdgeLeft.size());
+                    params->track->pointsEdgeLeft.resize(
+                        static_cast<size_t>(targetEdgeCount));
+                    for (int i = sizeLNow; i < targetEdgeCount; i++)
+                    {
+                        params->track->pointsEdgeLeft[i].x =
+                            params->track->pointsEdgeLeft[i - 1].x - 1;
+                        params->track->pointsEdgeLeft[i].y =
+                            params->track->pointsEdgeLeft[i - 1].y;
+                    }
+
+                    const int sizeRNow =
+                        static_cast<int>(params->track->pointsEdgeRight.size());
+                    const int deltaPoint = targetEdgeCount - sizeRNow;
+                    params->track->pointsEdgeRight.resize(
+                        static_cast<size_t>(targetEdgeCount));
+                    if (deltaPoint > 0)
+                    {
+                        for (int i = sizeRNow; i < targetEdgeCount; i++)
                         {
-                            params->track->pointsEdgeLeft[i].x = params->track->pointsEdgeLeft[i - 1].x - 1;
-                            params->track->pointsEdgeLeft[i].y = params->track->pointsEdgeLeft[i - 1].y;
+                            params->track->pointsEdgeRight[i].y =
+                                params->track->pointsEdgeRight[sizeRNow - 1].y;
+                            params->track->pointsEdgeRight[i].x =
+                                params->track->pointsEdgeRight[i - 1].x - 1;
+                        }
+                        const PointX &gradientStart =
+                            params->track->pointsEdgeRight[sizeRNow - 1];
+                        const PointX &gradientEnd =
+                            params->track->pointsEdgeRight[targetEdgeCount - 1];
+                        if (gradientStart.x != gradientEnd.x)
+                        {
+                            double k = gradientCal(gradientStart, gradientEnd);
+                            double b = gradientStart.y - k * gradientStart.x;
+                            for (int i = sizeRNow; i < targetEdgeCount; i++)
+                                params->track->pointsEdgeRight[i].y =
+                                    static_cast<int>(k * params->track->pointsEdgeRight[i].x + b);
                         }
                     }
-                    int sizeRNow = params->track->pointsEdgeRight.size();
-                    int deltaPoint = params->track->pointsEdgeRight[0].x - TempPoint.x + 1 - params->track->pointsEdgeRight.size(); // 记录此时打算resize的大小与如今右边点数量的差异
-                    params->track->pointsEdgeRight.resize(params->track->pointsEdgeRight[0].x - TempPoint.x + 1);                   // 类似种树问题，从0开始到index结束
-                    for (int i = sizeRNow - 1; i < sizeRNow + deltaPoint; i++)                                                      // 如果有右侧点被错误补充，先进行初始处理
+                    params->track->handle(true, targetEdgeCount);
+                    if (params->track->pointsEdgeLeft.empty() ||
+                        params->track->pointsEdgeRight.empty())
                     {
-                        params->track->pointsEdgeRight[i].y = params->track->pointsEdgeRight[sizeRNow - 1].y; // 暂时先使用最后一个点的y值把所有（0，0）补齐
-                        params->track->pointsEdgeRight[i].x = params->track->pointsEdgeRight[sizeRNow - 1].x - i + sizeRNow - 1;
-                    }
-                    params->track->handle(true, params->track->pointsEdgeRight[0].x - TempPoint.x + 1); // 可能出现多点的情况，补充了一部分（0，0）
-                    // 对这部分(0，0)点进行重新定位
-                    double k = gradientCal(params->track->pointsEdgeRight[sizeRNow - 1], params->track->pointsEdgeRight[sizeRNow - 1 + deltaPoint]);
-                    double b = params->track->pointsEdgeRight[sizeRNow - 1].y - k * params->track->pointsEdgeRight[sizeRNow - 1].x;
-                    for (int i = sizeRNow - 1; i < sizeRNow - 1 + deltaPoint; i++)
-                    {
-                        params->track->pointsEdgeRight[i].y = (int)(k * params->track->pointsEdgeRight[i].x + b);
+                        step = Step::END;
+                        return true;
                     }
                     // 需要对之前补零点的地方进行修正
                     repair0.resize(0);
@@ -676,8 +757,10 @@ bool FsmFork::handle(Mat &img, int type)
                     }
                     repair0.push_back(params->track->pointsEdgeLeft[params->track->pointsEdgeLeft.size() - 1]);
                     repair0 = smoothLine(repair0);
-                    params->track->pointsEdgeRight.resize(params->track->pointsEdgeRight[0].x - TempPoint.x + 1);
-                    while (repair0[0].x > params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() - 1].x && params->track->pointsEdgeRight.size() > 10)
+                    params->track->pointsEdgeRight.resize(static_cast<size_t>(targetEdgeCount));
+                    while (params->track->pointsEdgeRight.size() > 10 &&
+                           !repair0.empty() &&
+                           repair0[0].x > params->track->pointsEdgeRight.back().x)
                     { // 一直跳到x连续
                         params->track->pointsEdgeRight.pop_back();
                     }

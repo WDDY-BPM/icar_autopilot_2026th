@@ -68,72 +68,73 @@ void FsmStop::run(Mat &img)
 
     switch (step)
     {
-    case Step::NONE: // AI未识别
+    case Step::NONE:
     {
+        if (!params->aiResultFresh)
+            break;
         for (int i = 0; i < params->results.size(); i++)
         {
-            if (params->results[i].type == LABEL_GATE) // 障碍物：道闸
+            if (params->results[i].type == LABEL_GATE)
             {
                 countRec++;
                 break;
             }
         }
-
         if (countRec > 2)
-            setStep(Step::ENABLE); // 设置新状态
+            setStep(Step::ENABLE);
+        else if (countRec > 0 && ++countSes > 4)
+            setStep(Step::NONE);
+        break;
+    }
 
-        if (countRec > 0) // 识别AI标志后开始场次计数
+    case Step::ENABLE:
+    {
+        timeout++; // control-frame safety timeout continues without AI updates
+        if (params->aiResultFresh)
         {
             countSes++;
-            if (countSes > 4)
-                setStep(Step::NONE);
-        }
-        break;
-    }
-
-    case Step::ENABLE: // 场景使能
-    {
-        countSes++; // 场次计数器
-        timeout++;
-        for (int i = 0; i < params->results.size(); i++)
-        {
-            if (params->results[i].type == LABEL_GATE) // 障碍物：道闸
+            for (int i = 0; i < params->results.size(); i++)
             {
-                countSes = 0;
-                timeout = 0;
-                if ((params->results[i].y + params->results[i].height) > ROWSIMAGE * 0.4) // 停车距离计算
+                if (params->results[i].type == LABEL_GATE)
                 {
-                    countRec++;
+                    countSes = 0;
+                    timeout = 0;
+                    if ((params->results[i].y + params->results[i].height) >
+                        ROWSIMAGE * 0.4)
+                        countRec++;
                     break;
                 }
-                break;
             }
         }
         if (countRec > 2)
-            setStep(Step::STOP); // 设置新状态
-        if (countSes >= 10 || timeout > 50)
-            setStep(Step::NONE); // 设置新状态
+            setStep(Step::STOP);
+        else if (countSes >= 10 || timeout > 50)
+            setStep(Step::NONE);
         break;
     }
 
-    case Step::STOP: // 停车
+    case Step::STOP:
     {
-        params->ctrl.stop = true; // 停车标志
-        countSes++;               // 场次计数器
-        for (int i = 0; i < params->results.size(); i++)
+        params->ctrl.stop = true; // parking control remains active every frame
+        timeout++;
+        if (params->aiResultFresh)
         {
-            if (params->results[i].type == LABEL_GATE) // 障碍物：道闸
+            timeout = 0;
+            countSes++;
+            for (int i = 0; i < params->results.size(); i++)
             {
-                countSes = 0;
-                break;
+                if (params->results[i].type == LABEL_GATE)
+                {
+                    countSes = 0;
+                    break;
+                }
             }
         }
-        if (countSes >= 30)
+        if (countSes >= 30 || timeout > 150)
         {
-            setStep(Step::NONE); // 设置新状态
+            setStep(Step::NONE);
             params->ctrl.stop = false;
         }
-
         break;
     }
     }

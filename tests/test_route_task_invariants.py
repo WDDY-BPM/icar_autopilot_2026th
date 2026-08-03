@@ -111,6 +111,35 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIn("params->ctrl.obstacleSlow = false", core)
         self.assertIn("params->ctrl.obstacleSlow = true", obstacle)
         self.assertIn("params->ctrl.slow || params->ctrl.obstacleSlow", motion)
+    def test_stop_ai_evidence_uses_only_fresh_results(self):
+        source = (ROOT / "src" / "fsm" / "stop.cpp").read_text(encoding="utf-8")
+        none = re.search(r"case Step::NONE:.*?case Step::ENABLE:", source, re.DOTALL)
+        enable = re.search(r"case Step::ENABLE:.*?case Step::STOP:", source, re.DOTALL)
+        stopped = re.search(r"case Step::STOP:.*?\n    \}", source, re.DOTALL)
+        self.assertIsNotNone(none)
+        self.assertIsNotNone(enable)
+        self.assertIsNotNone(stopped)
+        self.assertIn("if (!params->aiResultFresh)", none.group(0))
+        self.assertIn("if (params->aiResultFresh)", enable.group(0))
+        self.assertIn("if (params->aiResultFresh)", stopped.group(0))
+        self.assertIn("params->ctrl.stop = true", stopped.group(0))
+        self.assertIn("timeout > 150", stopped.group(0))
+
+    def test_fork_computed_sizes_and_gradients_are_guarded(self):
+        source = (ROOT / "src" / "fsm" / "fork.cpp").read_text(encoding="utf-8")
+        self.assertIn("edgeCount <= 0 || edgeCount > ROWSIMAGE", source)
+        self.assertIn("targetEdgeCount <= 0 || targetEdgeCount > ROWSIMAGE", source)
+        self.assertIn("if (deltaPoint > 0)", source)
+        self.assertIn("gradientStart.x != gradientEnd.x", source)
+        self.assertIn("params->track->pointsEdgeRight[0].x == lastForkR.x", source)
+        self.assertNotIn(
+            "resize(params->track->pointsEdgeRight[0].x - lastForkR.x + 1)",
+            source,
+        )
+        self.assertNotIn(
+            "resize(params->track->pointsEdgeRight[0].x - TempPoint.x + 1)",
+            source,
+        )
     def test_passenger_wait_states_stop_the_vehicle(self):
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
         station = (ROOT / "src" / "fsm" / "station.cpp").read_text(encoding="utf-8")

@@ -40,8 +40,17 @@ class VisualParserTests(unittest.TestCase):
         self.assertEqual("busy", self.visual._parse_result(response))
 
     def test_negated_unlimit_description_is_not_unlimit(self):
-        self.assertNotEqual("unlimit", self.visual._match_label("不是解除限速标志"))
-        self.assertNotEqual("unlimit", self.visual._match_label("not unlimit"))
+        cases = (
+            "不是解除限速标志",
+            "这不是一个解除限速标志",
+            "没有看到解除限速标志",
+            "未见到解除限速标志",
+            "not unlimit",
+            "not an unlimit sign",
+        )
+        for text in cases:
+            with self.subTest(text=text):
+                self.assertIsNone(self.visual._match_label(text))
 
     def test_negative_visual_trait_keeps_affirmed_limit(self):
         self.assertEqual(

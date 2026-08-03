@@ -223,11 +223,17 @@ class VisualLLM:
             if index < 0:
                 return False
             prefix = lowered[:index].rstrip()
-            chinese_negated = any(prefix.endswith(token) for token in chinese_negations)
-            english_negated = any(
-                re.search(rf"(?:^|\s){re.escape(token)}\s*$", prefix)
-                for token in english_negations
-            )
+            chinese_negated = bool(re.search(
+                r"(?:不是(?:一个|该|这个)?|并非(?:一个|该|这个)?|"
+                r"没有(?:看到|看见|检测到|发现)?|未见(?:到)?|"
+                r"不存在|不含)\s*$",
+                prefix,
+            ))
+            english_negated = bool(re.search(
+                r"(?:^|\s)(?:no|not|without|isn't|is not)"
+                r"(?:\s+(?:a|an|the))?\s*$",
+                prefix,
+            ))
             if not chinese_negated and not english_negated:
                 return True
             start = index + len(term_lower)
@@ -255,9 +261,15 @@ class VisualLLM:
                ("限速解除", "限速已解除", "解除限速标志")):
             return "unlimit"
 
+        # Do not let the shorter word "限速" leak out of a negated
+        # "解除限速" phrase. An explicit later "限速" remains matchable.
+        generic_text = text
+        if "解除限速" in text and not self._term_is_affirmed(text, "解除限速"):
+            generic_text = generic_text.replace("解除限速", "")
+
         # 按中文长度降序匹配（长匹配优先）
         for eng, chn in sorted(LABEL_DICT.items(), key=lambda x: -len(x[1])):
-            if self._term_is_affirmed(text, chn):
+            if self._term_is_affirmed(generic_text, chn):
                 return eng
 
         if warn:
