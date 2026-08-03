@@ -89,6 +89,11 @@ void FsmObstacle::run(Mat &img)
     // 路径重规划
     int disLeft = resultsObs[index].x - params->track->pointsEdgeLeft[row].y;
     int disRight = params->track->pointsEdgeRight[row].y - (resultsObs[index].x + resultsObs[index].width);
+    const bool obstacleInDrivingPath =
+        resultsObs[index].x + resultsObs[index].width > params->track->pointsEdgeLeft[row].y &&
+        params->track->pointsEdgeRight[row].y > resultsObs[index].x;
+    if (!obstacleInDrivingPath)
+        return;
     if (resultsObs[index].x + resultsObs[index].width > params->track->pointsEdgeLeft[row].y &&
         params->track->pointsEdgeRight[row].y > resultsObs[index].x &&
         abs(disLeft) <= abs(disRight)) //[1] 障碍物靠左
@@ -111,7 +116,7 @@ void FsmObstacle::run(Mat &img)
             for (int i = 0; i < repair.size(); i++)
                 params->track->pointsEdgeLeft.push_back(repair[i]);
         }
-        params->ctrl.slow = true; // 避障期间锁定限速，防止转向见解除限速标志提前加速
+        params->ctrl.obstacleSlow = true; // 避障期间锁定限速，防止转向见解除限速标志提前加速
     }
     else if (resultsObs[index].x + resultsObs[index].width > params->track->pointsEdgeLeft[row].y &&
              params->track->pointsEdgeRight[row].y > resultsObs[index].x &&
@@ -135,7 +140,7 @@ void FsmObstacle::run(Mat &img)
             for (int i = 0; i < repair.size(); i++)
                 params->track->pointsEdgeRight.push_back(repair[i]);
         }
-        params->ctrl.slow = true; // 避障期间锁定限速，防止转向见解除限速标志提前加速
+        params->ctrl.obstacleSlow = true; // 避障期间锁定限速，防止转向见解除限速标志提前加速
     }
 
     // 车道线切除顶行1/5，避免弯道权重过大

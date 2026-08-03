@@ -384,6 +384,7 @@ private:
         }
 
         // 全局障碍物检测（锥桶/行人），施工区/停车场/Y型岔路口期间不检测
+        params->ctrl.obstacleSlow = false;
         if (params->config.obstacle &&
             params->mode != FsmMode::BUSY &&
             params->mode != FsmMode::PARK &&

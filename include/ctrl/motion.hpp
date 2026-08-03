@@ -149,7 +149,7 @@ public:
             desiredSpeed = params->config.velCurve;
         else if (params->mode == FsmMode::YFORK)
             desiredSpeed = params->config.velYfork;
-        else if (params->ctrl.slow)
+        else if (params->ctrl.slow || params->ctrl.obstacleSlow)
             desiredSpeed = params->config.velSlow;
         else
         {

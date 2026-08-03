@@ -442,7 +442,8 @@ void ManualControlThread::processCommand(const std::string &cmd) {
         std::lock_guard<std::mutex> lock(mtxState);
         manualMode = vehicleState.manual;
     }
-    if (cmd != "PING\n" && cmd != "STOP\n" && cmd != "CLEAR_STOP\n" && !manualMode) {
+    if (cmd != "PING\n" && cmd != "STOP\n" && cmd != "CLEAR_STOP\n" &&
+        cmd != "RETURN\n" && !manualMode) {
         resetManualControl(true);
         std::cerr << "[Manual] Ignored motion command while vehicle is in AUTO\n";
         return;

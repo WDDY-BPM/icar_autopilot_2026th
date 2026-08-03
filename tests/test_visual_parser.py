@@ -39,6 +39,15 @@ class VisualParserTests(unittest.TestCase):
         }
         self.assertEqual("busy", self.visual._parse_result(response))
 
+    def test_negated_unlimit_description_is_not_unlimit(self):
+        self.assertNotEqual("unlimit", self.visual._match_label("不是解除限速标志"))
+        self.assertNotEqual("unlimit", self.visual._match_label("not unlimit"))
+
+    def test_negative_visual_trait_keeps_affirmed_limit(self):
+        self.assertEqual(
+            "limit",
+            self.visual._match_label("没有斜线，这是限速标志"),
+        )
     def test_parses_direct_nested_label(self):
         self.assertEqual(
             "cone",

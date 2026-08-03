@@ -96,7 +96,7 @@ void FsmSlow::run(Mat &img)
     case Step::ENABLE: // 慢行阶段
     {
         timeout++;
-        params->ctrl.slow = true; // 设置慢行标志
+        params->ctrl.slow = true;
 
         bool seenUnlimit = false;
         for (int i = 0; i < params->results.size(); i++)
@@ -121,6 +121,12 @@ void FsmSlow::run(Mat &img)
             }
         }
 
+        if (timeout >= ENABLE_TIMEOUT_FRAMES)
+        {
+            setStep(Step::NONE);
+            params->ctrl.slow = false;
+            break;
+        }
         // UNLIMIT确认(countRec>=2)后，消失连续3帧则退出慢行区
         if (countRec >= 2)
         {
@@ -157,6 +163,12 @@ void FsmSlow::run(Mat &img)
  *
  * @param img
  */
+void FsmSlow::resetLap()
+{
+    setStep(Step::NONE);
+    params->ctrl.slow = false;
+}
+
 void FsmSlow::show(Mat &img)
 {
     if (params->mode != FsmMode::SLOW)

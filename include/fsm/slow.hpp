@@ -35,6 +35,7 @@ public:
   void run(Mat &img);
   void show(Mat &img);
   FsmMode getMode();
+  void resetLap() override;
 
 private:
   /**
@@ -51,6 +52,7 @@ private:
   uint16_t countSes = 0;  // 场次计数器
   uint16_t timeout = 0;   // 超时退出计数器
   uint16_t unlimitDelay = 0;  // 解除限速后延时退出计数
+  static constexpr uint16_t ENABLE_TIMEOUT_FRAMES = 450; // 约15秒无标志超时
 
   void setStep(Step st);
 };

@@ -58,6 +58,21 @@ class ManualProtocolTests(unittest.TestCase):
         self.assertIsNotNone(return_branch)
         self.assertIn("fsmFactory.busy->endManualTakeover();", return_branch.group("body"))
 
+    def test_return_bypasses_auto_mode_gate(self):
+        gate = SOURCE.index('if (cmd != "PING\\n"')
+        handler = SOURCE.index('if (cmd == "RETURN\\n")')
+        self.assertLess(gate, handler)
+        self.assertIn('cmd != "RETURN\\n"', SOURCE[gate:handler])
+
+    def test_malformed_state_is_ignored_without_dropping_link(self):
+        client = (ROOT / "tools" / "manual_control_client.py").read_text(
+            encoding="utf-8")
+        state_start = client.index('if text.startswith("STATE:"):')
+        image_start = client.index('elif text.startswith("IMAGE:"):', state_start)
+        state_body = client[state_start:image_start]
+        self.assertIn("if len(fields) < 2:", state_body)
+        self.assertIn("continue", state_body)
+        self.assertIn("except (ValueError, IndexError):", state_body)
     def test_exit_confirmation_counts_only_fresh_ai_results(self):
         for relative in ("src/fsm/busy.cpp", "src/fsm/park.cpp"):
             source = (ROOT / relative).read_text(encoding="utf-8")

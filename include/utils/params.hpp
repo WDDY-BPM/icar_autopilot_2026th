@@ -63,6 +63,7 @@ struct Control
     bool stop = false;            // 车辆停止运动
     bool back = false;            // 倒车
     bool slow = false;            // 车辆减速
+    bool obstacleSlow = false;    // 当前帧障碍物避障减速
     uint16_t servo = PWMSERVOMID; // 发送给舵机的PWM
     float speed = 0.0;            // 发送给电机的速度
     int center = COLSIMAGE / 2;   // 控制中心

@@ -213,6 +213,25 @@ class VisualLLM:
 
         return self._match_label(raw_text)
 
+    @staticmethod
+    def _term_is_affirmed(text: str, term: str) -> bool:
+        """Return true when at least one occurrence is not locally negated."""
+        lowered = text.lower()
+        term_lower = term.lower()
+        negations = ("不是", "并非", "没有", "无", "未见", "不存在", "不含",
+                     "缺少", "no ", "not ", "without ", "isn't ", "is not ")
+        start = 0
+        while True:
+            index = lowered.find(term_lower, start)
+            if index < 0:
+                return False
+            prefix = lowered[max(0, index - 12):index]
+            clause_start = max(
+                (prefix.rfind(mark) for mark in ",，。;；:："), default=-1)
+            prefix = prefix[clause_start + 1:]
+            if not any(token in prefix for token in negations):
+                return True
+            start = index + len(term_lower)
     def _match_label(self, text: str, warn: bool = True) -> Optional[str]:
         """从文本中匹配场景标签（特殊处理「限速/解除限速」冲突）"""
         text = text.strip()
@@ -224,20 +243,22 @@ class VisualLLM:
         # Accept explanatory output such as "label: park" or "scene is busy".
         lowered = text.lower()
         for label in sorted(LABEL_DICT, key=len, reverse=True):
-            if re.search(rf"\b{re.escape(label)}\b", lowered):
+            if (re.search(rf"\b{re.escape(label)}\b", lowered) and
+                    self._term_is_affirmed(text, label)):
                 return label
 
         # 优先匹配"解除限速"（避免被短词"限速"截胡）
-        if "解除限速" in text:
+        if self._term_is_affirmed(text, "解除限速"):
             return "unlimit"
 
         # 额外匹配变体："限速解除" == "解除限速"
-        if "限速解除" in text or "限速已解除" in text or "解除限速标志" in text:
+        if any(self._term_is_affirmed(text, term) for term in
+               ("限速解除", "限速已解除", "解除限速标志")):
             return "unlimit"
 
         # 按中文长度降序匹配（长匹配优先）
         for eng, chn in sorted(LABEL_DICT.items(), key=lambda x: -len(x[1])):
-            if chn in text:
+            if self._term_is_affirmed(text, chn):
                 return eng
 
         if warn:
@@ -320,17 +341,9 @@ class VisualLLM:
             resp = requests.post(self.api_url, json=body, headers=headers, timeout=60)
             if resp.ok:
                 data = resp.json()
-                text = json.dumps(data, ensure_ascii=False)
-                # 全文搜索关键词（兼容中文描述和英文返回值）
-                if "解除限速" in text or "斜线" in text or "斜杠" in text:
-                    return "unlimit"
-                if '"unlimit"' in text.lower():
-                    return "unlimit"
-                if "限速" in text:
-                    return "limit"
-                if '"limit"' in text.lower():
-                    return "limit"
-                # 兜底：走标准解析
+                # Parse only the model result fields. Searching the serialized
+                # response for visual traits treats negated descriptions such
+                # as "没有斜线" as positive evidence.
                 return self._parse_result(data)
         except Exception:
             pass

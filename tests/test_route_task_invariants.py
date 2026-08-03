@@ -79,6 +79,34 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertNotIn("completeLapTask", timeout_end.group(0))
         self.assertIn("completed = false", timeout_end.group(0))
 
+    def test_yfork_exit_uses_camera_edge_before_bezier_replan(self):
+        source = (ROOT / "src" / "fsm" / "yfork.cpp").read_text(encoding="utf-8")
+        capture = source.index("exitEdgeColumn = params->track->pointsEdgeLeft.back().y")
+        replan = source.index("replanTracking(selectLeft, img)", capture)
+        exit_check = source.index("int cur = exitEdgeColumn", replan)
+        self.assertLess(capture, replan)
+        self.assertLess(replan, exit_check)
+
+    def test_slow_mode_has_timeout_and_lap_reset(self):
+        header = (ROOT / "include" / "fsm" / "slow.hpp").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "fsm" / "slow.cpp").read_text(encoding="utf-8")
+        self.assertIn("ENABLE_TIMEOUT_FRAMES = 450", header)
+        self.assertIn("timeout >= ENABLE_TIMEOUT_FRAMES", source)
+        reset = re.search(r"void FsmSlow::resetLap\(\).*?\n\}", source, re.DOTALL)
+        self.assertIsNotNone(reset)
+        self.assertIn("setStep(Step::NONE)", reset.group(0))
+        self.assertIn("params->ctrl.slow = false", reset.group(0))
+
+    def test_obstacle_edits_only_in_path_and_slowdown_is_frame_scoped(self):
+        obstacle = (ROOT / "src" / "fsm" / "obstacle.cpp").read_text(encoding="utf-8")
+        core = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
+        motion = (ROOT / "include" / "ctrl" / "motion.hpp").read_text(encoding="utf-8")
+        guard = obstacle.index("if (!obstacleInDrivingPath)")
+        truncation = obstacle.index("pointsEdgeLeft.resize", guard)
+        self.assertLess(guard, truncation)
+        self.assertIn("params->ctrl.obstacleSlow = false", core)
+        self.assertIn("params->ctrl.obstacleSlow = true", obstacle)
+        self.assertIn("params->ctrl.slow || params->ctrl.obstacleSlow", motion)
     def test_passenger_wait_states_stop_the_vehicle(self):
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
         station = (ROOT / "src" / "fsm" / "station.cpp").read_text(encoding="utf-8")

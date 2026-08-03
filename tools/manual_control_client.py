@@ -198,9 +198,15 @@ class TakeoverConsole:
                 text = line.decode("ascii", errors="replace").strip()
                 if text.startswith("STATE:"):
                     fields = text[6:].split(",")
-                    speed, servo = fields[0], fields[1]
-                    self.current_speed = float(speed)
-                    self.current_steering = float(servo)
+                    if len(fields) < 2:
+                        continue
+                    try:
+                        speed = float(fields[0])
+                        servo = float(fields[1])
+                    except (ValueError, IndexError):
+                        continue
+                    self.current_speed = speed
+                    self.current_steering = servo
                     mode = fields[2] if len(fields) > 2 else "MANUAL"
                     was_manual = self.manual_mode
                     self.manual_mode = mode == "MANUAL"
@@ -213,7 +219,7 @@ class TakeoverConsole:
                     if estop:
                         mode_text = "锁存急停（按 C 确认解除）"
                     self.set_status("%s　速度 %.2f m/s　舵机 %.0f" %
-                                    (mode_text, float(speed), float(servo)))
+                                    (mode_text, speed, servo))
                 elif text.startswith("IMAGE:"):
                     image_fields = text[6:].split(",")
                     size = int(image_fields[0])

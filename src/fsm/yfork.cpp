@@ -208,6 +208,21 @@ bool FsmYfork::handle(Mat &img)
         counterYfork++;
         timeout++;
 
+        // Preserve the camera-derived exit edge before replanTracking replaces
+        // the selected branch with a Bezier guide.
+        bool exitEdgeAvailable = false;
+        int exitEdgeColumn = 0;
+        if (selectLeft && params->track->pointsEdgeLeft.size() > 4)
+        {
+            exitEdgeColumn = params->track->pointsEdgeLeft.back().y;
+            exitEdgeAvailable = true;
+        }
+        else if (!selectLeft && params->track->pointsEdgeRight.size() > 4)
+        {
+            exitEdgeColumn = params->track->pointsEdgeRight.back().y;
+            exitEdgeAvailable = true;
+        }
+
         replanTracking(selectLeft, img);
 
         // 引导期间屏蔽station检测，但V尖消失后放开让station能检测停车框
@@ -217,9 +232,9 @@ bool FsmYfork::handle(Mat &img)
         //   - 当前圈启用了station时：阻止突变退出，等先停好车
         bool stationEnabled = params->config.currentLapConfig->station;
         bool stationBusy = stationEnabled && !params->stationStopCompleted;
-        if (!stationBusy && selectLeft && tipRow == 0 && params->track->pointsEdgeLeft.size() > 4)
+        if (!stationBusy && selectLeft && tipRow == 0 && exitEdgeAvailable)
         {
-            int cur = params->track->pointsEdgeLeft.back().y;
+            int cur = exitEdgeColumn;
             if (countRes > 0 && abs(cur - countRes) > 25)
             {
                 params->completeLapTask("yfork-left-exit");
@@ -232,9 +247,9 @@ bool FsmYfork::handle(Mat &img)
         }
 
         // 右岔路：右边缘突变 → 已左拐驶出岔路
-        if (!stationBusy && !selectLeft && tipRow == 0 && params->track->pointsEdgeRight.size() > 4)
+        if (!stationBusy && !selectLeft && tipRow == 0 && exitEdgeAvailable)
         {
-            int cur = params->track->pointsEdgeRight.back().y;
+            int cur = exitEdgeColumn;
             if (countRes > 0 && abs(cur - countRes) > 25)
             {
                 params->completeLapTask("yfork-right-exit");
