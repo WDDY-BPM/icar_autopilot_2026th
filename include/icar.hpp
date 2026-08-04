@@ -89,6 +89,7 @@ private:
     bool emergencyStopWasActive = false;
     int previousFinalServo = PWMSERVOMID;
     control_algorithms::SingleLaneSpeedLimitState singleLaneSpeedLimit;
+    control_algorithms::LaneUnconfirmedState laneUnconfirmedState;
     std::chrono::steady_clock::time_point lastOverlayBuilt{};
 
     // 全局共享数据链
@@ -105,6 +106,7 @@ private:
     int startupDiagnosticFrames = 0;
     bool startupEnvironmentChecked = false;
     bool startupConeDetected = false;
+    int cameraFreshFrames = 0;
 
     bool updateStartupGate(bool receivedNewAiResult)
     {
@@ -158,11 +160,11 @@ private:
                 startupGateState = StartupGateState::RELEASED;
                 params->ctrl.countAcc = 0;
                 params->ctrl.startupSteeringCount = 0;
-                params->ctrl.stop = false;
+                params->setStopReason(control_algorithms::StopReason::STARTUP, false);
                 std::cout << "[Startup] Cone gate disabled; stable lane confirmed. AUTO released." << std::endl;
                 return true;
             }
-            params->ctrl.stop = true;
+            params->setStopReason(control_algorithms::StopReason::STARTUP, true);
             params->ctrl.speed = 0.0f;
             params->ctrl.servo = PWMSERVOMID;
             return false;
@@ -188,13 +190,13 @@ private:
                 startupGateState = StartupGateState::RELEASED;
                 params->ctrl.countAcc = 0;
                 params->ctrl.startupSteeringCount = 0;
-                params->ctrl.stop = false;
+                params->setStopReason(control_algorithms::StopReason::STARTUP, false);
                 std::cout << "[Startup] Cone removed and lane stable. AUTO released." << std::endl;
                 return true;
             }
         }
 
-        params->ctrl.stop = true;
+        params->setStopReason(control_algorithms::StopReason::STARTUP, true);
         params->ctrl.speed = 0.0f;
         params->ctrl.servo = PWMSERVOMID;
         if (++startupDiagnosticFrames % 30 == 0)
@@ -335,11 +337,11 @@ private:
             if (fsmFactory.manual->checkForReturnKey())
             {
                 fsmFactory.busy->endManualTakeover();
-                params->ctrl.stop = false;
+                params->setStopReason(control_algorithms::StopReason::MANUAL, false);
                 params->mode = FsmMode::NORMAL;   // 恢复自动模式
                 params->takeoverJustEnded = true; // 通知各FSM手动接管刚结束
                 params->autoRecoveryFrames = 2;
-                params->ctrl.stop = true;
+                params->setStopReason(control_algorithms::StopReason::STARTUP, true);
                 params->ctrl.speed = 0.0f;
                 params->ctrl.servo = PWMSERVOMID;
             }
@@ -347,11 +349,11 @@ private:
                      fsmFactory.manual->isManualControl())
             {
                 fsmFactory.manual->applyManualControl(&params->ctrl.speed, &params->ctrl.servo);
-                params->ctrl.stop = false;
+                params->setStopReason(control_algorithms::StopReason::MANUAL, false);
             }
             else
             {
-                params->ctrl.stop = true;
+                params->setStopReason(control_algorithms::StopReason::MANUAL, true);
                 params->ctrl.speed = 0;
                 params->ctrl.servo = PWMSERVOMID;
             }
@@ -673,7 +675,7 @@ public:
             capture->set(cv::CAP_PROP_POS_FRAMES, show->index); // 设置读取帧
             if (!capture->read(img))
             {
-                params->ctrl.stop = true;
+                params->setStopReason(control_algorithms::StopReason::CAMERA, true);
                 params->ctrl.speed = 0.0f;
                 params->ctrl.servo = PWMSERVOMID;
                 previousFinalServo = PWMSERVOMID;
@@ -699,13 +701,25 @@ public:
             lock.unlock();
             if (img.empty())
             {
-                params->ctrl.stop = true;
+                if (!params->hasStopReason(control_algorithms::StopReason::CAMERA))
+                    std::cout << "[Camera] Frame timeout; CAMERA stop active." << std::endl;
+                params->setStopReason(control_algorithms::StopReason::CAMERA, true);
+                cameraFreshFrames = 0;
                 params->ctrl.speed = 0.0f;
                 params->ctrl.servo = PWMSERVOMID;
                 previousFinalServo = PWMSERVOMID;
                 motion->reset();
                 client->carControl(0.0f, PWMSERVOMID);
                 return;
+            }
+        }
+        if (params->hasStopReason(control_algorithms::StopReason::CAMERA))
+        {
+            if (++cameraFreshFrames >= 3)
+            {
+                params->setStopReason(control_algorithms::StopReason::CAMERA, false);
+                cameraFreshFrames = 0;
+                std::cout << "[Camera] Fresh frames recovered; CAMERA stop cleared." << std::endl;
             }
         }
 
@@ -753,9 +767,13 @@ public:
             }
             params->track->allowOuterEnvelope = !forkMarkerActive;
             params->track->handle(imgBin);
+            const bool widthLearningMode = params->track->quality.valid &&
+                !params->manualTakeover && !params->ctrl.fitting &&
+                !forkMarkerActive &&
+                (params->mode == FsmMode::NORMAL || params->mode == FsmMode::CURVE);
             center->observeLaneWidth(params->track->pointsEdgeLeft,
                                      params->track->pointsEdgeRight,
-                                     params->track->quality.valid);
+                                     widthLearningMode);
         }
         if (params->config.debug)
         {
@@ -791,6 +809,8 @@ public:
         //[05] 有限状态机任务执行。锁存急停时不得推进任何有状态 FSM。
         params->ctrl.fitting = false;
         const bool emergencyStopRequested = fsmFactory.manual->isEmergencyStopRequested();
+        params->setStopReason(control_algorithms::StopReason::EMERGENCY,
+                              emergencyStopRequested);
         if (emergencyStopRequested && !emergencyStopWasActive)
         {
             emergencyStopWasActive = true;
@@ -813,7 +833,7 @@ public:
         // A remote STOP is latched and has priority in AUTO and MANUAL modes.
         if (emergencyStopRequested)
         {
-            params->ctrl.stop = true;
+            params->setStopReason(control_algorithms::StopReason::EMERGENCY, true);
             params->ctrl.speed = 0.0f;
             params->ctrl.servo = PWMSERVOMID;
         }
@@ -826,6 +846,8 @@ public:
         {
             center->fitting(params);
             centerUpdatedThisFrame = true;
+            const int laneUnconfirmedFrames = control_algorithms::updateLaneUnconfirmed(
+                laneUnconfirmedState, center->controlValid, 5);
             const bool safetyLaneMode = params->mode == FsmMode::NORMAL ||
                                         params->mode == FsmMode::CURVE ||
                                         params->mode == FsmMode::CROSS ||
@@ -834,8 +856,13 @@ public:
                                         params->mode == FsmMode::STATION;
             params->laneSafetyStop = control_algorithms::updateLaneSafetyStop(
                 params->laneSafetyStop, safetyLaneMode, center->controlValid,
-                center->laneInvalidFrames, center->laneRecoveryFrames, 7, 5);
+                center->laneInvalidFrames, center->laneRecoveryFrames, 7, 5,
+                laneUnconfirmedFrames, 30);
+            params->setStopReason(control_algorithms::StopReason::LANE,
+                                  params->laneSafetyStop);
         }
+
+        params->ctrl.stop = params->mustStop();
 
         //[07] 车辆运动控制（仅手动接管时跳过）
         static auto lastSteeringUpdate = std::chrono::steady_clock::now();
@@ -863,17 +890,17 @@ public:
                                         params->mode == FsmMode::STOP ||
                                         params->mode == FsmMode::SLOW ||
                                         params->mode == FsmMode::STATION;
-            if (control_algorithms::updateSingleLaneSpeedLimit(
-                    singleLaneSpeedLimit, strictLaneMode, center->controlValid,
-                    params->track->quality.leftReliable,
-                    params->track->quality.rightReliable, 5,
-                    center->singleSide != 0))
+            const bool lowConfidenceLane =
+                center->recoveryMode == LaneRecoveryMode::WEAK_HYBRID ||
+                center->recoveryMode == LaneRecoveryMode::LEFT_SINGLE ||
+                center->recoveryMode == LaneRecoveryMode::RIGHT_SINGLE;
+            if (lowConfidenceLane)
                 params->ctrl.speed = std::min(params->ctrl.speed, 0.15f);
+            else if (center->recoveryMode == LaneRecoveryMode::RELAXED_DUAL)
+                params->ctrl.speed = std::min(params->ctrl.speed,
+                    std::min(params->config.velCurve, 0.20f));
 
-            if (strictLaneMode && !center->controlValid &&
-                ((center->laneInvalidFrames > 0 &&
-                  center->laneInvalidFrames <= 6) ||
-                 center->laneRecoveryFrames > 0))
+            if (strictLaneMode && laneUnconfirmedState.frames > 0)
             {
                 params->ctrl.speed = std::min(params->ctrl.speed, 0.10f);
                 params->ctrl.servo = motion->syncServoCommand(previousFinalServo);
@@ -892,6 +919,7 @@ public:
         else if (params->manualTakeover && !emergencyStopRequested)
         {
             params->laneSafetyStop = false;
+            params->setStopReason(control_algorithms::StopReason::LANE, false);
             motion->resetControl();
             params->ctrl.servo = motion->limitServoCommand(
                 params->ctrl.servo, steeringDt, params->config.servoRate);
@@ -905,28 +933,34 @@ public:
         laneHoldWasActive = automaticControlActive && laneHold;
         if (!emergencyStopRequested && params->autoRecoveryFrames > 0)
         {
-            params->ctrl.stop = true;
+            params->setStopReason(control_algorithms::StopReason::STARTUP, true);
             params->ctrl.speed = 0.0f;
             params->ctrl.servo = PWMSERVOMID;
             params->autoRecoveryFrames--;
             if (params->autoRecoveryFrames == 0)
-                params->ctrl.stop = false; // 下一帧允许使用新车道线恢复
+                params->setStopReason(control_algorithms::StopReason::STARTUP, false);
         }
 
         // Reassert after all recovery/control logic so the latch cannot be cleared this frame.
         if (emergencyStopRequested)
         {
-            params->ctrl.stop = true;
+            params->setStopReason(control_algorithms::StopReason::EMERGENCY, true);
             params->ctrl.speed = 0.0f;
             params->ctrl.servo = PWMSERVOMID;
         }
         if (!startupGateReleased)
         {
-            params->ctrl.stop = true;
+            params->setStopReason(control_algorithms::StopReason::STARTUP, true);
             params->ctrl.speed = 0.0f;
             params->ctrl.servo = PWMSERVOMID;
         }
 
+        params->ctrl.stop = params->mustStop();
+        if (params->ctrl.stop)
+        {
+            params->ctrl.speed = 0.0f;
+            params->ctrl.servo = PWMSERVOMID;
+        }
         previousFinalServo = params->ctrl.servo;
 
         // Publish the final command after automatic/manual limiting and all
@@ -942,16 +976,18 @@ public:
             lastOverlayBuilt = overlayNow;
             const bool leftOverlayValid = lanesUpdatedThisFrame &&
                                           (params->track->quality.leftReliable ||
-                                           center->singleSide == -1) &&
+                                           center->singleSide == -1 ||
+                                           center->recoveryMode == LaneRecoveryMode::WEAK_HYBRID) &&
                                           !params->manualTakeover;
             const bool rightOverlayValid = lanesUpdatedThisFrame &&
                                            (params->track->quality.rightReliable ||
-                                            center->singleSide == 1) &&
+                                            center->singleSide == 1 ||
+                                            center->recoveryMode == LaneRecoveryMode::WEAK_HYBRID) &&
                                            !params->manualTakeover;
             const bool lanesValid = leftOverlayValid || rightOverlayValid;
             const bool centerValid = centerUpdatedThisFrame &&
                                      center->controlValid &&
-                                     params->ctrl.centerEdge.size() >= 20 &&
+                                     params->ctrl.centerEdge.size() >= 12 &&
                                      !params->manualTakeover;
             nlohmann::json overlay;
             overlay["frame_id"] = currentFrameId;
@@ -963,6 +999,23 @@ public:
             overlay["steering"] = params->ctrl.servo;
             overlay["center"] = params->ctrl.center;
             overlay["center_error"] = params->ctrl.center - COLSIMAGE / 2;
+            const auto recoveryModeName = [](LaneRecoveryMode mode) {
+                switch (mode) {
+                case LaneRecoveryMode::STRICT_DUAL: return "STRICT_DUAL";
+                case LaneRecoveryMode::RELAXED_DUAL: return "RELAXED_DUAL";
+                case LaneRecoveryMode::WEAK_HYBRID: return "WEAK_HYBRID";
+                case LaneRecoveryMode::LEFT_SINGLE: return "LEFT_SINGLE";
+                case LaneRecoveryMode::RIGHT_SINGLE: return "RIGHT_SINGLE";
+                default: return "INVALID";
+                }
+            };
+            overlay["recovery_mode"] = recoveryModeName(center->recoveryMode);
+            overlay["ctrl_stop"] = params->ctrl.stop;
+            overlay["must_stop"] = params->mustStop();
+            overlay["stop_reasons"] = params->stopReasonString();
+            overlay["camera_stop"] = params->hasStopReason(
+                control_algorithms::StopReason::CAMERA);
+            overlay["lane_safety_stop"] = params->laneSafetyStop;
             overlay["lanes_valid"] = lanesValid;
             overlay["lanes_frame_id"] = lanesValid ? currentFrameId : 0;
             overlay["center_valid"] = centerValid;
@@ -988,6 +1041,8 @@ public:
                 {"lane_confidence", params->track->quality.confidence},
                 {"common_rows", params->track->quality.commonRows},
                 {"invalid_frames", center->laneInvalidFrames},
+                {"recovery_frames", center->laneRecoveryFrames},
+                {"unconfirmed_frames", laneUnconfirmedState.frames},
                 {"left_reliable", params->track->quality.leftReliable},
                 {"right_reliable", params->track->quality.rightReliable},
                 {"left_strict", params->track->quality.leftReliable},
@@ -999,6 +1054,11 @@ public:
                 {"left_border_ratio", params->track->quality.leftBorderRatio},
                 {"right_border_ratio", params->track->quality.rightBorderRatio},
                 {"lane_width_ready", center->laneWidthProfileReady()},
+                {"usable_center_rows", center->usableCenterRows},
+                {"weak_hybrid_active", center->recoveryMode == LaneRecoveryMode::WEAK_HYBRID},
+                {"strict_dual", center->recoveryMode == LaneRecoveryMode::STRICT_DUAL},
+                {"relaxed_dual", center->recoveryMode == LaneRecoveryMode::RELAXED_DUAL},
+                {"selected_recovery_side", center->selectedRecoverySide},
                 {"single_side", center->singleSide},
                 {"raw_center_jump", center->rawCenterJump},
                 {"applied_center_step", center->appliedCenterStep},

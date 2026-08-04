@@ -12,6 +12,17 @@ struct TestPoint
 
 int main()
 {
+    control_algorithms::StopReasonState stopReasons;
+    stopReasons.set(control_algorithms::StopReason::CAMERA, true);
+    stopReasons.set(control_algorithms::StopReason::EMERGENCY, true);
+    assert(stopReasons.mustStop());
+    stopReasons.set(control_algorithms::StopReason::CAMERA, false);
+    assert(stopReasons.mustStop());
+    assert(stopReasons.has(control_algorithms::StopReason::EMERGENCY));
+    assert(stopReasons.string() == "EMERGENCY");
+    stopReasons.set(control_algorithms::StopReason::EMERGENCY, false);
+    assert(!stopReasons.mustStop());
+
     int count = 0;
     const float crossStart = control_algorithms::applyStartupSpeed(
         0.35f, count, 60, 0.10f);
@@ -45,6 +56,12 @@ int main()
     safetyStop = control_algorithms::updateLaneSafetyStop(
         safetyStop, true, false, 1, 0);
     assert(!safetyStop);
+    control_algorithms::LaneUnconfirmedState unconfirmed;
+    for (int i = 0; i < 30; ++i)
+        control_algorithms::updateLaneUnconfirmed(unconfirmed, false, 5);
+    assert(unconfirmed.frames == 30);
+    assert(control_algorithms::updateLaneSafetyStop(
+        false, true, false, 1, 0, 7, 5, unconfirmed.frames, 30));
     for (int recoveryFrame = 1; recoveryFrame <= 4; ++recoveryFrame)
     {
         safetyStop = control_algorithms::updateLaneSafetyStop(
@@ -243,6 +260,38 @@ int main()
     assert(!mostlyBorderReliability.reliable);
     assert(!mostlyBorderReliability.singleEdgeUsable);
     assert(mostlyBorderReliability.interiorPointCount == 9);
+
+    std::vector<TestPoint> wrongLeft, wrongRight;
+    for (int row = 220; row >= 190; --row)
+    {
+        wrongLeft.emplace_back(row, 319);
+        wrongRight.emplace_back(row, 0);
+    }
+    const auto wrongLeftReliability = control_algorithms::assessEdgeReliability(
+        wrongLeft, true, 320, 240, 20, 12);
+    const auto wrongRightReliability = control_algorithms::assessEdgeReliability(
+        wrongRight, false, 320, 240, 20, 12);
+    assert(!wrongLeftReliability.reliable && !wrongLeftReliability.singleEdgeUsable);
+    assert(!wrongRightReliability.reliable && !wrongRightReliability.singleEdgeUsable);
+    assert(wrongLeftReliability.oppositeBorderRun == 31);
+    assert(wrongRightReliability.oppositeBorderRun == 31);
+
+    std::vector<TestPoint> hybridLeft, hybridRight;
+    for (int row = 176; row <= 220; ++row)
+    {
+        hybridLeft.emplace_back(row, row % 3 == 0 ? 0 : 40);
+        hybridRight.emplace_back(row, row % 3 == 1 ? 319 : 280);
+    }
+    const auto hybridCenter = control_algorithms::buildDegradedLaneCenter(
+        hybridLeft, hybridRight, learnedWidths, 240, 320);
+    assert(hybridCenter.size() >= 30);
+    const auto hybridNear = control_algorithms::calculateCenterWindow(
+        hybridCenter, 160.0f, 176, 220, 205, 26, 8);
+    assert(hybridNear.valid && hybridNear.samples >= 8);
+    std::vector<TestPoint> bothBorders{{200, 0}};
+    std::vector<TestPoint> bothBordersRight{{200, 319}};
+    assert(control_algorithms::buildDegradedLaneCenter(
+        bothBorders, bothBordersRight, learnedWidths, 240, 320).empty());
 
     assert(control_algorithms::reconstructSingleLaneCenterColumn(
         40, 240.0f, true) == 160);

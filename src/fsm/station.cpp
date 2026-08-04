@@ -205,7 +205,7 @@ void FsmStation::run(Mat &img)
 
     case Step::STOP:
     {
-        params->ctrl.stop = true;
+        params->setStopReason(control_algorithms::StopReason::STATION, true);
         stopCounter++;
         printf("[Station] Stop %d/90\n", stopCounter);
         if (stopCounter > 90) // 施工区乘客下车等待约3秒
@@ -242,7 +242,7 @@ void FsmStation::setStep(Step st)
     step = st;
     stopCounter = 0;
     pressTimer = 0;
-    params->ctrl.stop = false;
+    params->setStopReason(control_algorithms::StopReason::STATION, false);
 }
 
 void FsmStation::resetLap()

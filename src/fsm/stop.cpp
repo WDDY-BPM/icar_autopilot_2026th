@@ -119,7 +119,7 @@ void FsmStop::run(Mat &img)
         {
             // Loss of AI updates is not evidence that a closed gate is gone.
             setStep(Step::STOP);
-            params->ctrl.stop = true;
+            params->setStopReason(control_algorithms::StopReason::GATE, true);
             params->ctrl.speed = 0.0f;
         }
         break;
@@ -127,7 +127,7 @@ void FsmStop::run(Mat &img)
 
     case Step::STOP:
     {
-        params->ctrl.stop = true; // fail safe: stale AI must never open the gate
+        params->setStopReason(control_algorithms::StopReason::GATE, true);
         if (!params->aiResultFresh)
             break;
 
@@ -143,7 +143,7 @@ void FsmStop::run(Mat &img)
         if (countSes >= 30)
         {
             setStep(Step::NONE);
-            params->ctrl.stop = false;
+            params->setStopReason(control_algorithms::StopReason::GATE, false);
         }
         break;
     }
@@ -329,6 +329,7 @@ void FsmStop::setStep(Step st)
 
 void FsmStop::resetLap()
 {
+    params->setStopReason(control_algorithms::StopReason::GATE, false);
     setStep(Step::NONE);
     polyRoad.clear();
     polyCar.clear();

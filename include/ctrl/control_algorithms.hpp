@@ -3,9 +3,74 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include <cstdint>
+#include <string>
 
 namespace control_algorithms
 {
+enum class StopReason : std::uint32_t
+{
+    STARTUP = 1u << 0, CAMERA = 1u << 1, EMERGENCY = 1u << 2,
+    LANE = 1u << 3, GATE = 1u << 4, PARK = 1u << 5,
+    BUSY = 1u << 6, STATION = 1u << 7, CROSS = 1u << 8,
+    MANUAL = 1u << 9
+};
+
+class StopReasonState
+{
+public:
+    void set(StopReason reason, bool active)
+    {
+        const auto bit = static_cast<std::uint32_t>(reason);
+        bits = active ? bits | bit : bits & ~bit;
+    }
+    bool has(StopReason reason) const
+    {
+        return (bits & static_cast<std::uint32_t>(reason)) != 0;
+    }
+    bool mustStop() const { return bits != 0; }
+    std::uint32_t value() const { return bits; }
+    std::string string() const
+    {
+        if (!bits) return "NONE";
+        std::string result;
+        const auto append = [&](StopReason reason, const char *name) {
+            if (!has(reason)) return;
+            if (!result.empty()) result += "|";
+            result += name;
+        };
+        append(StopReason::STARTUP, "STARTUP"); append(StopReason::CAMERA, "CAMERA");
+        append(StopReason::EMERGENCY, "EMERGENCY"); append(StopReason::LANE, "LANE");
+        append(StopReason::GATE, "GATE"); append(StopReason::PARK, "PARK");
+        append(StopReason::BUSY, "BUSY"); append(StopReason::STATION, "STATION");
+        append(StopReason::CROSS, "CROSS"); append(StopReason::MANUAL, "MANUAL");
+        return result;
+    }
+private:
+    std::uint32_t bits = 0;
+};
+
+struct LaneUnconfirmedState
+{
+    int frames = 0;
+    int stableFrames = 0;
+};
+
+inline int updateLaneUnconfirmed(LaneUnconfirmedState &state,
+                                 bool confirmedValid, int clearFrames = 5)
+{
+    if (confirmedValid)
+    {
+        state.stableFrames++;
+        if (state.stableFrames >= clearFrames) state.frames = 0;
+    }
+    else
+    {
+        state.frames++;
+        state.stableFrames = 0;
+    }
+    return state.frames;
+}
 struct LaneRecoveryState
 {
     int invalidFrames = 0;
@@ -24,11 +89,14 @@ inline bool updateLaneSafetyStop(bool latched, bool safetyLaneMode,
                                  bool controlValid, int invalidFrames,
                                  int recoveryFrames,
                                  int stopAfterInvalidFrames = 7,
-                                 int releaseAfterRecoveryFrames = 5)
+                                 int releaseAfterRecoveryFrames = 5,
+                                 int unconfirmedFrames = 0,
+                                 int unconfirmedLimit = 30)
 {
     if (!safetyLaneMode) return false;
     if (!latched)
-        return !controlValid && invalidFrames >= stopAfterInvalidFrames;
+        return !controlValid && (invalidFrames >= stopAfterInvalidFrames ||
+                                 unconfirmedFrames >= unconfirmedLimit);
     if (controlValid && recoveryFrames >= releaseAfterRecoveryFrames)
         return false;
     return true;
@@ -69,6 +137,10 @@ struct EdgeReliability
     int pointCount = 0;
     int interiorPointCount = 0;
     int longestBorderRun = 0;
+    int leftBorderRun = 0;
+    int rightBorderRun = 0;
+    int expectedBorderRun = 0;
+    int oppositeBorderRun = 0;
     float borderRatio = 1.0f;
     float maximumJump = 0.0f;
     bool coversBottom = false;
@@ -84,6 +156,7 @@ inline EdgeReliability assessEdgeReliability(const std::vector<Point> &edge,
     result.pointCount = static_cast<int>(edge.size());
     if (edge.empty()) return result;
     int borderPoints = 0, currentBorderRun = 0, nearestRow = 0;
+    int leftRun = 0, rightRun = 0;
     int previousColumn = edge.front().y;
     for (std::size_t i = 0; i < edge.size(); ++i)
     {
@@ -93,7 +166,13 @@ inline EdgeReliability assessEdgeReliability(const std::vector<Point> &edge,
             result.maximumJump = std::max(result.maximumJump,
                 static_cast<float>(std::abs(point.y - previousColumn)));
         previousColumn = point.y;
-        const bool onBorder = leftEdge ? point.y <= 2 : point.y >= imageWidth - 3;
+        const bool onLeftBorder = point.y <= 2;
+        const bool onRightBorder = point.y >= imageWidth - 3;
+        const bool onBorder = leftEdge ? onLeftBorder : onRightBorder;
+        leftRun = onLeftBorder ? leftRun + 1 : 0;
+        rightRun = onRightBorder ? rightRun + 1 : 0;
+        result.leftBorderRun = std::max(result.leftBorderRun, leftRun);
+        result.rightBorderRun = std::max(result.rightBorderRun, rightRun);
         if (onBorder)
         {
             borderPoints++;
@@ -101,15 +180,20 @@ inline EdgeReliability assessEdgeReliability(const std::vector<Point> &edge,
             result.longestBorderRun = std::max(result.longestBorderRun, currentBorderRun);
         }
         else currentBorderRun = 0;
-        if (!onBorder) result.interiorPointCount++;
+        if (!onLeftBorder && !onRightBorder) result.interiorPointCount++;
     }
     result.borderRatio = static_cast<float>(borderPoints) / edge.size();
     result.coversBottom = nearestRow >= imageHeight - rowCutBottom - 4;
     const bool borderFailure = result.borderRatio > 0.25f && result.longestBorderRun >= 8;
+    result.expectedBorderRun = leftEdge ? result.leftBorderRun : result.rightBorderRun;
+    result.oppositeBorderRun = leftEdge ? result.rightBorderRun : result.leftBorderRun;
+    const bool oppositeBorderFailure = result.oppositeBorderRun >= 3;
     result.reliable = result.pointCount >= 20 && result.coversBottom &&
-                      result.maximumJump <= 30.0f && !borderFailure;
+                      result.maximumJump <= 30.0f && !borderFailure &&
+                      !oppositeBorderFailure;
     result.singleEdgeUsable = result.pointCount >= 20 && result.coversBottom &&
         result.maximumJump <= 30.0f &&
+        !oppositeBorderFailure && result.interiorPointCount >= interiorPointsMinimum &&
         (!borderFailure || result.interiorPointCount >= interiorPointsMinimum);
     return result;
 }
@@ -162,6 +246,44 @@ inline std::vector<Point> reconstructSingleLaneCenter(
             edge[i].y, laneWidthProfile[row], leftEdge);
         if (column > 0 && column < imageColumns)
             center.emplace_back(row, column);
+    }
+    return center;
+}
+
+template <typename Point, typename WidthProfile>
+inline std::vector<Point> buildDegradedLaneCenter(
+    const std::vector<Point> &left, const std::vector<Point> &right,
+    const WidthProfile &laneWidthProfile, int imageRows, int imageColumns,
+    float maximumWidthError = 0.35f)
+{
+    std::vector<int> leftByRow(imageRows, -1), rightByRow(imageRows, -1);
+    for (const auto &point : left)
+        if (point.x >= 0 && point.x < imageRows) leftByRow[point.x] = point.y;
+    for (const auto &point : right)
+        if (point.x >= 0 && point.x < imageRows) rightByRow[point.x] = point.y;
+    std::vector<Point> center;
+    for (int row = 0; row < imageRows; ++row)
+    {
+        const float learnedWidth = laneWidthProfile[row];
+        if (learnedWidth <= 1.0f) continue;
+        const bool leftInterior = leftByRow[row] > 2 &&
+                                  leftByRow[row] < imageColumns - 3;
+        const bool rightInterior = rightByRow[row] > 2 &&
+                                   rightByRow[row] < imageColumns - 3;
+        int column = -1;
+        if (leftInterior && rightInterior && rightByRow[row] > leftByRow[row])
+        {
+            const float width = rightByRow[row] - leftByRow[row];
+            if (std::abs(width - learnedWidth) / learnedWidth <= maximumWidthError)
+                column = (leftByRow[row] + rightByRow[row]) / 2;
+        }
+        else if (leftInterior)
+            column = reconstructSingleLaneCenterColumn(
+                leftByRow[row], learnedWidth, true);
+        else if (rightInterior)
+            column = reconstructSingleLaneCenterColumn(
+                rightByRow[row], learnedWidth, false);
+        if (column > 0 && column < imageColumns) center.emplace_back(row, column);
     }
     return center;
 }

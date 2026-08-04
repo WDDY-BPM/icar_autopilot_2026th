@@ -357,6 +357,12 @@ class TakeoverConsole:
         cv2.putText(frame, recovery_info, (8, frame.shape[0] - 64),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 255, 0), 1,
                     cv2.LINE_AA)
+        stop_info = "lane=%s stop=%s" % (
+            overlay.get("recovery_mode", "?"),
+            overlay.get("stop_reasons", "NONE"))
+        cv2.putText(frame, stop_info, (8, frame.shape[0] - 82),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 255, 0), 1,
+                    cv2.LINE_AA)
         info = "mode=%s speed=%.2f servo=%d err=%d edge=%d/%d valid=%d/%d" % (
             overlay.get("mode", "?"), float(overlay.get("speed", 0.0)),
             int(overlay.get("steering", 1500)),

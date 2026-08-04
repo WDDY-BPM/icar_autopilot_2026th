@@ -74,7 +74,6 @@ struct Control
     bool parking = false;         // 停车场特殊模式
     int countAcc = 500;           // Speed launch-envelope counter
     int startupSteeringCount = 500; // Independent startup steering limiter
-    int outlineCooldown = 0;      // outlineCheck冷却计数器（停车场出库后暂时禁用）
     bool yforkReset = false;      // Y型岔路复位标志（park退出时设置）
 };
 /**
@@ -188,6 +187,17 @@ struct Config
 struct Params
 {
 public:
+    control_algorithms::StopReasonState stopReasons;
+    void setStopReason(control_algorithms::StopReason reason, bool active)
+    {
+        stopReasons.set(reason, active);
+    }
+    bool hasStopReason(control_algorithms::StopReason reason) const
+    {
+        return stopReasons.has(reason);
+    }
+    bool mustStop() const { return stopReasons.mustStop(); }
+    string stopReasonString() const { return stopReasons.string(); }
     /**
      * @brief Construct a new Params object
      *

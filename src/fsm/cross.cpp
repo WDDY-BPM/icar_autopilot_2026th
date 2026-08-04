@@ -249,7 +249,7 @@ void FsmCross::run(Mat &img)
         }
 
         // 最后一圈：停车并退出程序
-        params->ctrl.stop = true; // 停车标志
+        params->setStopReason(control_algorithms::StopReason::CROSS, true);
         timeout++;
         if (timeout >= 50)
         {
@@ -297,6 +297,6 @@ void FsmCross::setStep(Step st)
     countRec = 0;          // AI场景识别计数器
     countSes = 0;          // 场次计数器
     timeout = 0;           // 超时计数器
-    params->ctrl.stop = false;
+    params->setStopReason(control_algorithms::StopReason::CROSS, false);
     countCross = 0;
 }

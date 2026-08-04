@@ -213,7 +213,7 @@ void FsmBusy::run(Mat &img)
                 {
                     if (!drivingThrough)
                     { // 行驶通过模式不重新停车
-                        params->ctrl.stop = true;
+                        params->setStopReason(control_algorithms::StopReason::BUSY, true);
                         params->ctrl.speed = 0;
                         params->ctrl.servo = PWMSERVOMID; // 方向回中
                     }
@@ -262,6 +262,7 @@ void FsmBusy::run(Mat &img)
                     {
                         cout << "[Busy] Manual takeover NOT enabled in current lap config" << endl;
                         slowing = true; // 手动接管未启用时减速通过
+                        params->setStopReason(control_algorithms::StopReason::BUSY, false);
                         timeout = 0;
                     }
                 }
@@ -366,7 +367,7 @@ void FsmBusy::handleParkingSpot()
                     if (pressTimer > 9)
                     { // 0.3秒（9帧）
                         // 执行停车
-                        params->ctrl.stop = true;
+                        params->setStopReason(control_algorithms::StopReason::BUSY, true);
                         params->ctrl.speed = 0;
                         params->ctrl.servo = PWMSERVOMID;
                         stopCounter++;
@@ -433,6 +434,7 @@ bool FsmBusy::isStationDetected()
  */
 void FsmBusy::endParkingSequence()
 {
+    params->setStopReason(control_algorithms::StopReason::BUSY, false);
     parkingState = PARKING_COMPLETE;
     parkingStationMaskTime = 30; // 屏蔽1秒，避免重复检测
     parkingStationCount = 0;
@@ -449,6 +451,8 @@ void FsmBusy::endParkingSequence()
  */
 void FsmBusy::startManualTakeover()
 {
+    params->setStopReason(control_algorithms::StopReason::BUSY, false);
+    params->setStopReason(control_algorithms::StopReason::MANUAL, true);
     manualTakeover = true;
     waitingForTakeover = false;
     printf("[Busy] Manual takeover active. Pass the obstacle and press R/RETURN before the first station box.\n");
@@ -459,6 +463,8 @@ void FsmBusy::startManualTakeover()
  */
 void FsmBusy::endManualTakeover()
 {
+    params->setStopReason(control_algorithms::StopReason::MANUAL, false);
+    params->setStopReason(control_algorithms::StopReason::BUSY, false);
     manualTakeover = false;
     waitingForTakeover = false; // 改为false，不进入BUSY_WAIT
     enable = true;              // 保持在施工区模式
@@ -497,6 +503,8 @@ void FsmBusy::endManualTakeover()
 
 void FsmBusy::resetLap()
 {
+    params->setStopReason(control_algorithms::StopReason::BUSY, false);
+    params->setStopReason(control_algorithms::StopReason::MANUAL, false);
     enable = false;
     manualTakeover = false;
     waitingForTakeover = true;

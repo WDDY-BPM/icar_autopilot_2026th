@@ -149,7 +149,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("limitSingleLaneCenter", center)
         self.assertIn("reconstructSingleLaneCenter", center)
         self.assertNotIn("i += 2", center[center.index("Center::centerCompute"):])
-        self.assertIn("singleSide != 0 && laneWidthProfileReady()", center)
+        self.assertIn("recoveryMode == LaneRecoveryMode::WEAK_HYBRID", center)
         self.assertIn("borderClippedHeadingConfidence", center)
         self.assertIn("leftSingleUsable", track)
         self.assertIn("left_single_usable", core)
@@ -169,6 +169,22 @@ class LaneControlBehaviorTests(unittest.TestCase):
         center_cpp = (ROOT / "src/ctrl/center.cpp").read_text(encoding="utf-8")
         self.assertNotIn("derailmentCheck", center_h + center_cpp)
         self.assertNotIn("ICAR Outline", center_h + center_cpp)
+        motion = (ROOT / "include/ctrl/motion.hpp").read_text(encoding="utf-8")
+        self.assertNotIn("outlineCheck", motion)
+        self.assertNotIn("std::_Exit", motion)
+
+    def test_degraded_modes_and_stop_arbitration_are_published(self):
+        center = (ROOT / "src/ctrl/center.cpp").read_text(encoding="utf-8")
+        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        self.assertNotIn("params->track->pointsEdgeLeft.clear()", center)
+        self.assertNotIn("params->track->pointsEdgeRight.clear()", center)
+        self.assertIn("buildDegradedLaneCenter", center)
+        self.assertIn("LaneRecoveryMode::WEAK_HYBRID", center)
+        for field in ("recovery_mode", "strict_dual", "relaxed_dual",
+                      "stop_reasons", "unconfirmed_frames", "camera_stop"):
+            self.assertIn(field, core)
+        self.assertEqual(core.count("params->ctrl.stop ="), 2)
+        self.assertEqual(core.count("params->ctrl.stop = params->mustStop();"), 2)
 
     def test_single_reliable_edge_is_published_independently(self):
         core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
@@ -209,7 +225,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn('laneQuality.leftReliable &&', core)
         self.assertIn('laneQuality.commonRows >= 20', core)
         self.assertNotIn('laneQuality.centerJump <= 8.0f', core)
-        self.assertIn('params->track->quality.commonRows >= 20', center)
+        self.assertIn('laneQuality.commonRows >= 20', center)
 
     def test_visual_cone_confirmation_reaches_icar(self):
         launcher = (ROOT / 'src/start.py').read_text(encoding='utf-8')
@@ -293,7 +309,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("motion->syncServoCommand(previousFinalServo)", core)
         self.assertNotIn("derailmentCheck", center)
         self.assertNotIn("ICAR Outline", center)
-        self.assertIn("center->laneRecoveryFrames > 0", core)
+        self.assertIn("laneUnconfirmedState.frames > 0", core)
         self.assertIn("params->track->allowOuterEnvelope = !forkMarkerActive", core)
         self.assertIn("!allowCoherentEnvelope", track)
         self.assertLess(predeal.index("bitwise_not(imgBin, imgInv)"),

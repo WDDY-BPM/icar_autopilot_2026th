@@ -469,7 +469,7 @@ void FsmPark::run(Mat &img)
 
     case Step::PARKING: // 停车
     {
-        params->ctrl.stop = true; // 停车标志
+        params->setStopReason(control_algorithms::StopReason::PARK, true);
         timeout++;
         if (timeout > 20)
             setStep(Step::WAIT_PICKUP);
@@ -479,7 +479,7 @@ void FsmPark::run(Mat &img)
 
     case Step::WAIT_PICKUP: // 等待乘客上车
     {
-        params->ctrl.stop = true;
+        params->setStopReason(control_algorithms::StopReason::PARK, true);
         timeout++;
         if (timeout > 90) // 约3秒，防止永久等待
         {
@@ -492,7 +492,7 @@ void FsmPark::run(Mat &img)
 
     case Step::EXIT: // 出库
     {
-        params->ctrl.stop = false; // 停车标志
+        params->setStopReason(control_algorithms::StopReason::PARK, false);
         params->ctrl.back = true;  // 倒车
 
         if (pointsEdgeLeftPast.size() < 1 || pointsEdgeRightPast.size() < 1)
@@ -607,7 +607,6 @@ void FsmPark::run(Mat &img)
         {
             const bool exitConfirmed = countRes > 2;
             params->ctrl.countAcc = params->config.startupRampFrames;        // 跳过缓加速，直接恢复速度
-            params->ctrl.outlineCooldown = 90; // 出库后约4.5秒内禁用outlineCheck
             params->ctrl.yforkReset = true;    // 通知yfork复位，防止残留forkSeen误触发
             if (exitConfirmed)
                 params->completeLapTask("park-exit");
@@ -1111,6 +1110,7 @@ void FsmPark::findParkCars(vector<PredictResult> results)
 
 void FsmPark::resetLap()
 {
+    params->setStopReason(control_algorithms::StopReason::PARK, false);
     reset();
     spots.reset();
     pointsEdgeLeftPast.clear();

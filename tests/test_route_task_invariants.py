@@ -40,7 +40,7 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIn("buildRowAlignedCenter", center)
         self.assertIn("laneWidthProfile[row]", center)
         self.assertIn("laneWidthProfileReady()", center)
-        self.assertIn("laneInvalidFrames <= 6", core)
+        self.assertIn("laneUnconfirmedState.frames > 0", core)
         self.assertIn("control_algorithms::updateLaneRecovery", center)
         self.assertIn("params->track->quality.leftReliable", core)
         self.assertIn("params->track->quality.rightReliable", core)
@@ -125,11 +125,11 @@ class RouteTaskInvariantTests(unittest.TestCase):
         stale_timeout = enable.group(0).index("else if (timeout > 50)")
         stale_branch = enable.group(0)[stale_timeout:]
         self.assertIn("setStep(Step::STOP)", stale_branch)
-        self.assertIn("params->ctrl.stop = true", stale_branch)
+        self.assertIn("StopReason::GATE, true", stale_branch)
         self.assertIn("params->ctrl.speed = 0.0f", stale_branch)
         self.assertNotIn("setStep(Step::NONE)", stale_branch)
         self.assertIn("if (!params->aiResultFresh)", stopped.group(0))
-        self.assertIn("params->ctrl.stop = true", stopped.group(0))
+        self.assertIn("StopReason::GATE, true", stopped.group(0))
         self.assertNotIn("timeout", stopped.group(0))
         self.assertIn("countSes >= 30", stopped.group(0))
 
@@ -164,7 +164,7 @@ class RouteTaskInvariantTests(unittest.TestCase):
         station = (ROOT / "src" / "fsm" / "station.cpp").read_text(encoding="utf-8")
         pickup = re.search(r"case Step::WAIT_PICKUP:.*?break;", park, re.DOTALL)
         self.assertIsNotNone(pickup)
-        self.assertIn("params->ctrl.stop = true;", pickup.group(0))
+        self.assertIn("StopReason::PARK, true", pickup.group(0))
         self.assertIn("timeout > 90", pickup.group(0))
         self.assertIn("stopCounter > 90", station)
 

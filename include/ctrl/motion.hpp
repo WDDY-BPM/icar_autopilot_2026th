@@ -180,60 +180,6 @@ public:
         putText(img, str, Point(COLSIMAGE - 100, 120), FONT_HERSHEY_PLAIN, 1, Scalar(0, 0, 255), 1); // 速度
     }
 
-    /**
-     * @brief 车辆冲出赛道检测（保护车辆）
-     *
-     * @param track
-     * @return true
-     * @return false
-     */
-    void outlineCheck(shared_ptr<Params> &params)
-    {
-        // 停车场模式下车辆主动脱离赛道线，不检测
-        if (params->ctrl.parking)
-        {
-            countRes = 0;
-            outline = false;
-            return;
-        }
-
-        // 出库后冷却期，给车辆时间重新捕获赛道线
-        if (params->ctrl.outlineCooldown > 0)
-        {
-            params->ctrl.outlineCooldown--;
-            countRes = 0;
-            outline = false;
-            return;
-        }
-
-        if (outline) // 已出现
-        {
-            params->ctrl.stop = true; // 停车
-            countRes++;
-            if (countRes > 15)
-            {
-                std::cout << "-----> [Stop] Game over, system exit!!! <-----" << std::endl;
-                std::_Exit(0); // 直接退出，跳过静态析构避免ONNX崩溃
-            }
-        }
-        else // 出线检测
-        {
-            if (params->track->pointsEdgeLeft.size() < 30 &&
-                params->track->pointsEdgeRight.size() < 30) // 防止车辆冲出赛道
-            {
-                countRes++;
-                countOut = 0;
-                if (countRes > 30)
-                    outline = true;
-            }
-            else
-            {
-                countRes = 0; // 边线恢复立即归零，避免跨圈/跨路段累加
-                countOut = 0;
-            }
-        }
-    }
-
 private:
     static float sanitizeDt(float dtSeconds)
     {
@@ -244,7 +190,4 @@ private:
     float filteredError = 0.0f;
     float errorLast = 0.0f;
     int lastServo = PWMSERVOMID;
-    int countRes = 0;
-    int countOut = 0;
-    bool outline = false; // 出线标志
 };
