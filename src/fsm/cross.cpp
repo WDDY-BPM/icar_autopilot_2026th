@@ -297,6 +297,7 @@ void FsmCross::setStep(Step st)
     countRec = 0;          // AI场景识别计数器
     countSes = 0;          // 场次计数器
     timeout = 0;           // 超时计数器
-    params->setStopReason(control_algorithms::StopReason::CROSS, false);
+    params->setStopReason(control_algorithms::StopReason::CROSS,
+                          st == Step::STOP);
     countCross = 0;
 }

@@ -165,18 +165,31 @@ void Center::fitting(shared_ptr<Params> &params)
     if (visionLaneMode)
     {
         params->ctrl.centerEdge.clear();
+        const auto interiorOnly = [](const vector<PointX> &edge) {
+            vector<PointX> interior;
+            std::copy_if(edge.begin(), edge.end(), std::back_inserter(interior),
+                [](const PointX &point) {
+                    return point.y > 2 && point.y < COLSIMAGE - 3;
+                });
+            return interior;
+        };
+        const auto nearSampleCount = [](const vector<PointX> &centerline) {
+            return static_cast<int>(std::count_if(centerline.begin(), centerline.end(),
+                [](const PointX &point) { return point.x >= 176 && point.x <= 220; }));
+        };
         if (recoveryMode == LaneRecoveryMode::STRICT_DUAL ||
             recoveryMode == LaneRecoveryMode::RELAXED_DUAL)
             params->ctrl.centerEdge = buildRowAlignedCenter(
                 detectedLeft, detectedRight, false);
         else if (recoveryMode == LaneRecoveryMode::LEFT_SINGLE)
-            params->ctrl.centerEdge = centerCompute(detectedLeft, 0);
+            params->ctrl.centerEdge = centerCompute(interiorOnly(detectedLeft), 0);
         else if (recoveryMode == LaneRecoveryMode::RIGHT_SINGLE)
-            params->ctrl.centerEdge = centerCompute(detectedRight, 1);
+            params->ctrl.centerEdge = centerCompute(interiorOnly(detectedRight), 1);
         else if (recoveryMode == LaneRecoveryMode::WEAK_HYBRID)
         {
             params->ctrl.centerEdge = buildDegradedLaneCenter(detectedLeft, detectedRight);
-            if (params->ctrl.centerEdge.size() < 12)
+            if (params->ctrl.centerEdge.size() < 12 ||
+                nearSampleCount(params->ctrl.centerEdge) < 8)
             {
                 if (recoverySideHoldFrames <= 0 || selectedRecoverySide == 0)
                 {

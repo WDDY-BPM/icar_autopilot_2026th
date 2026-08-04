@@ -379,8 +379,31 @@ private:
 
         fsmFactory.stop->run(img); // 停车区识别与规划
         params->mode = fsmFactory.stop->getMode();
+        if (params->hasStopReason(control_algorithms::StopReason::GATE))
+            return;
         fsmFactory.cross->run(img); // 斑马线停车识别与规划
         params->mode = fsmFactory.cross->getMode();
+        if (params->hasStopReason(control_algorithms::StopReason::CROSS))
+            return;
+
+        if (params->hasStopReason(control_algorithms::StopReason::PARK))
+        {
+            fsmFactory.park->run(img);
+            params->mode = fsmFactory.park->getMode();
+            return;
+        }
+        if (params->hasStopReason(control_algorithms::StopReason::BUSY))
+        {
+            fsmFactory.busy->run(img);
+            params->mode = fsmFactory.busy->getMode();
+            return;
+        }
+        if (params->hasStopReason(control_algorithms::StopReason::STATION))
+        {
+            fsmFactory.station->run(img);
+            params->mode = fsmFactory.station->getMode();
+            return;
+        }
 
         // ===== 路线隔离：仅在当前圈使能时调用对应FSM =====
         if (params->config.park)
@@ -391,6 +414,8 @@ private:
                 FsmMode mode = fsmFactory.park->getMode();
                 if (mode != FsmMode::NORMAL)
                     params->mode = mode;
+                if (params->hasStopReason(control_algorithms::StopReason::PARK))
+                    return;
             }
         }
         if (params->config.fork)
@@ -420,6 +445,8 @@ private:
             fsmFactory.busy->run(img);
             if (params->mode == FsmMode::NORMAL)
                 params->mode = fsmFactory.busy->getMode();
+            if (params->hasStopReason(control_algorithms::StopReason::BUSY))
+                return;
             // 施工区鸣笛（每秒3次，间隔10帧≈333ms）
             if (params->busyAlertCountdown > 0)
             {
@@ -435,6 +462,8 @@ private:
             // 不覆盖YFORK模式，让yfork状态能正常显示
             if (stationMode != FsmMode::NORMAL && params->mode != FsmMode::YFORK)
                 params->mode = stationMode;
+            if (params->hasStopReason(control_algorithms::StopReason::STATION))
+                return;
         }
 
         // 全局障碍物检测（锥桶/行人），施工区/停车场/Y型岔路口期间不检测
@@ -894,7 +923,13 @@ public:
                 center->recoveryMode == LaneRecoveryMode::WEAK_HYBRID ||
                 center->recoveryMode == LaneRecoveryMode::LEFT_SINGLE ||
                 center->recoveryMode == LaneRecoveryMode::RIGHT_SINGLE;
-            if (lowConfidenceLane)
+            const bool strictDualLane =
+                center->recoveryMode == LaneRecoveryMode::STRICT_DUAL;
+            const bool retainedSingleLaneLimit =
+                control_algorithms::updateSingleLaneSpeedLimit(
+                    singleLaneSpeedLimit, strictLaneMode, center->controlValid,
+                    strictDualLane, strictDualLane, 5, lowConfidenceLane);
+            if (retainedSingleLaneLimit)
                 params->ctrl.speed = std::min(params->ctrl.speed, 0.15f);
             else if (center->recoveryMode == LaneRecoveryMode::RELAXED_DUAL)
                 params->ctrl.speed = std::min(params->ctrl.speed,
@@ -903,7 +938,8 @@ public:
             if (strictLaneMode && laneUnconfirmedState.frames > 0)
             {
                 params->ctrl.speed = std::min(params->ctrl.speed, 0.10f);
-                params->ctrl.servo = motion->syncServoCommand(previousFinalServo);
+                if (!center->controlValid)
+                    params->ctrl.servo = motion->syncServoCommand(previousFinalServo);
             }
         }
         else if (automaticControlActive && laneHold)

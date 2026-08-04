@@ -322,6 +322,8 @@ void FsmStop::drawPolygon(Mat img, vector<Point> poly, bool fill, bool close)
 void FsmStop::setStep(Step st)
 {
     step = st;
+    params->setStopReason(control_algorithms::StopReason::GATE,
+                          st == Step::STOP);
     countRec = 0; // AI场景识别计数器
     countSes = 0; // 场次计数器
     timeout = 0;  // 超时计数器

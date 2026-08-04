@@ -73,6 +73,9 @@ void FsmPark::run(Mat &img)
 {
     if (!params->config.park) // 该模式未启用
         return;
+    if (params->mustStop() &&
+        !params->hasStopReason(control_algorithms::StopReason::PARK))
+        return;
 
     if (step != Step::NONE)
         params->track->spurroad.clear(); // 停车场活动期间清除岔路红点，防止yfork误检
@@ -804,6 +807,8 @@ void FsmPark::setStep(Step st)
     countSes = 0; // 场次计数器
     timeout = 0;  // 超时计数器
     step = st;    // 停车步骤
+    params->setStopReason(control_algorithms::StopReason::PARK,
+        st == Step::PARKING || st == Step::WAIT_PICKUP);
     if (st == Step::FORKOUT)
         forkOutStartedAt = std::chrono::steady_clock::now();
     countIn = 0;  // 入库矫正计数器

@@ -242,7 +242,8 @@ void FsmStation::setStep(Step st)
     step = st;
     stopCounter = 0;
     pressTimer = 0;
-    params->setStopReason(control_algorithms::StopReason::STATION, false);
+    params->setStopReason(control_algorithms::StopReason::STATION,
+                          st == Step::STOP);
 }
 
 void FsmStation::resetLap()

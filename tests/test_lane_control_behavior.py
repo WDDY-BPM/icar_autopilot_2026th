@@ -186,6 +186,21 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertEqual(core.count("params->ctrl.stop ="), 2)
         self.assertEqual(core.count("params->ctrl.stop = params->mustStop();"), 2)
 
+    def test_recovery_controls_and_fsm_freezing_are_wired(self):
+        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        center = (ROOT / "src/ctrl/center.cpp").read_text(encoding="utf-8")
+        park = (ROOT / "src/fsm/park.cpp").read_text(encoding="utf-8")
+        self.assertIn("nearSampleCount(params->ctrl.centerEdge) < 8", center)
+        self.assertIn("centerCompute(interiorOnly(detectedLeft), 0)", center)
+        self.assertIn("centerCompute(interiorOnly(detectedRight), 1)", center)
+        self.assertIn("updateSingleLaneSpeedLimit", core)
+        hold = core[core.index("if (strictLaneMode && laneUnconfirmedState.frames > 0)"):]
+        hold = hold[:hold.index("\n            }")]
+        self.assertIn("if (!center->controlValid)", hold)
+        self.assertIn("StopReason::GATE))\n            return;", core)
+        self.assertIn("StopReason::CROSS))\n            return;", core)
+        self.assertIn("params->mustStop()", park)
+
     def test_single_reliable_edge_is_published_independently(self):
         core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
         self.assertIn("const bool leftOverlayValid", core)
