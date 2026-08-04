@@ -129,6 +129,35 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertTrue(continuous(175, 160))
         self.assertFalse(continuous(176, 160))
 
+    def test_border_clipped_single_edge_recovery_is_wired(self):
+        algorithms = (ROOT / "include/ctrl/control_algorithms.hpp").read_text(encoding="utf-8")
+        track = (ROOT / "src/ctrl/track.cpp").read_text(encoding="utf-8")
+        center = (ROOT / "src/ctrl/center.cpp").read_text(encoding="utf-8")
+        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        self.assertIn("result.singleEdgeUsable", algorithms)
+        self.assertIn("result.interiorPointCount >= interiorPointsMinimum", algorithms)
+        self.assertIn("limitSingleLaneCenter", center)
+        self.assertIn("singleSide != 0 && laneWidthProfileReady()", center)
+        self.assertIn("borderClippedHeadingConfidence", center)
+        self.assertIn("leftSingleUsable", track)
+        self.assertIn("left_single_usable", core)
+        self.assertIn("raw_center_jump", core)
+        self.assertIn("control_valid", core)
+
+    def test_startup_does_not_accept_weakened_single_edge(self):
+        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        lane_valid = core[core.index("const bool laneValid ="):]
+        lane_valid = lane_valid[:lane_valid.index(";")]
+        self.assertIn("leftReliable", lane_valid)
+        self.assertIn("rightReliable", lane_valid)
+        self.assertNotIn("SingleUsable", lane_valid)
+
+    def test_obsolete_outline_stop_path_remains_removed(self):
+        center_h = (ROOT / "include/ctrl/center.hpp").read_text(encoding="utf-8")
+        center_cpp = (ROOT / "src/ctrl/center.cpp").read_text(encoding="utf-8")
+        self.assertNotIn("derailmentCheck", center_h + center_cpp)
+        self.assertNotIn("ICAR Outline", center_h + center_cpp)
+
     def test_single_reliable_edge_is_published_independently(self):
         core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
         self.assertIn("const bool leftOverlayValid", core)

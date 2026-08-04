@@ -346,6 +346,17 @@ class TakeoverConsole:
         cv2.putText(frame, heading_info, (8, frame.shape[0] - 46),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 0), 1,
                     cv2.LINE_AA)
+        recovery_info = "strict=%d/%d usable=%d/%d side=%d jump=%+d step=%+d" % (
+            int(edge.get("left_strict", edge.get("left_reliable", False))),
+            int(edge.get("right_strict", edge.get("right_reliable", False))),
+            int(edge.get("left_single_usable", False)),
+            int(edge.get("right_single_usable", False)),
+            int(edge.get("single_side", 0)),
+            int(edge.get("raw_center_jump", 0)),
+            int(edge.get("applied_center_step", 0)))
+        cv2.putText(frame, recovery_info, (8, frame.shape[0] - 64),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 255, 0), 1,
+                    cv2.LINE_AA)
         info = "mode=%s speed=%.2f servo=%d err=%d edge=%d/%d valid=%d/%d" % (
             overlay.get("mode", "?"), float(overlay.get("speed", 0.0)),
             int(overlay.get("steering", 1500)),

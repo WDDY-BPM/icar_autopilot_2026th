@@ -55,6 +55,9 @@ public:
     int farCenterSamples = 0;
     bool nearCenterValid = false;
     bool farCenterValid = false;
+    int singleSide = 0; // -1 left edge, +1 right edge, 0 dual/invalid
+    int rawCenterJump = 0;
+    int appliedCenterStep = 0;
 
     void fitting(shared_ptr<Params> &params);
     void observeLaneWidth(const vector<PointX> &left, const vector<PointX> &right,
@@ -78,5 +81,6 @@ private:
     int laneWidthObservationFrames = 0;
     int lastValidCenter = COLSIMAGE / 2;
     int lastValidLaneCenter = COLSIMAGE / 2;
+    int previousLaneDiagnosticState = -99;
     control_algorithms::LaneRecoveryState laneRecoveryState;
 };

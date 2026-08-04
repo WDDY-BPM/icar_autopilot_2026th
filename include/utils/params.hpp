@@ -100,7 +100,11 @@ struct Config
     float laneHeadingMaxCorrection = 60.0f;     // Maximum heading steering term (PWM)
     float laneHeadingFadeError = 40.0f;
     float singleLaneHeadingConfidence = 0.45f;
+    float borderClippedHeadingConfidence = 0.35f;
     float parkingHeadingConfidence = 0.65f;
+    int singleLaneInteriorPointsMin = 12;
+    int singleLaneMaxCenterJump = 45;
+    int singleLaneCenterStep = 8;
     float steeringFilterTau = 0.065f;
     float maxErrorRate = 360.0f;
     float servoRate = 600.0f;
@@ -173,7 +177,7 @@ struct Config
     bool obstacle = true; // 障碍物避障使能（锥桶/行人）
 
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(Config, velLow, velHigh, velSlow, velPark, velCurve, velBusy, velStop, velCross, velYfork,
-                                   runP1, runP2, turnD, laneHeadingGain, laneHeadingMaxCorrection, laneHeadingFadeError, singleLaneHeadingConfidence, parkingHeadingConfidence, steeringFilterTau, maxErrorRate, servoRate, startupServoRate, startupServoLimit, startupStableFrames, startupRampFrames, startupSpeed, maxGapRows, debug, saveImg, saveIpm, rowCutUp, rowCutBottom,
+                                   runP1, runP2, turnD, laneHeadingGain, laneHeadingMaxCorrection, laneHeadingFadeError, singleLaneHeadingConfidence, borderClippedHeadingConfidence, parkingHeadingConfidence, singleLaneInteriorPointsMin, singleLaneMaxCenterJump, singleLaneCenterStep, steeringFilterTau, maxErrorRate, servoRate, startupServoRate, startupServoLimit, startupStableFrames, startupRampFrames, startupSpeed, maxGapRows, debug, saveImg, saveIpm, rowCutUp, rowCutBottom,
                                    overlap, score, binary, model, video, alertTarget, totalLaps, fork, fine, park, spot, curve, busy, slow, stop, cross, yfork, station);
 };
 
@@ -219,7 +223,11 @@ public:
             config.laneHeadingMaxCorrection = configs["通用配置参数"].value("laneHeadingMaxCorrection", 60.0f);
             config.laneHeadingFadeError = configs["通用配置参数"].value("laneHeadingFadeError", 40.0f);
             config.singleLaneHeadingConfidence = configs["通用配置参数"].value("singleLaneHeadingConfidence", 0.45f);
+            config.borderClippedHeadingConfidence = configs["通用配置参数"].value("borderClippedHeadingConfidence", 0.35f);
             config.parkingHeadingConfidence = configs["通用配置参数"].value("parkingHeadingConfidence", 0.65f);
+            config.singleLaneInteriorPointsMin = configs["通用配置参数"].value("singleLaneInteriorPointsMin", 12);
+            config.singleLaneMaxCenterJump = configs["通用配置参数"].value("singleLaneMaxCenterJump", 45);
+            config.singleLaneCenterStep = configs["通用配置参数"].value("singleLaneCenterStep", 8);
             config.steeringFilterTau = configs["通用配置参数"].value("steeringFilterTau", 0.065f);
             config.maxErrorRate = configs["通用配置参数"].value("maxErrorRate", 360.0f);
             config.servoRate = configs["通用配置参数"].value("servoRate", 600.0f);
@@ -331,6 +339,7 @@ public:
         track->rowCutUp = config.rowCutUp;         // 图像顶部切行（前瞻距离）
         track->rowCutBottom = config.rowCutBottom;
         track->maxGapRows = config.maxGapRows; // 图像底部切行（盲区距离）
+        track->singleLaneInteriorPointsMin = config.singleLaneInteriorPointsMin;
 
         // 初始化圈数和斑马线通过状态
         totalLaps = std::max(1, std::min(config.totalLaps, 3));

@@ -184,6 +184,42 @@ int main()
     assert(stuckReliability.borderRatio > 0.99f);
     assert(stuckReliability.longestBorderRun == 31);
 
+    std::vector<TestPoint> clippedRight;
+    for (int row = 220; row >= 190; --row)
+    {
+        const int index = 220 - row;
+        clippedRight.emplace_back(row, index < 19 ? 319 : 300);
+    }
+    const auto clippedReliability = control_algorithms::assessEdgeReliability(
+        clippedRight, false, 320, 240, 20, 12);
+    assert(!clippedReliability.reliable);
+    assert(clippedReliability.singleEdgeUsable);
+    assert(clippedReliability.interiorPointCount == 12);
+
+    std::vector<TestPoint> mostlyBorderRight;
+    for (int row = 220; row >= 190; --row)
+    {
+        const int index = 220 - row;
+        mostlyBorderRight.emplace_back(row, index < 22 ? 319 : 300);
+    }
+    const auto mostlyBorderReliability = control_algorithms::assessEdgeReliability(
+        mostlyBorderRight, false, 320, 240, 20, 12);
+    assert(!mostlyBorderReliability.reliable);
+    assert(!mostlyBorderReliability.singleEdgeUsable);
+    assert(mostlyBorderReliability.interiorPointCount == 9);
+
+    assert(control_algorithms::reconstructSingleLaneCenterColumn(
+        40, 240.0f, true) == 160);
+    assert(control_algorithms::reconstructSingleLaneCenterColumn(
+        280, 240.0f, false) == 160);
+    const auto acceptedCenter = control_algorithms::limitSingleLaneCenter(
+        190, 160, 45, 8);
+    assert(acceptedCenter.valid && acceptedCenter.rawJump == 30);
+    assert(acceptedCenter.appliedCenter == 168 && acceptedCenter.appliedStep == 8);
+    const auto rejectedCenter = control_algorithms::limitSingleLaneCenter(
+        206, 160, 45, 8);
+    assert(!rejectedCenter.valid && rejectedCenter.appliedCenter == 160);
+
     std::vector<TestPoint> left{{220, 40}, {216, 44}};
     std::vector<TestPoint> right{{220, 280}, {216, 276}};
     std::vector<TestPoint> width{{220, 240}, {216, 232}};

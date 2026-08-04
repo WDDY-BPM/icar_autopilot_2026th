@@ -392,11 +392,17 @@ void Track::evaluateQuality()
 {
     quality = LaneQuality{};
     const auto leftReliability = control_algorithms::assessEdgeReliability(
-        pointsEdgeLeft, true, COLSIMAGE, ROWSIMAGE, rowCutBottom);
+        pointsEdgeLeft, true, COLSIMAGE, ROWSIMAGE, rowCutBottom,
+        singleLaneInteriorPointsMin);
     const auto rightReliability = control_algorithms::assessEdgeReliability(
-        pointsEdgeRight, false, COLSIMAGE, ROWSIMAGE, rowCutBottom);
+        pointsEdgeRight, false, COLSIMAGE, ROWSIMAGE, rowCutBottom,
+        singleLaneInteriorPointsMin);
     quality.leftReliable = leftReliability.reliable;
     quality.rightReliable = rightReliability.reliable;
+    quality.leftSingleUsable = leftReliability.singleEdgeUsable;
+    quality.rightSingleUsable = rightReliability.singleEdgeUsable;
+    quality.leftInteriorPoints = leftReliability.interiorPointCount;
+    quality.rightInteriorPoints = rightReliability.interiorPointCount;
     quality.leftBorderRatio = leftReliability.borderRatio;
     quality.rightBorderRatio = rightReliability.borderRatio;
     quality.leftLongestBorderRun = leftReliability.longestBorderRun;

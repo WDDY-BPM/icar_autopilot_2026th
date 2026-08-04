@@ -865,7 +865,8 @@ public:
             if (control_algorithms::updateSingleLaneSpeedLimit(
                     singleLaneSpeedLimit, strictLaneMode, center->controlValid,
                     params->track->quality.leftReliable,
-                    params->track->quality.rightReliable, 5))
+                    params->track->quality.rightReliable, 5,
+                    center->singleSide != 0))
                 params->ctrl.speed = std::min(params->ctrl.speed, 0.15f);
 
             if (strictLaneMode && !center->controlValid &&
@@ -938,10 +939,12 @@ public:
         {
             lastOverlayBuilt = overlayNow;
             const bool leftOverlayValid = lanesUpdatedThisFrame &&
-                                          params->track->quality.leftReliable &&
+                                          (params->track->quality.leftReliable ||
+                                           center->singleSide == -1) &&
                                           !params->manualTakeover;
             const bool rightOverlayValid = lanesUpdatedThisFrame &&
-                                           params->track->quality.rightReliable &&
+                                           (params->track->quality.rightReliable ||
+                                            center->singleSide == 1) &&
                                            !params->manualTakeover;
             const bool lanesValid = leftOverlayValid || rightOverlayValid;
             const bool centerValid = centerUpdatedThisFrame &&
@@ -985,8 +988,19 @@ public:
                 {"invalid_frames", center->laneInvalidFrames},
                 {"left_reliable", params->track->quality.leftReliable},
                 {"right_reliable", params->track->quality.rightReliable},
+                {"left_strict", params->track->quality.leftReliable},
+                {"right_strict", params->track->quality.rightReliable},
+                {"left_single_usable", params->track->quality.leftSingleUsable},
+                {"right_single_usable", params->track->quality.rightSingleUsable},
+                {"left_interior_points", params->track->quality.leftInteriorPoints},
+                {"right_interior_points", params->track->quality.rightInteriorPoints},
                 {"left_border_ratio", params->track->quality.leftBorderRatio},
-                {"right_border_ratio", params->track->quality.rightBorderRatio}
+                {"right_border_ratio", params->track->quality.rightBorderRatio},
+                {"lane_width_ready", center->laneWidthProfileReady()},
+                {"single_side", center->singleSide},
+                {"raw_center_jump", center->rawCenterJump},
+                {"applied_center_step", center->appliedCenterStep},
+                {"control_valid", center->controlValid}
             };
 
             auto samplePoints = [](const std::vector<PointX> &points) {

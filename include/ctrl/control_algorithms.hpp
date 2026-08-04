@@ -51,7 +51,9 @@ struct LaneControlCenters
 struct EdgeReliability
 {
     bool reliable = false;
+    bool singleEdgeUsable = false;
     int pointCount = 0;
+    int interiorPointCount = 0;
     int longestBorderRun = 0;
     float borderRatio = 1.0f;
     float maximumJump = 0.0f;
@@ -61,7 +63,8 @@ struct EdgeReliability
 template <typename Point>
 inline EdgeReliability assessEdgeReliability(const std::vector<Point> &edge,
                                              bool leftEdge, int imageWidth,
-                                             int imageHeight, int rowCutBottom)
+                                             int imageHeight, int rowCutBottom,
+                                             int interiorPointsMinimum = 12)
 {
     EdgeReliability result;
     result.pointCount = static_cast<int>(edge.size());
@@ -84,13 +87,49 @@ inline EdgeReliability assessEdgeReliability(const std::vector<Point> &edge,
             result.longestBorderRun = std::max(result.longestBorderRun, currentBorderRun);
         }
         else currentBorderRun = 0;
+        if (!onBorder) result.interiorPointCount++;
     }
     result.borderRatio = static_cast<float>(borderPoints) / edge.size();
     result.coversBottom = nearestRow >= imageHeight - rowCutBottom - 4;
     const bool borderFailure = result.borderRatio > 0.25f && result.longestBorderRun >= 8;
     result.reliable = result.pointCount >= 20 && result.coversBottom &&
                       result.maximumJump <= 30.0f && !borderFailure;
+    result.singleEdgeUsable = result.pointCount >= 20 && result.coversBottom &&
+        result.maximumJump <= 30.0f &&
+        (!borderFailure || result.interiorPointCount >= interiorPointsMinimum);
     return result;
+}
+
+struct SingleLaneCenterResult
+{
+    bool valid = false;
+    int rawJump = 0;
+    int appliedCenter = 0;
+    int appliedStep = 0;
+};
+
+inline SingleLaneCenterResult limitSingleLaneCenter(int candidateCenter,
+                                                    int previousCenter,
+                                                    int maximumJump = 45,
+                                                    int maximumStep = 8)
+{
+    SingleLaneCenterResult result;
+    result.rawJump = candidateCenter - previousCenter;
+    result.appliedCenter = previousCenter;
+    if (std::abs(result.rawJump) > std::max(0, maximumJump)) return result;
+    result.valid = true;
+    result.appliedStep = std::clamp(result.rawJump,
+        -std::max(0, maximumStep), std::max(0, maximumStep));
+    result.appliedCenter = previousCenter + result.appliedStep;
+    return result;
+}
+
+inline int reconstructSingleLaneCenterColumn(int edgeColumn, float laneWidth,
+                                             bool leftEdge)
+{
+    const float halfWidth = std::max(0.0f, laneWidth) * 0.5f;
+    return static_cast<int>(std::lround(leftEdge
+        ? edgeColumn + halfWidth : edgeColumn - halfWidth));
 }
 
 inline bool isSingleLaneCenterContinuous(int currentCenter,
@@ -131,7 +170,8 @@ inline bool updateLaneRecovery(LaneRecoveryState &state, bool candidateValid,
 inline bool updateSingleLaneSpeedLimit(SingleLaneSpeedLimitState &state,
                                        bool strictLaneMode, bool controlValid,
                                        bool leftReliable, bool rightReliable,
-                                       int requiredDualLaneFrames = 5)
+                                       int requiredDualLaneFrames = 5,
+                                       bool recoveredSingleEdge = false)
 {
     if (!strictLaneMode)
     {
@@ -139,7 +179,7 @@ inline bool updateSingleLaneSpeedLimit(SingleLaneSpeedLimitState &state,
         return false;
     }
     const bool singleLaneControl = controlValid &&
-        (leftReliable != rightReliable);
+        ((leftReliable != rightReliable) || recoveredSingleEdge);
     const bool dualLaneControl = controlValid && leftReliable && rightReliable;
     if (singleLaneControl)
     {

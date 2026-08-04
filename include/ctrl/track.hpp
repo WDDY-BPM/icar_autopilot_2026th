@@ -44,6 +44,10 @@ public:
         bool coversBottom = false;
         bool leftReliable = false;
         bool rightReliable = false;
+        bool leftSingleUsable = false;
+        bool rightSingleUsable = false;
+        int leftInteriorPoints = 0;
+        int rightInteriorPoints = 0;
         float leftBorderRatio = 1.0f;
         float rightBorderRatio = 1.0f;
         int leftLongestBorderRun = 0;
@@ -60,6 +64,7 @@ public:
     uint16_t rowCutUp = 1;          // 图像顶部切行
     uint16_t rowCutBottom = 20;
     int maxGapRows = 8;
+    int singleLaneInteriorPointsMin = 12;
     bool allowOuterEnvelope = true; // Disabled while an AI fork marker is active
     LaneQuality quality;
 

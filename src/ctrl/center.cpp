@@ -80,15 +80,32 @@ void Center::fitting(shared_ptr<Params> &params)
     farCenterSamples = 0;
     nearCenterValid = false;
     farCenterValid = false;
+    singleSide = 0;
+    rawCenterJump = 0;
+    appliedCenterStep = 0;
     const bool visionLaneMode = !params->ctrl.fitting &&
         (params->mode == FsmMode::NORMAL || params->mode == FsmMode::CURVE ||
          params->mode == FsmMode::CROSS || params->mode == FsmMode::STOP ||
          params->mode == FsmMode::SLOW || params->mode == FsmMode::STATION);
+    const auto &laneQuality = params->track->quality;
+    if (visionLaneMode)
+    {
+        if (laneQuality.leftReliable && laneQuality.rightReliable)
+            singleSide = 0;
+        else if (laneQuality.leftReliable)
+            singleSide = -1;
+        else if (laneQuality.rightReliable)
+            singleSide = 1;
+        else if (laneQuality.leftSingleUsable != laneQuality.rightSingleUsable)
+            singleSide = laneQuality.leftSingleUsable ? -1 : 1;
+    }
     if (!params->ctrl.fitting)           // 除停车场特殊绘制
     {
-        if (visionLaneMode && !params->track->quality.leftReliable)
+        if (visionLaneMode && !(laneQuality.leftReliable && laneQuality.rightReliable) &&
+            singleSide != -1)
             params->track->pointsEdgeLeft.clear();
-        if (visionLaneMode && !params->track->quality.rightReliable)
+        if (visionLaneMode && !(laneQuality.leftReliable && laneQuality.rightReliable) &&
+            singleSide != 1)
             params->track->pointsEdgeRight.clear();
         params->ctrl.centerEdge.clear();
         vector<PointX> v_center(4); // 三阶贝塞尔曲线
@@ -178,15 +195,17 @@ void Center::fitting(shared_ptr<Params> &params)
             params->track->quality.leftReliable &&
             params->track->quality.rightReliable &&
             params->track->quality.commonRows >= 20;
-        const bool singleLaneHeading = visionLaneMode &&
-            (params->track->quality.leftReliable !=
-             params->track->quality.rightReliable) &&
+        const bool singleLaneHeading = visionLaneMode && singleSide != 0 &&
             laneWidthProfileReady() && params->ctrl.centerEdge.size() >= 20;
+        const bool singleEdgeStrict = singleSide == -1
+            ? laneQuality.leftReliable : laneQuality.rightReliable;
         const float pathHeadingConfidence = parkingHeadingMode
             ? params->config.parkingHeadingConfidence
             : (dualLaneHeading ? 1.0f
                                : (singleLaneHeading
-                                   ? params->config.singleLaneHeadingConfidence
+                                   ? (singleEdgeStrict
+                                       ? params->config.singleLaneHeadingConfidence
+                                       : params->config.borderClippedHeadingConfidence)
                                    : 0.0f));
         const int minimumSamples = parkingHeadingMode ? 4 : 8;
         const auto centers = control_algorithms::calculateLaneControlCenters(
@@ -260,13 +279,21 @@ void Center::fitting(shared_ptr<Params> &params)
                            params->track->quality.rightReliable &&
                            params->track->quality.coversBottom &&
                            params->track->quality.commonRows >= 20;
-    const bool singleCenterContinuous =
-        control_algorithms::isSingleLaneCenterContinuous(
-            params->ctrl.center, lastValidLaneCenter, 15);
-    const bool singleValid =
-        (params->track->quality.leftReliable != params->track->quality.rightReliable) &&
-        laneWidthProfileReady() && params->ctrl.centerEdge.size() >= 20 &&
-        singleCenterContinuous;
+    bool singleCenterContinuous = false;
+    if (singleSide != 0 && laneWidthProfileReady() &&
+        params->ctrl.centerEdge.size() >= 20)
+    {
+        const auto limited = control_algorithms::limitSingleLaneCenter(
+            params->ctrl.center, lastValidLaneCenter,
+            params->config.singleLaneMaxCenterJump,
+            params->config.singleLaneCenterStep);
+        rawCenterJump = limited.rawJump;
+        appliedCenterStep = limited.appliedStep;
+        singleCenterContinuous = limited.valid;
+        if (limited.valid) params->ctrl.center = limited.appliedCenter;
+    }
+    const bool singleValid = singleSide != 0 && laneWidthProfileReady() &&
+        params->ctrl.centerEdge.size() >= 20 && singleCenterContinuous;
     const bool candidateValid = controlWindowValid &&
                                 params->ctrl.centerEdge.size() >= 20 &&
                                 (bothValid || singleValid);
@@ -297,6 +324,29 @@ void Center::fitting(shared_ptr<Params> &params)
         laneRecoveryFrames = 0;
         if (controlValid)
             lastValidCenter = params->ctrl.center;
+    }
+    const bool dualStrict = laneQuality.leftReliable && laneQuality.rightReliable;
+    const int laneDiagnosticState = dualStrict ? 0 :
+        (singleSide != 0 ? singleSide : 2);
+    if (visionLaneMode && laneDiagnosticState != previousLaneDiagnosticState)
+    {
+        const char *sideName = laneDiagnosticState < 0 ? "left" :
+            (laneDiagnosticState == 1 ? "right" :
+             (laneDiagnosticState == 0 ? "dual" : "invalid"));
+        std::cout << "[Lane] singleSide=" << sideName
+                  << " leftStrict=" << laneQuality.leftReliable
+                  << " rightStrict=" << laneQuality.rightReliable
+                  << " leftSingleUsable=" << laneQuality.leftSingleUsable
+                  << " rightSingleUsable=" << laneQuality.rightSingleUsable
+                  << " leftInteriorPoints=" << laneQuality.leftInteriorPoints
+                  << " rightInteriorPoints=" << laneQuality.rightInteriorPoints
+                  << " leftBorderRatio=" << laneQuality.leftBorderRatio
+                  << " rightBorderRatio=" << laneQuality.rightBorderRatio
+                  << " laneWidthReady=" << laneWidthProfileReady()
+                  << " rawCenterJump=" << rawCenterJump
+                  << " appliedCenterStep=" << appliedCenterStep
+                  << " controlValid=" << controlValid << std::endl;
+        previousLaneDiagnosticState = laneDiagnosticState;
     }
 }
 
@@ -511,10 +561,8 @@ vector<PointX> Center::centerCompute(vector<PointX> pointsEdge, int side)
         const int row = pointsEdge[i].x;
         if (row < 0 || row >= ROWSIMAGE || laneWidthProfile[row] <= 1.0f)
             continue;
-        const float halfWidth = laneWidthProfile[row] * 0.5f;
-        const int column = side == 0
-            ? static_cast<int>(std::lround(pointsEdge[i].y + halfWidth))
-            : static_cast<int>(std::lround(pointsEdge[i].y - halfWidth));
+        const int column = control_algorithms::reconstructSingleLaneCenterColumn(
+            pointsEdge[i].y, laneWidthProfile[row], side == 0);
         if (column > 0 && column < COLSIMAGE)
             center.emplace_back(row, column);
     }
