@@ -48,6 +48,8 @@ public:
     int laneRecoveryFrames = 0;
     int nearCenter = COLSIMAGE / 2;
     int farCenter = COLSIMAGE / 2;
+    float headingError = 0.0f;
+    float headingCorrection = 0.0f;
     int nearCenterSamples = 0;
     int farCenterSamples = 0;
     bool nearCenterValid = false;

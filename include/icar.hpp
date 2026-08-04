@@ -875,6 +875,8 @@ public:
                     ? center->nearCenter - COLSIMAGE / 2 : 0},
                 {"far_error", center->farCenterValid
                     ? center->farCenter - COLSIMAGE / 2 : 0},
+                {"heading_error", center->headingError},
+                {"heading_correction", center->headingCorrection},
                 {"near_samples", center->nearCenterSamples},
                 {"far_samples", center->farCenterSamples},
                 {"lane_confidence", params->track->quality.confidence},

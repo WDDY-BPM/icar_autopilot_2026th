@@ -72,6 +72,9 @@ void Center::fitting(shared_ptr<Params> &params)
     params->ctrl.center = COLSIMAGE / 2; // 控制中心
     nearCenter = COLSIMAGE / 2;
     farCenter = COLSIMAGE / 2;
+    headingError = 0.0f;
+    headingCorrection = 0.0f;
+    params->ctrl.laneHeadingCorrection = 0.0f;
     nearCenterSamples = 0;
     farCenterSamples = 0;
     nearCenterValid = false;
@@ -167,10 +170,20 @@ void Center::fitting(shared_ptr<Params> &params)
     bool controlWindowValid = true;
     if (visionLaneMode)
     {
+        const bool headingReliable =
+            params->track->quality.valid &&
+            (params->track->quality.leftReliable ||
+             params->track->quality.rightReliable);
         const auto centers = control_algorithms::calculateLaneControlCenters(
-            params->ctrl.centerEdge, COLSIMAGE / 2.0f);
+            params->ctrl.centerEdge, COLSIMAGE / 2.0f, 0.65f, 8,
+            headingReliable, params->config.laneHeadingGain,
+            params->config.laneHeadingMaxCorrection,
+            params->config.laneHeadingFadeError);
         nearCenterSamples = centers.nearSamples;
         farCenterSamples = centers.farSamples;
+        headingError = centers.headingError;
+        headingCorrection = centers.headingCorrection;
+        params->ctrl.laneHeadingCorrection = centers.headingCorrection;
         nearCenterValid = centers.nearValid;
         farCenterValid = centers.farValid;
         if (nearCenterValid)

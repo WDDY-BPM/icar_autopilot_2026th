@@ -67,6 +67,7 @@ struct Control
     uint16_t servo = PWMSERVOMID; // 发送给舵机的PWM
     float speed = 0.0;            // 发送给电机的速度
     int center = COLSIMAGE / 2;   // 控制中心
+    float laneHeadingCorrection = 0.0f; // Independent lane-heading steering term (PWM)
     vector<PointX> centerEdge;    // 赛道中心点集
     int lineArea = 0;             // 面积规划行序号
     bool fitting = false;         // 控制中心拟合标志(停车场专用)
@@ -95,11 +96,14 @@ struct Config
     float runP1 = 2.2;                                  // 比例系数：直线控制量
     float runP2 = 0.007;                                // 动态P变化系数
     float turnD = 0.027;
+    float laneHeadingGain = 300.0f;             // PWM per radian
+    float laneHeadingMaxCorrection = 60.0f;     // Maximum heading steering term (PWM)
+    float laneHeadingFadeError = 40.0f;
     float steeringFilterTau = 0.065f;
     float maxErrorRate = 360.0f;
     float servoRate = 600.0f;
-    float startupServoRate = 300.0f;
-    int startupServoLimit = 120;
+    float startupServoRate = 550.0f;
+    int startupServoLimit = 180;
     int startupStableFrames = 12;
     int startupRampFrames = 60;
     float startupSpeed = 0.10f;
@@ -167,7 +171,7 @@ struct Config
     bool obstacle = true; // 障碍物避障使能（锥桶/行人）
 
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(Config, velLow, velHigh, velSlow, velPark, velCurve, velBusy, velStop, velCross, velYfork,
-                                   runP1, runP2, turnD, steeringFilterTau, maxErrorRate, servoRate, startupServoRate, startupServoLimit, startupStableFrames, startupRampFrames, startupSpeed, maxGapRows, debug, saveImg, saveIpm, rowCutUp, rowCutBottom,
+                                   runP1, runP2, turnD, laneHeadingGain, laneHeadingMaxCorrection, laneHeadingFadeError, steeringFilterTau, maxErrorRate, servoRate, startupServoRate, startupServoLimit, startupStableFrames, startupRampFrames, startupSpeed, maxGapRows, debug, saveImg, saveIpm, rowCutUp, rowCutBottom,
                                    overlap, score, binary, model, video, alertTarget, totalLaps, fork, fine, park, spot, curve, busy, slow, stop, cross, yfork, station);
 };
 
@@ -209,11 +213,14 @@ public:
             config.runP1 = configs["通用配置参数"]["runP1"];
             config.runP2 = configs["通用配置参数"]["runP2"];
             config.turnD = configs["通用配置参数"]["turnD"];
+            config.laneHeadingGain = configs["通用配置参数"].value("laneHeadingGain", 300.0f);
+            config.laneHeadingMaxCorrection = configs["通用配置参数"].value("laneHeadingMaxCorrection", 60.0f);
+            config.laneHeadingFadeError = configs["通用配置参数"].value("laneHeadingFadeError", 40.0f);
             config.steeringFilterTau = configs["通用配置参数"].value("steeringFilterTau", 0.065f);
             config.maxErrorRate = configs["通用配置参数"].value("maxErrorRate", 360.0f);
             config.servoRate = configs["通用配置参数"].value("servoRate", 600.0f);
-            config.startupServoRate = configs["通用配置参数"].value("startupServoRate", 300.0f);
-            config.startupServoLimit = configs["通用配置参数"].value("startupServoLimit", 120);
+            config.startupServoRate = configs["通用配置参数"].value("startupServoRate", 550.0f);
+            config.startupServoLimit = configs["通用配置参数"].value("startupServoLimit", 180);
             config.startupStableFrames = configs["通用配置参数"].value("startupStableFrames", 12);
             config.startupRampFrames = configs["通用配置参数"].value("startupRampFrames", 60);
             config.startupSpeed = configs["通用配置参数"].value("startupSpeed", 0.10f);

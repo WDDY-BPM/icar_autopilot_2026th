@@ -139,8 +139,9 @@ class LaneControlBehaviorTests(unittest.TestCase):
     def test_steering_json_fallbacks_match_tuned_defaults(self):
         params = (ROOT / "include/utils/params.hpp").read_text(encoding="utf-8")
         self.assertIn('value("servoRate", 600.0f)', params)
-        self.assertIn('value("startupServoRate", 300.0f)', params)
-        self.assertIn('value("startupServoLimit", 120)', params)
+        self.assertIn('value("startupServoRate", 550.0f)', params)
+        self.assertIn('value("startupServoLimit", 180)', params)
+        self.assertIn('value("laneHeadingGain", 300.0f)', params)
 
     def test_normal_lane_speed_uses_centerline_curvature(self):
         motion = (ROOT / 'include/ctrl/motion.hpp').read_text(encoding='utf-8')
@@ -154,8 +155,10 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertNotIn('params->ctrl.lineArea', motion)
         self.assertIn('control_algorithms::calculateLaneControlCenters', center)
         self.assertIn('const bool candidateValid = controlWindowValid', center)
-        self.assertIn('180, 220, 205, 26', algorithms)
-        self.assertIn('120, 175, 145, 31', algorithms)
+        self.assertIn('176, 220, 205, 26', algorithms)
+        self.assertIn('90, 155, 120, 31', algorithms)
+        self.assertIn('std::atan2', algorithms)
+        self.assertIn('params->ctrl.laneHeadingCorrection', motion)
         self.assertIn('near_center', core)
         self.assertIn('nearErr=%+d farErr=%+d ctrlErr=%+d', client)
 

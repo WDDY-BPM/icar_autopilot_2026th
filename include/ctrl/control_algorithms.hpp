@@ -39,6 +39,8 @@ struct LaneControlCenters
     float nearCenter = 0.0f;
     float farCenter = 0.0f;
     float controlCenter = 0.0f;
+    float headingError = 0.0f;
+    float headingCorrection = 0.0f;
     int nearSamples = 0;
     int farSamples = 0;
     bool nearValid = false;
@@ -189,12 +191,15 @@ inline CenterWindowResult calculateCenterWindow(
 template <typename Point>
 inline LaneControlCenters calculateLaneControlCenters(
     const std::vector<Point> &centerline, float defaultCenter,
-    float nearBlend = 0.80f, int minimumSamples = 8)
+    float nearBlend = 0.65f, int minimumSamples = 8,
+    bool enableHeadingCorrection = false, float headingGain = 300.0f,
+    float maximumHeadingCorrection = 60.0f,
+    float headingFadeError = 40.0f)
 {
     const auto near = calculateCenterWindow(
-        centerline, defaultCenter, 180, 220, 205, 26, minimumSamples);
+        centerline, defaultCenter, 176, 220, 205, 26, minimumSamples);
     const auto far = calculateCenterWindow(
-        centerline, defaultCenter, 120, 175, 145, 31, minimumSamples);
+        centerline, defaultCenter, 90, 155, 120, 31, minimumSamples);
 
     LaneControlCenters result;
     result.nearCenter = near.column;
@@ -213,6 +218,37 @@ inline LaneControlCenters calculateLaneControlCenters(
         nearBlend = std::clamp(nearBlend, 0.0f, 1.0f);
         result.controlCenter = nearBlend * near.column +
             (1.0f - nearBlend) * far.column;
+        // Lane-relative vehicle heading in camera coordinates. Unlike the old
+        // column delta this is an angle and is independent of window spacing.
+        constexpr float rowSeparation = 85.0f; // near peak 205 - far peak 120
+        result.headingError = std::atan2(
+            far.column - near.column, rowSeparation);
+
+        if (enableHeadingCorrection)
+        {
+            const float nearError = near.column - defaultCenter;
+            const float farError = far.column - defaultCenter;
+            const bool oppositeSideRecovery =
+                (nearError > 4.0f && farError < -8.0f) ||
+                (nearError < -4.0f && farError > 8.0f);
+
+            // Keep heading feedback active during lateral recovery. Completely
+            // fading it out lets the car point away from the lane while the
+            // lateral controller is trying to return to the center.
+            const float fadeRange = std::max(1.0f, headingFadeError);
+            const float headingWeight = std::max(0.35f, 1.0f - std::clamp(
+                std::abs(nearError) / fadeRange, 0.0f, 1.0f));
+            const float correctionLimit =
+                std::max(0.0f, maximumHeadingCorrection);
+            if (!oppositeSideRecovery)
+            {
+                result.headingCorrection = std::clamp(
+                    std::max(0.0f, headingGain) * result.headingError *
+                        headingWeight,
+                    -correctionLimit, correctionLimit);
+                // Applied independently by Motion::poseControl as a PWM term.
+            }
+        }
     }
     return result;
 }

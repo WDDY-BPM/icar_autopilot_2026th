@@ -339,6 +339,12 @@ class TakeoverConsole:
         cv2.putText(frame, lane_info, (8, frame.shape[0] - 28),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 0), 1,
                     cv2.LINE_AA)
+        heading_info = "headErr=%+.1f headCorr=%+.1f" % (
+            float(edge.get("heading_error", 0.0)),
+            float(edge.get("heading_correction", 0.0)))
+        cv2.putText(frame, heading_info, (8, frame.shape[0] - 46),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 0), 1,
+                    cv2.LINE_AA)
         info = "mode=%s speed=%.2f servo=%d err=%d edge=%d/%d valid=%d/%d" % (
             overlay.get("mode", "?"), float(overlay.get("speed", 0.0)),
             int(overlay.get("steering", 1500)),

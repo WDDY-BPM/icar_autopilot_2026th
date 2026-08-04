@@ -45,10 +45,10 @@ public:
 
         if (!controlInitialized)
         {
-            // Build the first steering command from neutral through the normal
-            // error-rate limiter instead of accepting a full first-frame error.
-            filteredError = 0.0f;
-            errorLast = 0.0f;
+            // Start from the measured error. Starting at zero delayed the first
+            // useful steering response by several frames.
+            filteredError = rawError;
+            errorLast = rawError;
             controlInitialized = true;
         }
         else
@@ -65,7 +65,8 @@ public:
                                params->config.runP1;
         const float derivative = (error - errorLast) / dt;
         const int pwmDiff = static_cast<int>(std::lround(
-            error * currentP + derivative * params->config.turnD));
+            error * currentP + derivative * params->config.turnD +
+            params->ctrl.laneHeadingCorrection));
 
         // Clamp in the signed domain before converting to uint16_t. Automatic
         // and manual steering share the same time-based actuator rate limiter.
