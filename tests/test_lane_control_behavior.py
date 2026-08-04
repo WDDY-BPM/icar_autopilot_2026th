@@ -198,6 +198,23 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn('heading_confidence', core)
         self.assertIn('headErr=%+.3f', client)
 
+    def test_cached_rectification_and_startup_diagnostics(self):
+        predeal = (ROOT / 'src/ctrl/predeal.cpp').read_text(encoding='utf-8')
+        core = (ROOT / 'include/icar.hpp').read_text(encoding='utf-8')
+        launcher = (ROOT / 'src/start.py').read_text(encoding='utf-8')
+        self.assertIn('!enable || img.empty()', predeal)
+        self.assertNotIn('remap(img, img', predeal)
+        self.assertIn('cv::Mat corrected;', predeal)
+        self.assertIn('remap(img, corrected', predeal)
+        self.assertIn('img = std::move(corrected);', predeal)
+        self.assertIn('undistortMapSize != sizeImage', predeal)
+        self.assertIn('undistortMapSize = sizeImage', predeal)
+        for field in ('leftReliable', 'rightReliable', 'coversBottom',
+                      'coneMissing', 'laneFrames'):
+            self.assertIn(field, core)
+        self.assertIn('ICAR_START_CONE_PRECONFIRMED', launcher)
+        self.assertIn('ICAR_START_CONE_PRECONFIRMED', core)
+
     def test_lane_center_validation_speeds_are_conservative(self):
         config = json.loads((ROOT / 'res/config.json').read_text(
             encoding='utf-8'))['通用配置参数']

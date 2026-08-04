@@ -102,19 +102,22 @@ cv::Mat Predeal::binaryzation(cv::Mat &img)
  */
 void Predeal::correction(cv::Mat &img)
 {
-    if (enable)
+    if (!enable || img.empty())
+        return;
+
+    const cv::Size sizeImage = img.size();
+    if (undistortMapX.empty() || undistortMapSize != sizeImage)
     {
-        const Size sizeImage(img.cols, img.rows);
-        if (undistortMapX.empty() || undistortMapSize != sizeImage)
-        {
-            const cv::Mat rotMatrix = cv::Mat::eye(3, 3, CV_32F);
-            initUndistortRectifyMap(
-                cameraMatrix, distCoeffs, rotMatrix, cameraMatrix,
-                sizeImage, CV_32FC1, undistortMapX, undistortMapY);
-            undistortMapSize = sizeImage;
-        }
-        remap(img, img, undistortMapX, undistortMapY, INTER_LINEAR);
+        const cv::Mat rotMatrix = cv::Mat::eye(3, 3, CV_32F);
+        initUndistortRectifyMap(
+            cameraMatrix, distCoeffs, rotMatrix, cameraMatrix,
+            sizeImage, CV_32FC1, undistortMapX, undistortMapY);
+        undistortMapSize = sizeImage;
     }
+
+    cv::Mat corrected;
+    remap(img, corrected, undistortMapX, undistortMapY, INTER_LINEAR);
+    img = std::move(corrected);
 }
 
 /**

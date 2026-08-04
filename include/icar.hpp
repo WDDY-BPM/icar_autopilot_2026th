@@ -104,6 +104,7 @@ private:
     int startupLaneValidCount = 0;
     int startupDiagnosticFrames = 0;
     bool startupEnvironmentChecked = false;
+    bool startupConeDetected = false;
 
     bool updateStartupGate(bool receivedNewAiResult)
     {
@@ -124,9 +125,10 @@ private:
         if (startupGateState == StartupGateState::RELEASED)
             return true;
 
-        bool coneDetected = false;
+        bool coneDetected = startupConeDetected;
         if (receivedNewAiResult)
         {
+            coneDetected = false;
             for (const auto &result : params->results)
             {
                 if (result.type == LABEL_CONE && result.width >= 10 && result.height >= 10)
@@ -135,6 +137,7 @@ private:
                     break;
                 }
             }
+            startupConeDetected = coneDetected;
         }
 
         const auto &laneQuality = params->track->quality;
@@ -199,11 +202,15 @@ private:
             const char *state = startupGateState == StartupGateState::WAIT_FOR_CONE
                 ? "WAIT_FOR_CONE" : "WAIT_FOR_REMOVAL";
             std::cout << "[Startup] state=" << state
+                      << " coneDetected=" << coneDetected
                       << " coneSeen=" << startupConeSeenCount
                       << " coneMissing=" << startupConeMissingCount
+                      << " leftReliable=" << laneQuality.leftReliable
+                      << " rightReliable=" << laneQuality.rightReliable
+                      << " coversBottom=" << laneQuality.coversBottom
+                      << " commonRows=" << laneQuality.commonRows
                       << " laneValid=" << laneValid
                       << " laneFrames=" << startupLaneValidCount
-                      << " commonRows=" << laneQuality.commonRows
                       << " confidence=" << laneQuality.confidence
                       << " centerJump=" << laneQuality.centerJump
                       << " widthVariation=" << laneQuality.widthVariation
@@ -579,6 +586,8 @@ public:
         }
         else
         {
+            std::cout << "[Camera] Latest-frame capture enabled; backend="
+                      << capture->get(cv::CAP_PROP_BACKEND) << std::endl;
             captureRunning = true;
             captureThread = std::thread([this]() {
                 while (captureRunning)
