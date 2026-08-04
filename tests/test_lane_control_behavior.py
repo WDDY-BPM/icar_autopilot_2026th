@@ -87,6 +87,16 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertTrue(all(not state[0] for state in states[4:8]))
         self.assertTrue(states[8][0])
 
+    def test_one_invalid_frame_does_not_latch_safety_stop(self):
+        algorithms = (ROOT / "include/ctrl/control_algorithms.hpp").read_text(encoding="utf-8")
+        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        self.assertIn("updateLaneSafetyStop", algorithms)
+        self.assertIn("if (!latched)", algorithms)
+        self.assertIn("invalidFrames >= stopAfterInvalidFrames", algorithms)
+        self.assertIn("controlValid && recoveryFrames >= releaseAfterRecoveryFrames", algorithms)
+        self.assertIn("params->laneSafetyStop = control_algorithms::updateLaneSafetyStop", core)
+        self.assertNotIn("laneInvalidFrames >= 7 || center->laneRecoveryFrames > 0", core)
+
     def test_invalid_measurement_does_not_update_width_history(self):
         history = 220.0
         measured = 90.0
@@ -137,6 +147,8 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("result.singleEdgeUsable", algorithms)
         self.assertIn("result.interiorPointCount >= interiorPointsMinimum", algorithms)
         self.assertIn("limitSingleLaneCenter", center)
+        self.assertIn("reconstructSingleLaneCenter", center)
+        self.assertNotIn("i += 2", center[center.index("Center::centerCompute"):])
         self.assertIn("singleSide != 0 && laneWidthProfileReady()", center)
         self.assertIn("borderClippedHeadingConfidence", center)
         self.assertIn("leftSingleUsable", track)
@@ -277,7 +289,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("mode == FsmMode::CROSS", center)
         self.assertIn("!params->laneSafetyStop", core)
         self.assertIn("automaticControlActive && laneHold", core)
-        self.assertIn("center->laneInvalidFrames >= 7", core)
+        self.assertIn("center->laneInvalidFrames, center->laneRecoveryFrames, 7, 5", core)
         self.assertIn("motion->syncServoCommand(previousFinalServo)", core)
         self.assertNotIn("derailmentCheck", center)
         self.assertNotIn("ICAR Outline", center)

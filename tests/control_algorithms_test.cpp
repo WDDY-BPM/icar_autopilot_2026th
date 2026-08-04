@@ -41,6 +41,31 @@ int main()
     assert(lane.invalidFrames == 0);
     assert(!lane.recovering);
 
+    bool safetyStop = false;
+    safetyStop = control_algorithms::updateLaneSafetyStop(
+        safetyStop, true, false, 1, 0);
+    assert(!safetyStop);
+    for (int recoveryFrame = 1; recoveryFrame <= 4; ++recoveryFrame)
+    {
+        safetyStop = control_algorithms::updateLaneSafetyStop(
+            safetyStop, true, false, 0, recoveryFrame);
+        assert(!safetyStop);
+    }
+    safetyStop = false;
+    for (int invalidFrame = 1; invalidFrame <= 7; ++invalidFrame)
+        safetyStop = control_algorithms::updateLaneSafetyStop(
+            safetyStop, true, false, invalidFrame, 0);
+    assert(safetyStop);
+    for (int recoveryFrame = 1; recoveryFrame <= 4; ++recoveryFrame)
+    {
+        safetyStop = control_algorithms::updateLaneSafetyStop(
+            safetyStop, true, false, 0, recoveryFrame);
+        assert(safetyStop);
+    }
+    safetyStop = control_algorithms::updateLaneSafetyStop(
+        safetyStop, true, true, 0, 5);
+    assert(!safetyStop);
+
     control_algorithms::SingleLaneSpeedLimitState speedLimit;
     assert(control_algorithms::updateSingleLaneSpeedLimit(
         speedLimit, true, true, true, false));
@@ -195,6 +220,17 @@ int main()
     assert(!clippedReliability.reliable);
     assert(clippedReliability.singleEdgeUsable);
     assert(clippedReliability.interiorPointCount == 12);
+    std::vector<float> learnedWidths(240, 240.0f);
+    const auto clippedCenter = control_algorithms::reconstructSingleLaneCenter(
+        clippedRight, learnedWidths, false, 240, 320);
+    assert(clippedCenter.size() == clippedRight.size());
+    assert(clippedCenter.size() >= 20);
+    const auto clippedControl = control_algorithms::limitSingleLaneCenter(
+        clippedCenter.front().y, 160, 45, 8);
+    assert(clippedControl.valid);
+    control_algorithms::SingleLaneSpeedLimitState clippedSpeedLimit;
+    assert(control_algorithms::updateSingleLaneSpeedLimit(
+        clippedSpeedLimit, true, true, false, false, 5, true));
 
     std::vector<TestPoint> mostlyBorderRight;
     for (int row = 220; row >= 190; --row)

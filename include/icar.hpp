@@ -832,8 +832,9 @@ public:
                                         params->mode == FsmMode::STOP ||
                                         params->mode == FsmMode::SLOW ||
                                         params->mode == FsmMode::STATION;
-            params->laneSafetyStop = safetyLaneMode && !center->controlValid &&
-                (center->laneInvalidFrames >= 7 || center->laneRecoveryFrames > 0);
+            params->laneSafetyStop = control_algorithms::updateLaneSafetyStop(
+                params->laneSafetyStop, safetyLaneMode, center->controlValid,
+                center->laneInvalidFrames, center->laneRecoveryFrames, 7, 5);
         }
 
         //[07] 车辆运动控制（仅手动接管时跳过）
@@ -870,8 +871,9 @@ public:
                 params->ctrl.speed = std::min(params->ctrl.speed, 0.15f);
 
             if (strictLaneMode && !center->controlValid &&
-                center->laneInvalidFrames > 0 &&
-                center->laneInvalidFrames <= 6)
+                ((center->laneInvalidFrames > 0 &&
+                  center->laneInvalidFrames <= 6) ||
+                 center->laneRecoveryFrames > 0))
             {
                 params->ctrl.speed = std::min(params->ctrl.speed, 0.10f);
                 params->ctrl.servo = motion->syncServoCommand(previousFinalServo);

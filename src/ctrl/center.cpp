@@ -554,19 +554,8 @@ vector<PointX> Center::buildRowAlignedCenter(const vector<PointX> &left,
 
 vector<PointX> Center::centerCompute(vector<PointX> pointsEdge, int side)
 {
-    vector<PointX> center;
-    center.reserve(pointsEdge.size() / 2);
-    for (size_t i = 0; i < pointsEdge.size(); i += 2)
-    {
-        const int row = pointsEdge[i].x;
-        if (row < 0 || row >= ROWSIMAGE || laneWidthProfile[row] <= 1.0f)
-            continue;
-        const int column = control_algorithms::reconstructSingleLaneCenterColumn(
-            pointsEdge[i].y, laneWidthProfile[row], side == 0);
-        if (column > 0 && column < COLSIMAGE)
-            center.emplace_back(row, column);
-    }
-    return center;
+    return control_algorithms::reconstructSingleLaneCenter(
+        pointsEdge, laneWidthProfile, side == 0, ROWSIMAGE, COLSIMAGE);
 }
 /**
  * @brief 边缘有效行计算：左/右

@@ -20,6 +20,20 @@ struct SingleLaneSpeedLimitState
     int dualLaneRecoveryFrames = 0;
 };
 
+inline bool updateLaneSafetyStop(bool latched, bool safetyLaneMode,
+                                 bool controlValid, int invalidFrames,
+                                 int recoveryFrames,
+                                 int stopAfterInvalidFrames = 7,
+                                 int releaseAfterRecoveryFrames = 5)
+{
+    if (!safetyLaneMode) return false;
+    if (!latched)
+        return !controlValid && invalidFrames >= stopAfterInvalidFrames;
+    if (controlValid && recoveryFrames >= releaseAfterRecoveryFrames)
+        return false;
+    return true;
+}
+
 struct CenterlineSpeedResult
 {
     bool valid = false;
@@ -130,6 +144,26 @@ inline int reconstructSingleLaneCenterColumn(int edgeColumn, float laneWidth,
     const float halfWidth = std::max(0.0f, laneWidth) * 0.5f;
     return static_cast<int>(std::lround(leftEdge
         ? edgeColumn + halfWidth : edgeColumn - halfWidth));
+}
+
+template <typename Point, typename WidthProfile>
+inline std::vector<Point> reconstructSingleLaneCenter(
+    const std::vector<Point> &edge, const WidthProfile &laneWidthProfile,
+    bool leftEdge, int imageRows, int imageColumns)
+{
+    std::vector<Point> center;
+    center.reserve(edge.size());
+    for (std::size_t i = 0; i < edge.size(); ++i)
+    {
+        const int row = edge[i].x;
+        if (row < 0 || row >= imageRows || laneWidthProfile[row] <= 1.0f)
+            continue;
+        const int column = reconstructSingleLaneCenterColumn(
+            edge[i].y, laneWidthProfile[row], leftEdge);
+        if (column > 0 && column < imageColumns)
+            center.emplace_back(row, column);
+    }
+    return center;
 }
 
 inline bool isSingleLaneCenterContinuous(int currentCenter,
