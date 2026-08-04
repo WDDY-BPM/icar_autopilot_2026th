@@ -41,6 +41,7 @@ struct LaneControlCenters
     float controlCenter = 0.0f;
     float headingError = 0.0f;
     float headingCorrection = 0.0f;
+    float headingConfidence = 0.0f;
     int nearSamples = 0;
     int farSamples = 0;
     bool nearValid = false;
@@ -194,7 +195,7 @@ inline LaneControlCenters calculateLaneControlCenters(
     float nearBlend = 0.65f, int minimumSamples = 8,
     bool enableHeadingCorrection = false, float headingGain = 300.0f,
     float maximumHeadingCorrection = 60.0f,
-    float headingFadeError = 40.0f)
+    float headingFadeError = 40.0f, float headingConfidence = 1.0f)
 {
     const auto near = calculateCenterWindow(
         centerline, defaultCenter, 176, 220, 205, 26, minimumSamples);
@@ -226,6 +227,8 @@ inline LaneControlCenters calculateLaneControlCenters(
 
         if (enableHeadingCorrection)
         {
+            result.headingConfidence = std::clamp(
+                headingConfidence, 0.0f, 1.0f);
             const float nearError = near.column - defaultCenter;
             const float farError = far.column - defaultCenter;
             const bool oppositeSideRecovery =
@@ -240,14 +243,12 @@ inline LaneControlCenters calculateLaneControlCenters(
                 std::abs(nearError) / fadeRange, 0.0f, 1.0f));
             const float correctionLimit =
                 std::max(0.0f, maximumHeadingCorrection);
-            if (!oppositeSideRecovery)
-            {
-                result.headingCorrection = std::clamp(
-                    std::max(0.0f, headingGain) * result.headingError *
-                        headingWeight,
-                    -correctionLimit, correctionLimit);
-                // Applied independently by Motion::poseControl as a PWM term.
-            }
+            const float recoveryDamping = oppositeSideRecovery ? 0.25f : 1.0f;
+            result.headingCorrection = std::clamp(
+                std::max(0.0f, headingGain) * result.headingError *
+                    headingWeight * result.headingConfidence * recoveryDamping,
+                -correctionLimit, correctionLimit);
+            // Applied independently by Motion::poseControl as a PWM term.
         }
     }
     return result;

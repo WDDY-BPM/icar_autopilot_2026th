@@ -99,6 +99,8 @@ struct Config
     float laneHeadingGain = 300.0f;             // PWM per radian
     float laneHeadingMaxCorrection = 60.0f;     // Maximum heading steering term (PWM)
     float laneHeadingFadeError = 40.0f;
+    float singleLaneHeadingConfidence = 0.45f;
+    float parkingHeadingConfidence = 0.65f;
     float steeringFilterTau = 0.065f;
     float maxErrorRate = 360.0f;
     float servoRate = 600.0f;
@@ -171,7 +173,7 @@ struct Config
     bool obstacle = true; // 障碍物避障使能（锥桶/行人）
 
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(Config, velLow, velHigh, velSlow, velPark, velCurve, velBusy, velStop, velCross, velYfork,
-                                   runP1, runP2, turnD, laneHeadingGain, laneHeadingMaxCorrection, laneHeadingFadeError, steeringFilterTau, maxErrorRate, servoRate, startupServoRate, startupServoLimit, startupStableFrames, startupRampFrames, startupSpeed, maxGapRows, debug, saveImg, saveIpm, rowCutUp, rowCutBottom,
+                                   runP1, runP2, turnD, laneHeadingGain, laneHeadingMaxCorrection, laneHeadingFadeError, singleLaneHeadingConfidence, parkingHeadingConfidence, steeringFilterTau, maxErrorRate, servoRate, startupServoRate, startupServoLimit, startupStableFrames, startupRampFrames, startupSpeed, maxGapRows, debug, saveImg, saveIpm, rowCutUp, rowCutBottom,
                                    overlap, score, binary, model, video, alertTarget, totalLaps, fork, fine, park, spot, curve, busy, slow, stop, cross, yfork, station);
 };
 
@@ -216,6 +218,8 @@ public:
             config.laneHeadingGain = configs["通用配置参数"].value("laneHeadingGain", 300.0f);
             config.laneHeadingMaxCorrection = configs["通用配置参数"].value("laneHeadingMaxCorrection", 60.0f);
             config.laneHeadingFadeError = configs["通用配置参数"].value("laneHeadingFadeError", 40.0f);
+            config.singleLaneHeadingConfidence = configs["通用配置参数"].value("singleLaneHeadingConfidence", 0.45f);
+            config.parkingHeadingConfidence = configs["通用配置参数"].value("parkingHeadingConfidence", 0.65f);
             config.steeringFilterTau = configs["通用配置参数"].value("steeringFilterTau", 0.065f);
             config.maxErrorRate = configs["通用配置参数"].value("maxErrorRate", 360.0f);
             config.servoRate = configs["通用配置参数"].value("servoRate", 600.0f);

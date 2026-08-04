@@ -104,17 +104,16 @@ void Predeal::correction(cv::Mat &img)
 {
     if (enable)
     {
-        Size sizeImage; // 图像的尺寸
-        sizeImage.width = img.cols;
-        sizeImage.height = img.rows;
-
-        cv::Mat mapx = cv::Mat(sizeImage, CV_32FC1);    // 经过矫正后的X坐标重映射参数
-        cv::Mat mapy = cv::Mat(sizeImage, CV_32FC1);    // 经过矫正后的Y坐标重映射参数
-        cv::Mat rotMatrix = cv::Mat::eye(3, 3, CV_32F); // 内参矩阵与畸变矩阵之间的旋转矩阵
-
-        // 采用initUndistortRectifyMap+remap进行图像矫正
-        initUndistortRectifyMap(cameraMatrix, distCoeffs, rotMatrix, cameraMatrix, sizeImage, CV_32FC1, mapx, mapy);
-        remap(img, img, mapx, mapy, INTER_LINEAR);
+        const Size sizeImage(img.cols, img.rows);
+        if (undistortMapX.empty() || undistortMapSize != sizeImage)
+        {
+            const cv::Mat rotMatrix = cv::Mat::eye(3, 3, CV_32F);
+            initUndistortRectifyMap(
+                cameraMatrix, distCoeffs, rotMatrix, cameraMatrix,
+                sizeImage, CV_32FC1, undistortMapX, undistortMapY);
+            undistortMapSize = sizeImage;
+        }
+        remap(img, img, undistortMapX, undistortMapY, INTER_LINEAR);
     }
 }
 

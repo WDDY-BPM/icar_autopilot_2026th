@@ -141,7 +141,7 @@ def run_visual_flow(vllm):
     return label
 
 
-def start_car_program():
+def start_car_program(start_cone_preconfirmed=False):
     """启动小车程序"""
     if not os.path.exists(ICAR_PATH):
         print(f"{COUT_RED}\n未找到小车程序: {ICAR_PATH}{COUT_REST}")
@@ -159,13 +159,18 @@ def start_car_program():
         time.sleep(3)
 
     print(f"\n正在启动小车程序: {ICAR_PATH}")
-    subprocess.Popen(
-        ["nohup", "./icar"],
-        cwd=BUILD_DIR,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    print(f"{COUT_GREEN}小车程序已启动{COUT_REST}")
+    icar_env = os.environ.copy()
+    if start_cone_preconfirmed:
+        icar_env["ICAR_START_CONE_PRECONFIRMED"] = "1"
+        print("启动锥桶已由视觉流程预确认；icar 将直接等待锥桶移除")
+    log_path = os.path.join(BUILD_DIR, "icar.log")
+    with open(log_path, "ab", buffering=0) as log_file:
+        subprocess.Popen(
+            ["./icar"], cwd=BUILD_DIR, env=icar_env,
+            stdout=log_file, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    print(f"{COUT_GREEN}小车程序已启动，日志: {log_path}{COUT_REST}")
     return True
 
 
@@ -195,7 +200,7 @@ def main():
 
     # ========== 4. 启动小车 ==========
     print(f"\n{COUT_YELLOW}>>> 第四步：启动小车程序{COUT_REST}")
-    start_car_program()
+    start_car_program(start_cone_preconfirmed=(label == "cone"))
 
 
 if __name__ == "__main__":

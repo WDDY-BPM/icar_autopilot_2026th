@@ -74,6 +74,7 @@ void Center::fitting(shared_ptr<Params> &params)
     farCenter = COLSIMAGE / 2;
     headingError = 0.0f;
     headingCorrection = 0.0f;
+    headingConfidence = 0.0f;
     params->ctrl.laneHeadingCorrection = 0.0f;
     nearCenterSamples = 0;
     farCenterSamples = 0;
@@ -168,21 +169,36 @@ void Center::fitting(shared_ptr<Params> &params)
     }
 
     bool controlWindowValid = true;
-    if (visionLaneMode)
+    bool usedWindowControl = false;
+    const bool parkingHeadingMode = params->mode == FsmMode::PARK ||
+                                    params->ctrl.parking;
+    if (visionLaneMode || parkingHeadingMode)
     {
-        const bool headingReliable =
-            params->track->quality.valid &&
-            (params->track->quality.leftReliable ||
-             params->track->quality.rightReliable);
+        const bool dualLaneHeading =
+            params->track->quality.leftReliable &&
+            params->track->quality.rightReliable &&
+            params->track->quality.commonRows >= 20;
+        const bool singleLaneHeading = visionLaneMode &&
+            (params->track->quality.leftReliable !=
+             params->track->quality.rightReliable) &&
+            laneWidthProfileReady() && params->ctrl.centerEdge.size() >= 20;
+        const float pathHeadingConfidence = parkingHeadingMode
+            ? params->config.parkingHeadingConfidence
+            : (dualLaneHeading ? 1.0f
+                               : (singleLaneHeading
+                                   ? params->config.singleLaneHeadingConfidence
+                                   : 0.0f));
+        const int minimumSamples = parkingHeadingMode ? 4 : 8;
         const auto centers = control_algorithms::calculateLaneControlCenters(
-            params->ctrl.centerEdge, COLSIMAGE / 2.0f, 0.65f, 8,
-            headingReliable, params->config.laneHeadingGain,
+            params->ctrl.centerEdge, COLSIMAGE / 2.0f, 0.65f, minimumSamples,
+            pathHeadingConfidence > 0.0f, params->config.laneHeadingGain,
             params->config.laneHeadingMaxCorrection,
-            params->config.laneHeadingFadeError);
+            params->config.laneHeadingFadeError, pathHeadingConfidence);
         nearCenterSamples = centers.nearSamples;
         farCenterSamples = centers.farSamples;
         headingError = centers.headingError;
         headingCorrection = centers.headingCorrection;
+        headingConfidence = centers.headingConfidence;
         params->ctrl.laneHeadingCorrection = centers.headingCorrection;
         nearCenterValid = centers.nearValid;
         farCenterValid = centers.farValid;
@@ -194,12 +210,13 @@ void Center::fitting(shared_ptr<Params> &params)
         controlWindowValid = nearCenterValid;
         if (controlWindowValid)
         {
+            usedWindowControl = true;
             params->ctrl.center = std::clamp(
                 static_cast<int>(std::lround(centers.controlCenter)),
                 0, COLSIMAGE - 1);
         }
     }
-    else
+    if (!usedWindowControl && !visionLaneMode)
     {
         int controlNum = 1;
         for (const auto &p : params->ctrl.centerEdge)
@@ -236,9 +253,13 @@ void Center::fitting(shared_ptr<Params> &params)
                                 params->mode == FsmMode::STOP ||
                                 params->mode == FsmMode::SLOW ||
                                 params->mode == FsmMode::STATION;
+    // Two independently reliable, bottom-covering edges provide a usable
+    // centerline even on a tight curve. Aggregate quality.valid also contains
+    // straight-road temporal/width thresholds and must not reject that path.
     const bool bothValid = params->track->quality.leftReliable &&
                            params->track->quality.rightReliable &&
-                           params->track->quality.valid;
+                           params->track->quality.coversBottom &&
+                           params->track->quality.commonRows >= 20;
     const bool singleCenterContinuous =
         control_algorithms::isSingleLaneCenterContinuous(
             params->ctrl.center, lastValidLaneCenter, 15);

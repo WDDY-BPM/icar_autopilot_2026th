@@ -339,9 +339,10 @@ class TakeoverConsole:
         cv2.putText(frame, lane_info, (8, frame.shape[0] - 28),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 0), 1,
                     cv2.LINE_AA)
-        heading_info = "headErr=%+.1f headCorr=%+.1f" % (
+        heading_info = "headErr=%+.3f headCorr=%+.1f headConf=%.2f" % (
             float(edge.get("heading_error", 0.0)),
-            float(edge.get("heading_correction", 0.0)))
+            float(edge.get("heading_correction", 0.0)),
+            float(edge.get("heading_confidence", 0.0)))
         cv2.putText(frame, heading_info, (8, frame.shape[0] - 46),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 0), 1,
                     cv2.LINE_AA)

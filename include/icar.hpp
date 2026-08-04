@@ -1,4 +1,8 @@
 #pragma once
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 /**
  ********************************************************************************************************
  *                                               示例代码
@@ -67,6 +71,13 @@ private:
     shared_ptr<Predeal> predeal;          // 图像预处理类
     shared_ptr<Show> show;                // 初始化UI显示窗口
     shared_ptr<cv::VideoCapture> capture; // Opencv相机类
+    std::thread captureThread;
+    std::atomic<bool> captureRunning{false};
+    std::mutex latestCaptureMutex;
+    std::condition_variable latestCaptureCv;
+    cv::Mat latestCaptureFrame;
+    uint64_t latestCaptureSequence{0};
+    uint64_t consumedCaptureSequence{0};
     shared_ptr<Detection> detection;      // 目标检测类
     shared_ptr<Client> client;            // TCP客户端通信类
     shared_ptr<Params> params;            // 车辆状态参数（FSM共享传递）
@@ -91,9 +102,25 @@ private:
     int startupConeSeenCount = 0;
     int startupConeMissingCount = 0;
     int startupLaneValidCount = 0;
+    int startupDiagnosticFrames = 0;
+    bool startupEnvironmentChecked = false;
 
     bool updateStartupGate(bool receivedNewAiResult)
     {
+        if (!startupEnvironmentChecked)
+        {
+            startupEnvironmentChecked = true;
+            const char *preconfirmed = std::getenv("ICAR_START_CONE_PRECONFIRMED");
+            if (params->config.requireStartCone && preconfirmed &&
+                std::string(preconfirmed) == "1")
+            {
+                startupGateState = StartupGateState::WAIT_FOR_REMOVAL;
+                startupConeSeenCount = 3;
+                startupConeMissingCount = 0;
+                std::cout << "[Startup] Cone preconfirmed by launcher. "
+                             "Waiting for removal." << std::endl;
+            }
+        }
         if (startupGateState == StartupGateState::RELEASED)
             return true;
 
@@ -111,11 +138,14 @@ private:
         }
 
         const auto &laneQuality = params->track->quality;
-        const bool laneValid = laneQuality.valid &&
-            laneQuality.commonRows >= 30 &&
-            laneQuality.confidence >= 0.75f &&
-            laneQuality.centerJump <= 8.0f &&
-            laneQuality.widthVariation <= 0.15f;
+        // At a curved start line, temporal center jump and perspective lane
+        // width variation can legitimately exceed the straight-road quality
+        // thresholds.  Requiring those metrics here could keep the startup
+        // gate closed forever even though both physical lane edges are sound.
+        // The normal controller performs its own recovery checks after release.
+        const bool laneValid = laneQuality.leftReliable &&
+            laneQuality.rightReliable && laneQuality.coversBottom &&
+            laneQuality.commonRows >= 20;
         startupLaneValidCount = laneValid ? startupLaneValidCount + 1 : 0;
 
         if (!params->config.requireStartCone)
@@ -164,6 +194,21 @@ private:
         params->ctrl.stop = true;
         params->ctrl.speed = 0.0f;
         params->ctrl.servo = PWMSERVOMID;
+        if (++startupDiagnosticFrames % 30 == 0)
+        {
+            const char *state = startupGateState == StartupGateState::WAIT_FOR_CONE
+                ? "WAIT_FOR_CONE" : "WAIT_FOR_REMOVAL";
+            std::cout << "[Startup] state=" << state
+                      << " coneSeen=" << startupConeSeenCount
+                      << " coneMissing=" << startupConeMissingCount
+                      << " laneValid=" << laneValid
+                      << " laneFrames=" << startupLaneValidCount
+                      << " commonRows=" << laneQuality.commonRows
+                      << " confidence=" << laneQuality.confidence
+                      << " centerJump=" << laneQuality.centerJump
+                      << " widthVariation=" << laneQuality.widthVariation
+                      << std::endl;
+        }
         return false;
     }
     cv::Mat imgShare;
@@ -509,7 +554,11 @@ public:
         if (params->config.debug)
             capture = make_shared<cv::VideoCapture>(params->config.video); // 打开本地视频
         else
-            capture = make_shared<cv::VideoCapture>("/dev/video0"); // 打开摄像头
+        {
+            capture = make_shared<cv::VideoCapture>("/dev/video0", cv::CAP_V4L2);
+            if (!capture->isOpened())
+                capture = make_shared<cv::VideoCapture>("/dev/video0");
+        }
         if (!capture->isOpened())
         {
             printf("[Error]: Can not open video device!!!\n");
@@ -518,6 +567,8 @@ public:
         capture->set(cv::CAP_PROP_FRAME_WIDTH, COLSCAMERA);  // 设置图像分辨率
         capture->set(cv::CAP_PROP_FRAME_HEIGHT, ROWSCAMERA); // 设置图像分辨率
         capture->set(cv::CAP_PROP_FPS, 30);                  // 设置帧率
+        if (!params->config.debug)
+            capture->set(cv::CAP_PROP_BUFFERSIZE, 1);
 
         if (params->config.debug)
         {
@@ -525,6 +576,27 @@ public:
             show->frameMax = capture->get(cv::CAP_PROP_FRAME_COUNT) - 1;
             cv::createTrackbar("Frame", "ICAR", &show->index, show->frameMax, [](int, void *) {}); // 创建Opencv图像滑条控件
             cv::setMouseCallback("ICAR", this->callbackMouse);                                     // 创建鼠标键盘快捷键事件
+        }
+        else
+        {
+            captureRunning = true;
+            captureThread = std::thread([this]() {
+                while (captureRunning)
+                {
+                    cv::Mat frame;
+                    if (!capture->read(frame))
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        continue;
+                    }
+                    {
+                        std::lock_guard<std::mutex> lock(latestCaptureMutex);
+                        latestCaptureFrame = std::move(frame);
+                        ++latestCaptureSequence;
+                    }
+                    latestCaptureCv.notify_one();
+                }
+            });
         }
 
         // FSM有限状态机初始化
@@ -552,6 +624,10 @@ public:
     };
     ~Icar()
     {
+        captureRunning = false;
+        latestCaptureCv.notify_all();
+        if (captureThread.joinable())
+            captureThread.join();
         if (fsmFactory.manual)
             fsmFactory.manual->stop();
         shuttingDown = true;
@@ -598,7 +674,21 @@ public:
             }
             show->indexLast = show->index;
         }
-        else if (!capture->read(img))
+        else
+        {
+            std::unique_lock<std::mutex> lock(latestCaptureMutex);
+            const bool frameReady = latestCaptureCv.wait_for(
+                lock, std::chrono::milliseconds(150), [this]() {
+                    return !captureRunning ||
+                        latestCaptureSequence != consumedCaptureSequence;
+                });
+            if (frameReady && latestCaptureSequence != consumedCaptureSequence)
+            {
+                img = latestCaptureFrame.clone();
+                consumedCaptureSequence = latestCaptureSequence;
+            }
+            lock.unlock();
+            if (img.empty())
             {
                 params->ctrl.stop = true;
                 params->ctrl.speed = 0.0f;
@@ -608,6 +698,7 @@ public:
                 client->carControl(0.0f, PWMSERVOMID);
                 return;
             }
+        }
 
         uint64_t currentFrameId = 0;
         int64_t currentFrameTimestampMs = 0;
@@ -877,6 +968,7 @@ public:
                     ? center->farCenter - COLSIMAGE / 2 : 0},
                 {"heading_error", center->headingError},
                 {"heading_correction", center->headingCorrection},
+                {"heading_confidence", center->headingConfidence},
                 {"near_samples", center->nearCenterSamples},
                 {"far_samples", center->farCenterSamples},
                 {"lane_confidence", params->track->quality.confidence},

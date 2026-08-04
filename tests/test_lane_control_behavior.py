@@ -162,6 +162,42 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn('near_center', core)
         self.assertIn('nearErr=%+d farErr=%+d ctrlErr=%+d', client)
 
+    def test_curved_lane_can_release_startup_gate(self):
+        core = (ROOT / 'include/icar.hpp').read_text(encoding='utf-8')
+        center = (ROOT / 'src/ctrl/center.cpp').read_text(encoding='utf-8')
+        self.assertIn('laneQuality.leftReliable &&', core)
+        self.assertIn('laneQuality.commonRows >= 20', core)
+        self.assertNotIn('laneQuality.centerJump <= 8.0f', core)
+        self.assertIn('params->track->quality.commonRows >= 20', center)
+
+    def test_visual_cone_confirmation_reaches_icar(self):
+        launcher = (ROOT / 'src/start.py').read_text(encoding='utf-8')
+        core = (ROOT / 'include/icar.hpp').read_text(encoding='utf-8')
+        self.assertIn('ICAR_START_CONE_PRECONFIRMED', launcher)
+        self.assertIn('start_cone_preconfirmed=(label == "cone")', launcher)
+        self.assertIn('ICAR_START_CONE_PRECONFIRMED', core)
+        self.assertIn('StartupGateState::WAIT_FOR_REMOVAL', core)
+        self.assertIn('icar.log', launcher)
+
+    def test_low_latency_capture_and_heading_confidence_wiring(self):
+        core = (ROOT / 'include/icar.hpp').read_text(encoding='utf-8')
+        predeal_h = (ROOT / 'include/ctrl/predeal.hpp').read_text(encoding='utf-8')
+        predeal_cpp = (ROOT / 'src/ctrl/predeal.cpp').read_text(encoding='utf-8')
+        center = (ROOT / 'src/ctrl/center.cpp').read_text(encoding='utf-8')
+        config = (ROOT / 'res/config.json').read_text(encoding='utf-8')
+        client = (ROOT / 'tools/manual_control_client.py').read_text(encoding='utf-8')
+        self.assertIn('cv::CAP_V4L2', core)
+        self.assertIn('cv::CAP_PROP_BUFFERSIZE, 1', core)
+        self.assertIn('latestCaptureSequence', core)
+        self.assertIn('undistortMapX', predeal_h)
+        self.assertIn('undistortMapSize != sizeImage', predeal_cpp)
+        self.assertIn('singleLaneHeadingConfidence', center)
+        self.assertIn('parkingHeadingConfidence', center)
+        self.assertIn('"singleLaneHeadingConfidence": 0.45', config)
+        self.assertIn('"parkingHeadingConfidence": 0.65', config)
+        self.assertIn('heading_confidence', core)
+        self.assertIn('headErr=%+.3f', client)
+
     def test_lane_center_validation_speeds_are_conservative(self):
         config = json.loads((ROOT / 'res/config.json').read_text(
             encoding='utf-8'))['通用配置参数']
@@ -172,7 +208,8 @@ class LaneControlBehaviorTests(unittest.TestCase):
     def test_startup_single_lane_remains_locked(self):
         core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
         track = (ROOT / "src/ctrl/track.cpp").read_text(encoding="utf-8")
-        self.assertIn("const bool laneValid = laneQuality.valid", core)
+        self.assertIn("const bool laneValid = laneQuality.leftReliable", core)
+        self.assertIn("laneQuality.rightReliable", core)
         self.assertIn("quality.leftReliable && quality.rightReliable", track)
         self.assertIn("startupLaneValidCount >= params->config.startupStableFrames", core)
 

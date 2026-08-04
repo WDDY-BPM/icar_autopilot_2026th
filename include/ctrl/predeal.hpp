@@ -41,4 +41,7 @@ private:
 	cv::Mat cameraMatrix; // 摄像机内参矩阵
 	cv::Mat distCoeffs;	  // 相机的畸变矩阵
     float filteredThreshold = -1.0f;
+    cv::Mat undistortMapX;
+    cv::Mat undistortMapY;
+    cv::Size undistortMapSize;
 };

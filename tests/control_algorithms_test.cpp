@@ -93,7 +93,9 @@ int main()
         control_algorithms::calculateLaneControlCenters(
             laneControlCenter, 160.0f, 0.65f, 8, true,
             300.0f, 60.0f, 40.0f);
-    assert(std::abs(oppositeSideRecovery.headingCorrection) < 0.001f);
+    const float recoveryHeading = std::atan2(-60.0f, 85.0f);
+    assert(std::abs(oppositeSideRecovery.headingCorrection -
+                    300.0f * recoveryHeading * 0.375f * 0.25f) < 0.001f);
     assert(std::abs(oppositeSideRecovery.controlCenter - 164.0f) < 0.001f);
 
     std::vector<TestPoint> cappedHeading;
@@ -107,6 +109,14 @@ int main()
             300.0f, 60.0f, 40.0f);
     assert(std::abs(cappedHeadingAssist.headingCorrection - 60.0f) < 0.001f);
     assert(std::abs(cappedHeadingAssist.controlCenter - 174.0f) < 0.001f);
+
+    const auto confidenceLimitedHeading =
+        control_algorithms::calculateLaneControlCenters(
+            earlyRightHeading, 160.0f, 0.65f, 8, true,
+            300.0f, 60.0f, 40.0f, 0.45f);
+    assert(std::abs(confidenceLimitedHeading.headingConfidence - 0.45f) < 0.001f);
+    assert(std::abs(confidenceLimitedHeading.headingCorrection -
+                    headingAssisted.headingCorrection * 0.45f) < 0.001f);
 
     std::vector<TestPoint> missingNearCenter;
     for (int row = 120; row <= 175; ++row)
