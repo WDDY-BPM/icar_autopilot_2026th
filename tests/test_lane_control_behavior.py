@@ -250,6 +250,9 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("automaticControlActive && laneHold", core)
         self.assertIn("center->laneInvalidFrames >= 7", core)
         self.assertIn("motion->syncServoCommand(previousFinalServo)", core)
+        self.assertNotIn("derailmentCheck", center)
+        self.assertNotIn("ICAR Outline", center)
+        self.assertIn("center->laneRecoveryFrames > 0", core)
         self.assertIn("params->track->allowOuterEnvelope = !forkMarkerActive", core)
         self.assertIn("!allowCoherentEnvelope", track)
         self.assertLess(predeal.index("bitwise_not(imgBin, imgInv)"),

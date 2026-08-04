@@ -32,12 +32,14 @@ int main()
     assert(!control_algorithms::isSingleLaneCenterContinuous(176, 160));
 
     control_algorithms::LaneRecoveryState lane;
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 7; ++i)
         assert(!control_algorithms::updateLaneRecovery(lane, false));
-    assert(lane.invalidFrames == 4);
+    assert(lane.invalidFrames == 7);
     for (int i = 0; i < 4; ++i)
         assert(!control_algorithms::updateLaneRecovery(lane, true));
     assert(control_algorithms::updateLaneRecovery(lane, true));
+    assert(lane.invalidFrames == 0);
+    assert(!lane.recovering);
 
     control_algorithms::SingleLaneSpeedLimitState speedLimit;
     assert(control_algorithms::updateSingleLaneSpeedLimit(
