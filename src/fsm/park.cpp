@@ -76,9 +76,6 @@ void FsmPark::run(Mat &img)
         !params->hasStopReason(control_algorithms::StopReason::PARK))
         return;
 
-    if (step != Step::NONE)
-        params->track->spurroad.clear(); // 停车场活动期间清除岔路红点，防止yfork误检
-
     stopping = false; // 停车等待标志
     speedUp++;
     if (speedUp > 1000) // 出库缓加速计时
@@ -430,25 +427,26 @@ void FsmPark::run(Mat &img)
             }
 
             // 入库直行
-            params->track->pointsEdgeLeft.clear();  // 清空数据
-            params->track->pointsEdgeRight.clear(); // 清空数据
+            params->pathOverride.setEdges(PathSource::PARK, {}, {});
             // 左车道线
             PointX startPoint = PointX(ROWSIMAGE - 30, COLSIMAGE * 0.2);                                    // 入库补线起点:固定左下角
             PointX endPoint = PointX(50, COLSIMAGE * 0.35);                                                 // 入库补线终点
             PointX midPoint = PointX((startPoint.x + endPoint.x) * 0.5, (startPoint.y + endPoint.y) * 0.5); // 入库补线中点
             vector<PointX> repairPoints = {startPoint, midPoint, endPoint};
-            params->track->pointsEdgeLeft = Bezier(0.02, repairPoints); // 三阶贝塞尔曲线拟合
+            params->pathOverride.leftEdge = Bezier(0.02, repairPoints);
+            params->pathOverride.hasLeftEdge = true;
 
             // 右车道
             startPoint = PointX(ROWSIMAGE - 30, COLSIMAGE * 0.8);                                    // 入库补线起点:固定左下角
             endPoint = PointX(50, COLSIMAGE * 0.65);                                                 // 入库补线终点
             midPoint = PointX((startPoint.x + endPoint.x) * 0.5, (startPoint.y + endPoint.y) * 0.5); // 入库补线中点
             repairPoints = {startPoint, midPoint, endPoint};
-            params->track->pointsEdgeRight = Bezier(0.02, repairPoints); // 三阶贝塞尔曲线拟合
+            params->pathOverride.rightEdge = Bezier(0.02, repairPoints);
+            params->pathOverride.hasRightEdge = true;
         }
 
-        pointsEdgeLeftPast.push_back(params->track->pointsEdgeLeft); // 记录入库路径
-        pointsEdgeRightPast.push_back(params->track->pointsEdgeRight);
+        pointsEdgeLeftPast.push_back(params->pathOverride.leftEdge);
+        pointsEdgeRightPast.push_back(params->pathOverride.rightEdge);
 
         if (timeout > 30)           // 转向超时
             setStep(Step::PARKING); // 停车完成
@@ -488,8 +486,8 @@ void FsmPark::run(Mat &img)
         else
         {
             // 出库轨迹复现
-            params->track->pointsEdgeLeft = pointsEdgeLeftPast[pointsEdgeLeftPast.size() - 1];
-            params->track->pointsEdgeRight = pointsEdgeRightPast[pointsEdgeRightPast.size() - 1];
+            params->pathOverride.setEdges(
+                PathSource::PARK, pointsEdgeLeftPast.back(), pointsEdgeRightPast.back());
             pointsEdgeLeftPast.pop_back(); // 删除最后一组路径
             pointsEdgeRightPast.pop_back();
         }
@@ -767,6 +765,7 @@ void FsmPark::setParkSpotOccupied(int spotNumber)
  */
 void FsmPark::reset()
 {
+    params->clearPathOverride(PathSource::PARK);
     countSes = 0;      // AI场景识别计数器
     timeout = 0;       // 超时计数器
     step = Step::NONE; // 停车步骤
@@ -792,6 +791,8 @@ void FsmPark::setStep(Step st)
     countSes = 0; // 场次计数器
     timeout = 0;  // 超时计数器
     step = st;    // 停车步骤
+    if (st == Step::NONE)
+        params->clearPathOverride(PathSource::PARK);
     params->setStopReason(control_algorithms::StopReason::PARK,
         st == Step::PARKING || st == Step::WAIT_PICKUP);
     if (st == Step::FORKOUT)
@@ -807,16 +808,13 @@ void FsmPark::setStep(Step st)
  */
 void FsmPark::replanTracking()
 {
-    params->track->pointsEdgeLeft.clear();  // 清空原来数据
-    params->track->pointsEdgeRight.clear(); // 清空原来数据
-
     // 左车道线
     PointX startPoint = PointX(ROWSIMAGE - 10, 1);                                                // 入库补线起点:固定左下角
     PointX endPoint = PointX(ROWSIMAGE / 3, 1);                                                   // 入库补线终点
     PointX midPoint = PointX((startPoint.x + endPoint.x) * 0.3, (startPoint.y + endPoint.y) / 2); // 入库补线中点
     vector<PointX> repairPoints = {startPoint, midPoint, endPoint};
     vector<PointX> modifyEdge = Bezier(0.02, repairPoints); // 三阶贝塞尔曲线拟合
-    params->track->pointsEdgeLeft = modifyEdge;
+    const vector<PointX> leftEdge = modifyEdge;
 
     // 右车道线
     startPoint = PointX(ROWSIMAGE - 10, COLSIMAGE * 0.8);                                     // 入库补线起点:固定左下角
@@ -824,7 +822,8 @@ void FsmPark::replanTracking()
     midPoint = PointX((startPoint.x + endPoint.x) * 0.5, (startPoint.y + endPoint.y) * 0.35); // 入库补线中点（更靠下，左转更早）
     repairPoints = {startPoint, midPoint, endPoint};
     modifyEdge = Bezier(0.02, repairPoints); // 三阶贝塞尔曲线拟合
-    params->track->pointsEdgeRight = modifyEdge;
+    params->pathOverride.setEdges(PathSource::PARK, leftEdge, modifyEdge);
+    params->pathOverride.headingConfidence = 0.65f;
 }
 /**
  * @brief 停车入库车道线重绘
@@ -833,9 +832,8 @@ void FsmPark::replanTracking()
  */
 void FsmPark::replanTracking(bool left)
 {
-    params->track->pointsEdgeLeft.clear();  // 清空原来数据
-    params->track->pointsEdgeRight.clear(); // 清空原来数据
-
+    vector<PointX> leftEdge;
+    vector<PointX> rightEdge;
     if (left)
     {
         // 左车道线
@@ -844,14 +842,14 @@ void FsmPark::replanTracking(bool left)
         PointX midPoint = PointX((startPoint.x + endPoint.x) * 0.3, (startPoint.y + endPoint.y) / 2); // 入库补线中点
         vector<PointX> repairPoints = {startPoint, midPoint, endPoint};
         vector<PointX> modifyEdge = Bezier(0.02, repairPoints); // 三阶贝塞尔曲线拟合
-        params->track->pointsEdgeLeft = modifyEdge;
+        leftEdge = modifyEdge;
         // 右车道线
         startPoint = PointX(ROWSIMAGE - 10, COLSIMAGE * 0.8);                                  // 入库补线起点:固定左下角
         endPoint = PointX(ROWSIMAGE / 3, 1);                                                   // 入库补线终点
         midPoint = PointX((startPoint.x + endPoint.x) * 0.3, (startPoint.y + endPoint.y) / 2); // 入库补线中点
         repairPoints = {startPoint, midPoint, endPoint};
         modifyEdge = Bezier(0.02, repairPoints); // 三阶贝塞尔曲线拟合
-        params->track->pointsEdgeRight = modifyEdge;
+        rightEdge = modifyEdge;
     }
     else
     {
@@ -861,15 +859,17 @@ void FsmPark::replanTracking(bool left)
         PointX midPoint = PointX((startPoint.x + endPoint.x) * 0.3, (startPoint.y + endPoint.y) / 2); // 入库补线中点
         vector<PointX> repairPoints = {startPoint, midPoint, endPoint};
         vector<PointX> modifyEdge = Bezier(0.02, repairPoints); // 三阶贝塞尔曲线拟合
-        params->track->pointsEdgeLeft = modifyEdge;
+        leftEdge = modifyEdge;
         // 右车道线
         startPoint = PointX(ROWSIMAGE - 10, COLSIMAGE - 1);                                    // 入库补线起点:固定左下角
         endPoint = PointX(ROWSIMAGE / 8, COLSIMAGE - 1);                                       // 入库补线终点
         midPoint = PointX((startPoint.x + endPoint.x) * 0.3, (startPoint.y + endPoint.y) / 2); // 入库补线中点
         repairPoints = {startPoint, midPoint, endPoint};
         modifyEdge = Bezier(0.02, repairPoints); // 三阶贝塞尔曲线拟合
-        params->track->pointsEdgeRight = modifyEdge;
+        rightEdge = modifyEdge;
     }
+    params->pathOverride.setEdges(PathSource::PARK, leftEdge, rightEdge);
+    params->pathOverride.headingConfidence = 0.65f;
 }
 
 /**
@@ -1022,8 +1022,8 @@ PointX FsmPark::getResultCenter(PredictResult res)
 
     if (center.x < 0)
         center.x = 0;
-    else if (center.x > COLSIMAGE)
-        center.x = COLSIMAGE;
+    else if (center.x >= COLSIMAGE)
+        center.x = COLSIMAGE - 1;
 
     if (center.y < 0)
         center.y = 0;

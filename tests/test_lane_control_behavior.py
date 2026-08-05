@@ -197,7 +197,8 @@ class LaneControlBehaviorTests(unittest.TestCase):
                       "stop_reasons", "unconfirmed_frames", "camera_stop"):
             self.assertIn(field, core)
         self.assertEqual(core.count("params->ctrl.stop ="), 2)
-        self.assertEqual(core.count("params->ctrl.stop = params->mustStop();"), 2)
+        self.assertIn("resolveFinalCommand", core)
+        self.assertIn("params->mustStop() || !frame.cameraReady", core)
 
     def test_recovery_controls_and_fsm_freezing_are_wired(self):
         core = read_runtime_sources()
@@ -238,7 +239,8 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn('control_algorithms::calculateCenterlineSpeed', motion)
         self.assertNotIn('params->ctrl.lineArea', motion)
         self.assertIn('control_algorithms::calculateLaneControlCenters', center)
-        self.assertIn('const bool candidateValid = controlWindowValid', center)
+        self.assertIn('const bool candidateValid = plannedPath', center)
+        self.assertIn('(strictValid || relaxedValid || weakHybridValid || singleValid)', center)
         self.assertIn('176, 220, 205, 26', algorithms)
         self.assertIn('90, 155, 120, 31', algorithms)
         self.assertIn('std::atan2', algorithms)

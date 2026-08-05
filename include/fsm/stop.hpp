@@ -52,13 +52,5 @@ private:
   uint16_t countRec = 0;      // AI场景识别计数器
   uint16_t countSes = 0;      // 场次计数器
   int timeout = 0;            // 超时计数器
-  vector<cv::Point> polyRoad; // 赛道多边形点集
-  vector<cv::Point> polyCar;  // 智能车多边形点集
-  double overlap = 0;         // 重合度
-  float scoreLap = 0.5;       // 智能车在赛道上的置信度
-
-  double getRoadCarPloy(PredictResult result);
-  double getOverlapArea(const std::vector<cv::Point> &polyA, const std::vector<cv::Point> &polyB);
-  void drawPolygon(Mat img, vector<Point> poly, bool fill, bool close = true);
   void setStep(Step st);
 };

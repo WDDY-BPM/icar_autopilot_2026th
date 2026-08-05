@@ -143,7 +143,7 @@
     "#model": "AI模型路径(../res/models/yolov3_mobilenet_v1)",
     "#video": "视频路径(../res/samples/sample.mp4)",
     "totalLaps": "总圈数，默认3圈",
-    "每圈配置说明": "只能启用一种路径：\n    - 第一圈：停车场路径（park: true）\n    - 第二圈：施工区路径（busy: true）\n    - 第三圈：岔路口路径（fork: true）",
+    "每圈配置说明": "只能启用一种路径：\n    - 第一圈：停车场路径（park: true）\n    - 第二圈：施工区路径（busy: true）\n    - 第三圈：Y型岔路路径（yfork: true, fork: false）",
     "斑马线说明": "第一圈和第二圈作为普通通行点，第三圈作为终点（需要停止）",
     "停车场说明": "parkEnable控制是否停车，parkSpot指定停车位（1-4）",
     "锥桶检测说明": "在遇到锥桶时会鸣笛（由相关FSM实现）",

@@ -114,7 +114,7 @@ private:
 
             clientSocket = client;
             rxBuffer.clear();
-            controlWatchdog.onConnected();
+            controlWatchdog.onConnected(nowMs());
             connectionValid = true;
             clientConnected = true;
             {
@@ -191,6 +191,11 @@ public:
     }
 
     bool watchdogArmed() const { return controlWatchdog.armed(); }
+
+    bool watchdogStartupExpired(int64_t graceMs) const
+    {
+        return clientConnected && controlWatchdog.startupExpired(nowMs(), graceMs);
+    }
 
     void handleWatchdogTimeout()
     {

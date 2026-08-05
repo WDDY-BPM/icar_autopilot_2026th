@@ -2,7 +2,8 @@
 
 void Icar::runStateMachines(FrameCycle &frame)
 {
-        if (frame.startupGateReleased && !frame.emergencyStopRequested &&
+        if (frame.cameraReady && frame.startupGateReleased &&
+            !frame.emergencyStopRequested &&
             params->autoRecoveryFrames <= 0 && !params->laneSafetyStop &&
             (frame.manualBeforeFsm || !frame.aiStale))
             runFsm(frame.binary);

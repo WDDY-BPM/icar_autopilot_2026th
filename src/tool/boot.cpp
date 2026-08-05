@@ -83,6 +83,7 @@ int main(int argc, char const *argv[])
         return -1;
 
     constexpr int64_t WATCHDOG_TIMEOUT_MS = 500;
+    constexpr int64_t CONTROL_STARTUP_GRACE_MS = 30000;
     constexpr int64_t STARTUP_GRACE_MS = 30000;
     pid_t appPid = -1;
     bool clientWasSeen = false;
@@ -99,7 +100,12 @@ int main(int argc, char const *argv[])
             std::cerr << "[Boot] Valid-frame watchdog timed out; stopping vehicle.\n";
             server.handleWatchdogTimeout();
         }
-        if (!server.isClientConnected())
+        if (server.watchdogStartupExpired(CONTROL_STARTUP_GRACE_MS))
+        {
+            std::cerr << "[Boot] No control frame during startup grace; connection closed.\n";
+            server.handleWatchdogTimeout();
+        }
+        if (!server.isClientConnected() || !server.watchdogArmed())
             server.uart.sendHeart();
 
         usleep(200 * 1000);

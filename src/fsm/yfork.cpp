@@ -61,6 +61,7 @@ void FsmYfork::run(Mat &img)
 {
     if (!params->featureEnabled(Feature::YFORK)) // 该模式未启用
     {
+        params->clearPathOverride(PathSource::YFORK);
         completed = false; // 失能时复位，确保下次使能时能重新检测
         return;
     }
@@ -131,6 +132,7 @@ void FsmYfork::show(Mat &img)
  */
 void FsmYfork::reset(void)
 {
+    params->clearPathOverride(PathSource::YFORK);
     step = Step::NONE;
     enable = false;
     counterYfork = 0;
@@ -454,16 +456,18 @@ void FsmYfork::replanTracking(bool left, const Mat &img)
                 vRow + (ROWSIMAGE - 10 - vRow) * t,
                 vCol));
         }
-        params->track->pointsEdgeRight = island;
-        params->track->pointsEdgeRight.insert(params->track->pointsEdgeRight.end(),
+        params->pathOverride.setEdges(PathSource::YFORK, {}, island);
+        params->pathOverride.rightEdge.insert(params->pathOverride.rightEdge.end(),
                                               barrier.begin(), barrier.end());
+        params->pathOverride.hasRightEdge = !params->pathOverride.rightEdge.empty();
 
         // 左边缘：贝塞尔曲线左转引导线（替代图像边缘直线）
         PointX leftStart = PointX(ROWSIMAGE - 10, 60);
         PointX leftEnd = PointX(ROWSIMAGE / 3, 1);
         PointX leftMid = PointX((leftStart.x + leftEnd.x) * 0.3f, (leftStart.y + leftEnd.y) * 0.5f);
         vector<PointX> leftPoints = {leftStart, leftMid, leftEnd};
-        params->track->pointsEdgeLeft = Bezier(0.02f, leftPoints);
+        params->pathOverride.leftEdge = Bezier(0.02f, leftPoints);
+        params->pathOverride.hasLeftEdge = !params->pathOverride.leftEdge.empty();
     }
     else
     {
@@ -506,11 +510,14 @@ void FsmYfork::replanTracking(bool left, const Mat &img)
                 vCol + (endCol - vCol) * t));
         }
 
-        params->track->pointsEdgeLeft = island;
-        params->track->pointsEdgeLeft.insert(params->track->pointsEdgeLeft.end(),
+        params->pathOverride.setEdges(PathSource::YFORK, island,
+                                      params->track->pointsEdgeRight);
+        params->pathOverride.leftEdge.insert(params->pathOverride.leftEdge.end(),
                                              barrier.begin(), barrier.end());
+        params->pathOverride.hasLeftEdge = !params->pathOverride.leftEdge.empty();
     }
     printf("[Yfork] replan dir=%s tip=(%d,%d)\n", left ? "L" : "R", tipRow, tipCol);
+    params->pathOverride.headingConfidence = 0.65f;
 }
 
 void FsmYfork::drawTip(Mat &img)

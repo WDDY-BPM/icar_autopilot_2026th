@@ -4,7 +4,7 @@ void Icar::calculateControl(FrameCycle &frame)
 {
         //[06] Calculate the lane control center in autonomous mode.
         frame.centerUpdated = false;
-        if (frame.startupGateReleased && !frame.emergencyStopRequested &&
+        if (frame.cameraReady && frame.startupGateReleased && !frame.emergencyStopRequested &&
             !params->manualTakeover && params->autoRecoveryFrames <= 0 && !frame.aiStale)
         {
             center->fitting(params);
@@ -37,7 +37,7 @@ void Icar::calculateControl(FrameCycle &frame)
         steeringClockInitialized = true;
 
         const bool automaticControlActive =
-            frame.startupGateReleased && !frame.emergencyStopRequested &&
+            frame.cameraReady && frame.startupGateReleased && !frame.emergencyStopRequested &&
             !params->manualTakeover && params->autoRecoveryFrames <= 0 && !frame.aiStale;
         const bool laneHold = params->laneSafetyStop;
         static bool laneHoldWasActive = false;

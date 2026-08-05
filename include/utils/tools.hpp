@@ -29,6 +29,7 @@
 #include <opencv2/opencv.hpp>
 #include "ctrl/mapping.hpp"
 #include "utils/json.hpp"
+#include "utils/point.hpp"
 
 using namespace std;
 using namespace cv;
@@ -78,17 +79,6 @@ struct PredictResult
  * @brief 构建二维坐标
  *
  */
-struct PointX
-{
-    int x = 0;
-    int y = 0;
-    float slope = 0.0f;
-
-    PointX() {};
-    PointX(int x, int y) : x(x), y(y) {};
-    PointX(int x, int y, float z) : x(x), y(y), slope(z) {};
-};
-
 /**
  * @brief 存储图像至本地
  *

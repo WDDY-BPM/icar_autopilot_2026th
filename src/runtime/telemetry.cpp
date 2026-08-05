@@ -56,6 +56,16 @@ void Icar::publishTelemetry(const FrameCycle &frame)
                 control_algorithms::StopReason::AI_STALE);
             overlay["camera_stop"] = params->hasStopReason(
                 control_algorithms::StopReason::CAMERA);
+            overlay["camera_ready"] = frame.cameraReady;
+            overlay["camera_timed_out"] = frame.cameraTimedOut;
+            overlay["path_override_active"] = params->pathOverride.active;
+            overlay["path_source"] = pathSourceName(params->pathOverride.source);
+            overlay["perception_left_count"] = params->track->pointsEdgeLeft.size();
+            overlay["perception_right_count"] = params->track->pointsEdgeRight.size();
+            overlay["planned_left_count"] = params->pathOverride.active
+                ? params->pathOverride.leftEdge.size() : 0;
+            overlay["planned_right_count"] = params->pathOverride.active
+                ? params->pathOverride.rightEdge.size() : 0;
             overlay["lane_safety_stop"] = params->laneSafetyStop;
             overlay["lanes_valid"] = lanesValid;
             overlay["lanes_frame_id"] = lanesValid ? frame.frameId : 0;

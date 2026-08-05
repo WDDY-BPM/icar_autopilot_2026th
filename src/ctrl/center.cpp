@@ -118,7 +118,13 @@ void Center::fitting(shared_ptr<Params> &params)
     appliedCenterStep = 0;
     usableCenterRows = 0;
     recoveryMode = LaneRecoveryMode::INVALID;
-    const bool visionLaneMode = !params->ctrl.fitting &&
+    const LaneInput laneInput = selectLaneInput(
+        params->track->pointsEdgeLeft, params->track->pointsEdgeRight,
+        params->pathOverride);
+    const bool plannedPath = laneInput.planned();
+    vector<PointX> controlLeft = laneInput.left ? *laneInput.left : vector<PointX>{};
+    vector<PointX> controlRight = laneInput.right ? *laneInput.right : vector<PointX>{};
+    const bool visionLaneMode = !plannedPath && !params->ctrl.fitting &&
         (params->mode == FsmMode::NORMAL ||
          params->mode == FsmMode::CROSS || params->mode == FsmMode::STOP ||
          params->mode == FsmMode::SLOW || params->mode == FsmMode::STATION);
@@ -236,22 +242,42 @@ void Center::fitting(shared_ptr<Params> &params)
             }
         }
     }
+    else if (plannedPath)
+    {
+        params->ctrl.centerEdge.clear();
+        if (laneInput.center)
+            params->ctrl.centerEdge = *laneInput.center;
+        else if (controlLeft.size() > 4 && controlRight.size() > 4)
+            params->ctrl.centerEdge = buildRowAlignedCenter(
+                controlLeft, controlRight, false);
+        else if (controlLeft.size() > 4)
+            params->ctrl.centerEdge = centerCompute(controlLeft, 0);
+        else if (controlRight.size() > 4)
+            params->ctrl.centerEdge = centerCompute(controlRight, 1);
+        recoveryMode = controlLeft.size() > 4 && controlRight.size() > 4
+            ? LaneRecoveryMode::STRICT_DUAL
+            : (controlLeft.size() > 4 ? LaneRecoveryMode::LEFT_SINGLE
+                                      : LaneRecoveryMode::RIGHT_SINGLE);
+        style = pathSourceName(laneInput.source);
+    }
     else if (!params->ctrl.fitting)           // 除停车场特殊绘制
     {
         params->ctrl.centerEdge.clear();
-        vector<PointX> v_center(4); // 三阶贝塞尔曲线
         style = "STRIGHT";
 
         // 边缘斜率重计算（边缘修正之后）
-        params->track->stdevLeft = params->track->stdevEdgeCal(params->track->pointsEdgeLeft, ROWSIMAGE);
-        params->track->stdevRight = params->track->stdevEdgeCal(params->track->pointsEdgeRight, ROWSIMAGE);
+        const double controlStdevLeft = params->track->stdevEdgeCal(controlLeft, ROWSIMAGE);
+        const double controlStdevRight = params->track->stdevEdgeCal(controlRight, ROWSIMAGE);
 
         // 边缘有效行优化
-        if ((params->track->stdevLeft < 80 && params->track->stdevRight > 30) || (params->track->stdevLeft > 60 && params->track->stdevRight < 50))
+        if ((controlStdevLeft < 80 && controlStdevRight > 30) ||
+            (controlStdevLeft > 60 && controlStdevRight < 50))
         {
-            validRowsCal(params->track->pointsEdgeLeft, params->track->pointsEdgeRight); // 边缘有效行计算
-            params->track->pointsEdgeLeft.resize(validRowsLeft);
-            params->track->pointsEdgeRight.resize(validRowsRight);
+            validRowsCal(controlLeft, controlRight);
+            controlLeft.resize(std::min(controlLeft.size(),
+                static_cast<size_t>(validRowsLeft)));
+            controlRight.resize(std::min(controlRight.size(),
+                static_cast<size_t>(validRowsRight)));
         }
 
         if (recoveryMode == LaneRecoveryMode::WEAK_HYBRID)
@@ -289,65 +315,28 @@ void Center::fitting(shared_ptr<Params> &params)
             }
             style = "HYBRID";
         }
-        else if (params->track->pointsEdgeLeft.size() > 4 &&
-            params->track->pointsEdgeRight.size() > 4)
+        else if (controlLeft.size() > 4 && controlRight.size() > 4)
         {
             params->ctrl.centerEdge = buildRowAlignedCenter(
-                params->track->pointsEdgeLeft,
-                params->track->pointsEdgeRight,
+                controlLeft, controlRight,
                 false);
             style = "STRIGHT";
         }
         // Left single edge
-        else if ((params->track->pointsEdgeLeft.size() > 0 && params->track->pointsEdgeRight.size() <= 4) ||
-                 (params->track->pointsEdgeLeft.size() > 0 && params->track->pointsEdgeRight.size() > 0 &&
-                  params->track->pointsEdgeLeft[0].x - params->track->pointsEdgeRight[0].x > ROWSIMAGE / 2))
+        else if ((!controlLeft.empty() && controlRight.size() <= 4) ||
+                 (!controlLeft.empty() && !controlRight.empty() &&
+                  controlLeft[0].x - controlRight[0].x > ROWSIMAGE / 2))
         {
             style = "RIGHT";
-            params->ctrl.centerEdge = centerCompute(params->track->pointsEdgeLeft, 0);
+            params->ctrl.centerEdge = centerCompute(controlLeft, 0);
         }
         // 右单边
-        else if ((params->track->pointsEdgeRight.size() > 0 && params->track->pointsEdgeLeft.size() <= 4) ||
-                 (params->track->pointsEdgeRight.size() > 0 && params->track->pointsEdgeLeft.size() > 0 &&
-                  params->track->pointsEdgeRight[0].x - params->track->pointsEdgeLeft[0].x > ROWSIMAGE / 2))
+        else if ((!controlRight.empty() && controlLeft.size() <= 4) ||
+                 (!controlRight.empty() && !controlLeft.empty() &&
+                  controlRight[0].x - controlLeft[0].x > ROWSIMAGE / 2))
         {
             style = "LEFT";
-            params->ctrl.centerEdge = centerCompute(params->track->pointsEdgeRight, 1);
-        }
-        else if (params->track->pointsEdgeLeft.size() > 4 && params->track->pointsEdgeRight.size() == 0) // 左单边
-        {
-            v_center[0] = {params->track->pointsEdgeLeft[0].x, (params->track->pointsEdgeLeft[0].y + COLSIMAGE - 1) / 2};
-
-            v_center[1] = {params->track->pointsEdgeLeft[params->track->pointsEdgeLeft.size() / 3].x,
-                           (params->track->pointsEdgeLeft[params->track->pointsEdgeLeft.size() / 3].y + COLSIMAGE - 1) / 2};
-
-            v_center[2] = {
-                params->track->pointsEdgeLeft[params->track->pointsEdgeLeft.size() * 2 / 3].x,
-                (params->track->pointsEdgeLeft[params->track->pointsEdgeLeft.size() * 2 / 3].y + COLSIMAGE - 1) / 2};
-
-            v_center[3] = {params->track->pointsEdgeLeft[params->track->pointsEdgeLeft.size() - 1].x,
-                           (params->track->pointsEdgeLeft[params->track->pointsEdgeLeft.size() - 1].y + COLSIMAGE - 1) / 2};
-
-            params->ctrl.centerEdge = Bezier(0.02, v_center);
-            style = "RIGHT";
-        }
-        else if (params->track->pointsEdgeLeft.size() == 0 &&
-                 params->track->pointsEdgeRight.size() > 4) // 右单边
-        {
-            v_center[0] = {params->track->pointsEdgeRight[0].x, params->track->pointsEdgeRight[0].y / 2};
-
-            v_center[1] = {params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() / 3].x,
-                           params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() / 3].y / 2};
-
-            v_center[2] = {
-                params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() * 2 / 3].x,
-                params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() * 2 / 3].y / 2};
-
-            v_center[3] = {params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() - 1].x,
-                           params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() - 1].y / 2};
-
-            params->ctrl.centerEdge = Bezier(0.02, v_center);
-            style = "LEFT";
+            params->ctrl.centerEdge = centerCompute(controlRight, 1);
         }
     }
     usableCenterRows = static_cast<int>(params->ctrl.centerEdge.size());
@@ -356,7 +345,7 @@ void Center::fitting(shared_ptr<Params> &params)
     bool usedWindowControl = false;
     const bool parkingHeadingMode = params->mode == FsmMode::PARK ||
                                     params->ctrl.parking;
-    if (visionLaneMode || parkingHeadingMode)
+    if (visionLaneMode || parkingHeadingMode || plannedPath)
     {
         const bool strictDualHeading = recoveryMode == LaneRecoveryMode::STRICT_DUAL;
         const bool relaxedDualHeading = recoveryMode == LaneRecoveryMode::RELAXED_DUAL;
@@ -366,7 +355,10 @@ void Center::fitting(shared_ptr<Params> &params)
             laneWidthProfileReady() && params->ctrl.centerEdge.size() >= 20;
         const bool singleEdgeStrict = singleSide == -1
             ? laneQuality.leftReliable : laneQuality.rightReliable;
-        const float pathHeadingConfidence = parkingHeadingMode
+        const float pathHeadingConfidence = plannedPath
+            ? (params->pathOverride.headingConfidence > 0.0f
+                ? params->pathOverride.headingConfidence : 0.65f)
+            : parkingHeadingMode
             ? params->config.parkingHeadingConfidence
             : (strictDualHeading ? 1.0f
                : (relaxedDualHeading ? 0.65f
@@ -375,7 +367,7 @@ void Center::fitting(shared_ptr<Params> &params)
                                        ? params->config.singleLaneHeadingConfidence
                                        : params->config.borderClippedHeadingConfidence)
                                    : 0.0f)));
-        const int minimumSamples = parkingHeadingMode ? 4 : 8;
+        const int minimumSamples = (parkingHeadingMode || plannedPath) ? 4 : 8;
         const auto centers = control_algorithms::calculateLaneControlCenters(
             params->ctrl.centerEdge, COLSIMAGE / 2.0f, 0.65f, minimumSamples,
             pathHeadingConfidence > 0.0f, params->config.laneHeadingGain,
@@ -414,10 +406,7 @@ void Center::fitting(shared_ptr<Params> &params)
         }
         if (controlNum > 1) params->ctrl.center /= controlNum;
     }
-    if (params->ctrl.center > COLSIMAGE)
-        params->ctrl.center = COLSIMAGE;
-    else if (params->ctrl.center < 0)
-        params->ctrl.center = 0;
+    params->ctrl.center = std::clamp(params->ctrl.center, 0, COLSIMAGE - 1);
 
     // 控制率计算
     if (params->ctrl.centerEdge.size() > 20)
@@ -469,9 +458,12 @@ void Center::fitting(shared_ptr<Params> &params)
     const bool singleValid = (recoveryMode == LaneRecoveryMode::LEFT_SINGLE ||
         recoveryMode == LaneRecoveryMode::RIGHT_SINGLE) &&
         params->ctrl.centerEdge.size() >= 20 && degradedCenterContinuous;
-    const bool candidateValid = controlWindowValid &&
-        (strictValid || relaxedValid || weakHybridValid || singleValid);
-    if (strictLaneMode && !params->ctrl.parking && !params->manualTakeover)
+    const bool candidateValid = plannedPath
+        ? controlWindowValid && params->ctrl.centerEdge.size() >= 8
+        : controlWindowValid &&
+            (strictValid || relaxedValid || weakHybridValid || singleValid);
+    if (strictLaneMode && !plannedPath && !params->ctrl.parking &&
+        !params->manualTakeover)
     {
         controlValid = control_algorithms::updateLaneRecovery(
             laneRecoveryState, candidateValid, 5);

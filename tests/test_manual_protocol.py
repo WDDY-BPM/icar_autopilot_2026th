@@ -99,13 +99,15 @@ class ManualProtocolTests(unittest.TestCase):
         self.assertIn("continue", state_body)
         self.assertIn("except (ValueError, IndexError):", state_body)
     def test_exit_confirmation_counts_only_fresh_ai_results(self):
-        for relative in ("src/fsm/busy.cpp", "src/fsm/park.cpp"):
-            source = (ROOT / relative).read_text(encoding="utf-8")
-            with self.subTest(relative=relative):
-                self.assertRegex(
-                    source,
-                    r"if \(params->aiResultFresh\)\s*\{\s*if \(left(?:Visible|Sign)\)[\s\S]*?countRes\+\+;",
-                )
+        park = (ROOT / "src/fsm/park.cpp").read_text(encoding="utf-8")
+        self.assertRegex(
+            park,
+            r"if \(params->aiResultFresh\)\s*\{\s*if \(left(?:Visible|Sign)\)[\s\S]*?countRes\+\+;",
+        )
+        busy_state = (ROOT / "include/fsm/busy_exit_state.hpp").read_text(
+            encoding="utf-8")
+        self.assertIn("if (freshAi)", busy_state)
+        self.assertIn("consecutiveMissing = leftSignVisible ? 0", busy_state)
 
 
 if __name__ == "__main__":

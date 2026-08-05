@@ -16,11 +16,13 @@ void Icar::applyFinalStopArbitration(FrameCycle &frame)
             params->ctrl.servo = PWMSERVOMID;
         }
 
-        params->ctrl.stop = params->mustStop();
-        if (params->ctrl.stop)
-        {
-            params->ctrl.speed = 0.0f;
-            params->ctrl.servo = PWMSERVOMID;
-        }
+        params->ctrl.stop = params->mustStop() || !frame.cameraReady;
+        const FinalCommand command = resolveFinalCommand(
+            {params->ctrl.speed, params->ctrl.servo},
+            {params->mustStop(), frame.emergencyStopRequested,
+             frame.cameraReady, frame.startupGateReleased},
+            PWMSERVOMID);
+        params->ctrl.speed = command.speed;
+        params->ctrl.servo = static_cast<uint16_t>(command.servo);
         previousFinalServo = params->ctrl.servo;
 }

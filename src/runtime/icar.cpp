@@ -44,8 +44,7 @@ Icar::Icar()
         client = make_shared<Client>();
         if (!client->start())
         {
-            printf("[Error]: Socket init failed!!!\n");
-            exit(-1);
+            throw std::runtime_error("[Error]: Socket init failed");
         }
         client->buzzerSound(client->BUZZER_OK); // 提示音效
 
@@ -61,8 +60,7 @@ Icar::Icar()
         }
         if (!frameCapture->isOpened())
         {
-            printf("[Error]: Can not open video device!!!\n");
-            exit(-1);
+            throw std::runtime_error("[Error]: Can not open video device");
         }
         frameCapture->set(cv::CAP_PROP_FRAME_WIDTH, COLSCAMERA);  // 设置图像分辨率
         frameCapture->set(cv::CAP_PROP_FRAME_HEIGHT, ROWSCAMERA); // 设置图像分辨率
@@ -75,7 +73,7 @@ Icar::Icar()
             show = make_shared<Show>(4); // 调试UI初始化
             show->frameMax = frameCapture->get(cv::CAP_PROP_FRAME_COUNT) - 1;
             cv::createTrackbar("Frame", "ICAR", &show->index, show->frameMax, [](int, void *) {}); // 创建Opencv图像滑条控件
-            cv::setMouseCallback("ICAR", this->callbackMouse);                                     // 创建鼠标键盘快捷键事件
+            cv::setMouseCallback("ICAR", &Icar::callbackMouse, this);
         }
         else
         {
@@ -110,12 +108,12 @@ Icar::Icar()
 
 Icar::~Icar()
     {
-        if (frameCapture)
-            frameCapture->stop();
-        if (fsmFactory.manual)
-            fsmFactory.manual->stop();
         shuttingDown = true;
         cvImg.notify_all();
         if (loops)
             loops->shutdown();
+        if (fsmFactory.manual)
+            fsmFactory.manual->stop();
+        if (frameCapture)
+            frameCapture->stop();
     }

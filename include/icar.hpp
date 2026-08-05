@@ -44,6 +44,8 @@
 #include "ctrl/center.hpp"
 #include "ctrl/motion.hpp"
 #include "runtime/latest_frame_capture.hpp"
+#include "runtime/camera_recovery.hpp"
+#include "runtime/final_command.hpp"
 
 using namespace std;
 using namespace cv;
@@ -86,6 +88,8 @@ private:
     control_algorithms::SingleLaneSpeedLimitState singleLaneSpeedLimit;
     control_algorithms::LaneUnconfirmedState laneUnconfirmedState;
     std::chrono::steady_clock::time_point lastOverlayBuilt{};
+    uint64_t lastTelemetryFrameId{0};
+    std::int64_t lastTelemetryTimestampMs{0};
     control_algorithms::AiFreshnessState aiFreshness;
 
     // 全局共享数据链
@@ -102,7 +106,8 @@ private:
     int startupDiagnosticFrames = 0;
     bool startupEnvironmentChecked = false;
     bool startupConeDetected = false;
-    int cameraFreshFrames = 0;
+    CameraRecoveryState cameraRecovery;
+    std::atomic<bool> shutdownRequested{false};
 
     bool updateAiSafety(bool automaticMode, bool successfulFreshResult,
                         std::int64_t successfulResultMs = -1);
@@ -134,6 +139,10 @@ private:
         bool startupGateReleased{false};
         bool emergencyStopRequested{false};
         bool centerUpdated{false};
+        bool frameAvailable{false};
+        bool cameraTimedOut{false};
+        bool cameraReady{true};
+        bool exitRequested{false};
     };
 
     static void callbackMouse(int event, int x, int y, int flags, void *userdata);
@@ -152,9 +161,11 @@ private:
     void applyFinalStopArbitration(FrameCycle &frame);
     void publishTelemetry(const FrameCycle &frame);
     void sendVehicleCommand(FrameCycle &frame);
+    void requestShutdown();
 
 public:
     Icar();
     ~Icar();
     void running();
+    bool shouldShutdown() const { return shutdownRequested.load(); }
 };

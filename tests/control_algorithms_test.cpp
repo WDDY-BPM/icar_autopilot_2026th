@@ -15,7 +15,7 @@ int main()
 {
     {
         ControlWatchdogState watchdog;
-        watchdog.onConnected();
+        watchdog.onConnected(0);
         assert(!watchdog.armed());
         assert(!watchdog.expired(30000, 500));
 
@@ -38,7 +38,7 @@ int main()
         watchdog.reset();
         assert(!watchdog.armed());
         assert(!watchdog.expired(90000, 500));
-        watchdog.onConnected();
+        watchdog.onConnected(120000);
         assert(!watchdog.armed());
         assert(!watchdog.expired(120000, 500));
     }

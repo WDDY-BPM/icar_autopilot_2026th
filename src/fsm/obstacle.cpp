@@ -1,187 +1,141 @@
-/**
- ********************************************************************************************************
- *                                               示例代码
- *                                             EXAMPLE  CODE
- *
- *                      (c) Copyright 2024; SaiShu.Lcc.; Leo; https://bjsstech.com
- *                                   版权所属[SASU-北京赛曙科技有限公司]
- *
- *            The code is for internal use only, not for commercial transactions(开源学习).
- *            The code ADAPTS the corresponding hardware circuit board(智能汽车-ICAR),
- *            The specific details consult the professional(欢迎联系我们,代码持续更正，敬请关注相关开源渠道).
- *********************************************************************************************************
- * @file obstacle.cpp
- * @author Leo (leo@saishukeji.com)
- * @brief 全局障碍物检测（锥桶/行人）
- * @version 0.1
- * @date 2025-05-12
- *
- * @copyright Copyright (c) 2025
- *
- */
-
 #include "fsm/obstacle.hpp"
 #include "utils/tools.hpp"
 
-FsmObstacle::FsmObstacle(std::shared_ptr<Params> par)
-    : params(par)
-{
-}
-
-FsmObstacle::~FsmObstacle()
-{
-}
+FsmObstacle::FsmObstacle(std::shared_ptr<Params> par) : params(par) {}
+FsmObstacle::~FsmObstacle() = default;
 
 void FsmObstacle::run(Mat &img)
 {
+    (void)img;
     resultObs = PredictResult();
+    params->clearPathOverride(PathSource::OBSTACLE);
 
-    if (params->track->pointsEdgeLeft.size() < ROWSIMAGE / 2 ||
-        params->track->pointsEdgeRight.size() < ROWSIMAGE / 2)
+    const LaneInput lane = selectLaneInput(
+        params->track->pointsEdgeLeft, params->track->pointsEdgeRight,
+        params->pathOverride);
+    if (!lane.left || !lane.right || lane.left->size() < ROWSIMAGE / 2 ||
+        lane.right->size() < ROWSIMAGE / 2)
         return;
 
-    // 锥桶 + 行人检测
-    vector<PredictResult> resultsObs;
-    for (int i = 0; i < params->results.size(); i++)
+    vector<PredictResult> obstacles;
+    for (const auto &result : params->results)
     {
-        if ((params->results[i].type == LABEL_CONE || params->results[i].type == LABEL_PERSON) &&
-            (params->results[i].y + params->results[i].height) > ROWSIMAGE * 0.4 &&
-            params->results[i].height < 100 && params->results[i].width < 90 &&
-            params->results[i].height > 20 && params->results[i].width > 20)
-            resultsObs.push_back(params->results[i]);
+        if ((result.type == LABEL_CONE || result.type == LABEL_PERSON) &&
+            result.y + result.height > ROWSIMAGE * 0.4 &&
+            result.height < 100 && result.width < 90 &&
+            result.height > 20 && result.width > 20)
+            obstacles.push_back(result);
     }
-    if (resultsObs.size() <= 0)
+    if (obstacles.empty())
         return;
 
-    // 选取距离最近的障碍物
-    int areaMax = 0;
-    int index = 0;
-    for (int i = 0; i < resultsObs.size(); i++)
+    const auto nearest = std::max_element(obstacles.begin(), obstacles.end(),
+        [](const PredictResult &left, const PredictResult &right) {
+            return left.width * left.height < right.width * right.height;
+        });
+    resultObs = *nearest;
+
+    size_t row = 0;
+    int closestDistance = COLSIMAGE;
+    for (size_t index = 0; index < lane.left->size(); ++index)
     {
-        int area = resultsObs[i].width * resultsObs[i].height;
-        if (area >= areaMax)
+        const int distance = abs(resultObs.y - (*lane.left)[index].x);
+        if (distance < closestDistance)
         {
-            index = i;
-            areaMax = area;
+            closestDistance = distance;
+            row = index;
         }
     }
-    resultObs = resultsObs[index];
-
-    // 障碍物方向判定（左/右）
-    int row = 0, width = COLSIMAGE;
-    for (size_t i = 0; i < params->track->pointsEdgeLeft.size(); i++)
-    {
-        int w = abs(resultObs.y - params->track->pointsEdgeLeft[i].x);
-        if (w < 2)
-        {
-            row = i;
-            break;
-        }
-        if (w < width)
-        {
-            width = w;
-            row = i;
-        }
-    }
-    if (row > params->track->pointsEdgeRight.size() - 1)
-        row = params->track->pointsEdgeRight.size() - 1;
-
-    // 路径重规划
-    int disLeft = resultsObs[index].x - params->track->pointsEdgeLeft[row].y;
-    int disRight = params->track->pointsEdgeRight[row].y - (resultsObs[index].x + resultsObs[index].width);
-    const bool obstacleInDrivingPath =
-        resultsObs[index].x + resultsObs[index].width > params->track->pointsEdgeLeft[row].y &&
-        params->track->pointsEdgeRight[row].y > resultsObs[index].x;
-    if (!obstacleInDrivingPath)
+    row = std::min(row, lane.right->size() - 1);
+    const int obstacleRight = resultObs.x + resultObs.width;
+    const int leftColumn = (*lane.left)[row].y;
+    const int rightColumn = (*lane.right)[row].y;
+    if (obstacleRight <= leftColumn || rightColumn <= resultObs.x)
         return;
-    if (resultsObs[index].x + resultsObs[index].width > params->track->pointsEdgeLeft[row].y &&
-        params->track->pointsEdgeRight[row].y > resultsObs[index].x &&
-        abs(disLeft) <= abs(disRight)) //[1] 障碍物靠左
+
+    params->beginPathOverride(PathSource::OBSTACLE);
+    auto &left = params->pathOverride.leftEdge;
+    auto &right = params->pathOverride.rightEdge;
+    row = std::min(row, std::min(left.size(), right.size()) - 1);
+    const int distanceLeft = resultObs.x - left[row].y;
+    const int distanceRight = right[row].y - obstacleRight;
+
+    if (abs(distanceLeft) <= abs(distanceRight))
     {
-        if (resultsObs[index].type == LABEL_PERSON) // 行人避障
-            curtailTracking(false);                 // 缩减优化车道线（双车道→单车道）
+        if (resultObs.type == LABEL_PERSON)
+            curtailTracking(false);
         else
         {
-            vector<PointX> points(4); // 三阶贝塞尔曲线
-            points[0] = params->track->pointsEdgeLeft[row / 2];
-            points[1] = {resultsObs[index].y + resultsObs[index].height, resultsObs[index].x + resultsObs[index].width * 2};
-            points[2] = {(resultsObs[index].y + resultsObs[index].height + resultsObs[index].y) / 2, resultsObs[index].x + resultsObs[index].width * 2};
-            if (resultsObs[index].y > params->track->pointsEdgeLeft[params->track->pointsEdgeLeft.size() - 1].x)
-                points[3] = params->track->pointsEdgeLeft[params->track->pointsEdgeLeft.size() - 1];
-            else
-                points[3] = {resultsObs[index].y, resultsObs[index].x + resultsObs[index].width};
-
-            params->track->pointsEdgeLeft.resize((size_t)row / 2); // 删除错误路线
-            vector<PointX> repair = Bezier(0.01, points);          // 重新规划车道线
-            for (int i = 0; i < repair.size(); i++)
-                params->track->pointsEdgeLeft.push_back(repair[i]);
+            vector<PointX> points(4);
+            points[0] = left[row / 2];
+            points[1] = {resultObs.y + resultObs.height,
+                         resultObs.x + resultObs.width * 2};
+            points[2] = {resultObs.y + resultObs.height / 2,
+                         resultObs.x + resultObs.width * 2};
+            points[3] = resultObs.y > left.back().x
+                ? left.back() : PointX(resultObs.y, obstacleRight);
+            left.resize(row / 2);
+            const auto repair = Bezier(0.01, points);
+            left.insert(left.end(), repair.begin(), repair.end());
         }
-        params->ctrl.obstacleSlow = true; // 避障期间锁定限速，防止转向见解除限速标志提前加速
     }
-    else if (resultsObs[index].x + resultsObs[index].width > params->track->pointsEdgeLeft[row].y &&
-             params->track->pointsEdgeRight[row].y > resultsObs[index].x &&
-             abs(disLeft) > abs(disRight)) //[2] 障碍物靠右
+    else
     {
-        if (resultsObs[index].type == LABEL_PERSON) // 行人避障
-            curtailTracking(true);                  // 缩减优化车道线（双车道→单车道）
+        if (resultObs.type == LABEL_PERSON)
+            curtailTracking(true);
         else
         {
-            vector<PointX> points(4); // 三阶贝塞尔曲线
-            points[0] = params->track->pointsEdgeRight[row / 2];
-            points[1] = {resultsObs[index].y + resultsObs[index].height, resultsObs[index].x - resultsObs[index].width * 2};
-            points[2] = {(resultsObs[index].y + resultsObs[index].height + resultsObs[index].y) / 2, resultsObs[index].x - resultsObs[index].width * 2};
-            if (resultsObs[index].y > params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() - 1].x)
-                points[3] = params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() - 1];
-            else
-                points[3] = {resultsObs[index].y, resultsObs[index].x};
-
-            params->track->pointsEdgeRight.resize((size_t)row / 2); // 删除错误路线
-            vector<PointX> repair = Bezier(0.01, points);           // 重新规划车道线
-            for (int i = 0; i < repair.size(); i++)
-                params->track->pointsEdgeRight.push_back(repair[i]);
+            vector<PointX> points(4);
+            points[0] = right[row / 2];
+            points[1] = {resultObs.y + resultObs.height,
+                         resultObs.x - resultObs.width * 2};
+            points[2] = {resultObs.y + resultObs.height / 2,
+                         resultObs.x - resultObs.width * 2};
+            points[3] = resultObs.y > right.back().x
+                ? right.back() : PointX(resultObs.y, resultObs.x);
+            right.resize(row / 2);
+            const auto repair = Bezier(0.01, points);
+            right.insert(right.end(), repair.begin(), repair.end());
         }
-        params->ctrl.obstacleSlow = true; // 避障期间锁定限速，防止转向见解除限速标志提前加速
     }
 
-    // 车道线切除顶行1/5，避免弯道权重过大
-    params->track->pointsEdgeLeft.resize(params->track->pointsEdgeLeft.size() * 0.7);
-    params->track->pointsEdgeRight.resize(params->track->pointsEdgeRight.size() * 0.7);
+    left.resize(static_cast<size_t>(left.size() * 0.7));
+    right.resize(static_cast<size_t>(right.size() * 0.7));
+    params->pathOverride.hasLeftEdge = !left.empty();
+    params->pathOverride.hasRightEdge = !right.empty();
+    params->pathOverride.headingConfidence = 0.45f;
+    params->ctrl.obstacleSlow = true;
 }
 
 void FsmObstacle::resetLap()
 {
     resultObs = PredictResult();
+    params->clearPathOverride(PathSource::OBSTACLE);
 }
 
 void FsmObstacle::show(Mat &img)
 {
     if (resultObs.x > 0 && resultObs.y > 0)
-    {
-        cv::Rect rect(resultObs.x, resultObs.y, resultObs.width, resultObs.height);
-        cv::rectangle(img, rect, cv::Scalar(0, 0, 255), 1);
-    }
+        cv::rectangle(img,
+            cv::Rect(resultObs.x, resultObs.y, resultObs.width, resultObs.height),
+            cv::Scalar(0, 0, 255), 1);
 }
 
-void FsmObstacle::curtailTracking(bool left)
+void FsmObstacle::curtailTracking(bool leftSide)
 {
-    if (left) // 向左侧缩进
+    auto &left = params->pathOverride.leftEdge;
+    auto &right = params->pathOverride.rightEdge;
+    const size_t common = std::min(left.size(), right.size());
+    left.resize(common);
+    right.resize(common);
+    if (leftSide)
     {
-        if (params->track->pointsEdgeRight.size() > params->track->pointsEdgeLeft.size())
-            params->track->pointsEdgeRight.resize(params->track->pointsEdgeLeft.size());
-
-        for (int i = 0; i < params->track->pointsEdgeRight.size(); i++)
-        {
-            params->track->pointsEdgeRight[i].y = (params->track->pointsEdgeRight[i].y + params->track->pointsEdgeLeft[i].y) / 2;
-        }
+        for (size_t index = 0; index < common; ++index)
+            right[index].y = (right[index].y + left[index].y) / 2;
     }
-    else // 向右侧缩进
+    else
     {
-        if (params->track->pointsEdgeRight.size() < params->track->pointsEdgeLeft.size())
-            params->track->pointsEdgeLeft.resize(params->track->pointsEdgeRight.size());
-
-        for (int i = 0; i < params->track->pointsEdgeLeft.size(); i++)
-        {
-            params->track->pointsEdgeLeft[i].y = (params->track->pointsEdgeRight[i].y + params->track->pointsEdgeLeft[i].y) / 2;
-        }
+        for (size_t index = 0; index < common; ++index)
+            left[index].y = (right[index].y + left[index].y) / 2;
     }
 }

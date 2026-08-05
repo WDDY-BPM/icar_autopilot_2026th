@@ -1,24 +1,43 @@
-cmake_minimum_required(VERSION 3.4...3.18)
-project(patrol_car)
+cmake_minimum_required(VERSION 3.16)
+project(patrol_car LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-option(ICAR_BUILD_LOGIC_TESTS "Build hardware-independent control tests" OFF)
+option(ICAR_BUILD_LOGIC_TESTS "Build hardware-independent control tests" ON)
 option(ICAR_LOGIC_TESTS_ONLY "Build only hardware-independent control tests" OFF)
+
+function(icar_target_defaults target_name)
+  target_compile_features(${target_name} PRIVATE cxx_std_17)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${target_name} PRIVATE
+      -Wall
+      -Wextra
+      -Wpedantic
+      $<$<CONFIG:Release>:-O3>
+      $<$<CONFIG:Release>:-flto>)
+    target_link_options(${target_name} PRIVATE $<$<CONFIG:Release>:-flto>)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|aarch64)")
+      target_compile_options(${target_name} PRIVATE -mcpu=native)
+    endif()
+  endif()
+endfunction()
+
 if(ICAR_BUILD_LOGIC_TESTS OR ICAR_LOGIC_TESTS_ONLY)
   enable_testing()
   add_executable(control_algorithms_test tests/control_algorithms_test.cpp)
   target_include_directories(control_algorithms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  icar_target_defaults(control_algorithms_test)
   add_test(NAME control_algorithms_test COMMAND control_algorithms_test)
+  add_executable(runtime_behavior_test tests/runtime_behavior_test.cpp)
+  target_include_directories(runtime_behavior_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  icar_target_defaults(runtime_behavior_test)
+  add_test(NAME runtime_behavior_test COMMAND runtime_behavior_test)
 endif()
 if(ICAR_LOGIC_TESTS_ONLY)
   return()
 endif()
-set(CMAKE_CXX_FLAGS "-O3 -Wall -mcpu=native -flto -pthread")
-#关闭不同类型变量比较警告与未使用变量警告
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-variable")
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_BUILD_TYPE Debug)                 #允许cmake将debug信息加入
 set(INCLUDE_PATH "/usr/local/include")
 set(LIB_PATH "/usr/local/lib")
 include_directories(include)
@@ -55,6 +74,7 @@ link_directories(${ONNX_LIBRARY_DIRS})
 #---------------------------------------------------------------------
 # 开机自启程序
 add_executable(boot src/tool/boot.cpp)
+icar_target_defaults(boot)
 target_include_directories(boot PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
@@ -62,6 +82,7 @@ target_link_libraries(boot pthread ${OpenCV_LIBS} ${SERIAL_LIBRARIES})
 
 # 相机测试
 add_executable(camera src/tool/camera.cpp src/ctrl/predeal.cpp)
+icar_target_defaults(camera)
 target_include_directories(camera PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
@@ -69,6 +90,7 @@ target_link_libraries(camera pthread ${OpenCV_LIBS})
 
 # 图像合成
 add_executable(img2video src/tool/img2video.cpp)
+icar_target_defaults(img2video)
 target_include_directories(img2video PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
@@ -76,6 +98,7 @@ target_link_libraries(img2video pthread ${OpenCV_LIBS})
 
 # 相机矫正
 add_executable(calibration src/tool/calibration.cpp)
+icar_target_defaults(calibration)
 target_include_directories(calibration PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
@@ -83,6 +106,7 @@ target_link_libraries(calibration pthread ${OpenCV_LIBS})
 
 # 图像测试
 add_executable(imging src/tool/imging.cpp src/ctrl/predeal.cpp)
+icar_target_defaults(imging)
 target_include_directories(imging PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
@@ -90,6 +114,7 @@ target_link_libraries(imging pthread ${OpenCV_LIBS})
 
 # 目标检测
 add_executable(detection src/tool/detection.cpp src/ctrl/predeal.cpp)
+icar_target_defaults(detection)
 target_include_directories(detection PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
@@ -97,6 +122,7 @@ target_link_libraries(detection pthread ${PPNC_LIBRARIES} ${ONNX_LIBRARIES} ${Op
 
 # 图像采集
 add_executable(collection src/tool/collection.cpp src/ctrl/predeal.cpp)
+icar_target_defaults(collection)
 target_include_directories(collection PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
@@ -137,6 +163,7 @@ set(ICAR_SOURCES
   src/runtime/vehicle_output.cpp
 )
 add_executable(icar ${ICAR_SOURCES})
+icar_target_defaults(icar)
 target_include_directories(icar PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)

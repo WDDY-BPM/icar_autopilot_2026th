@@ -29,7 +29,7 @@ int main(int argc, char const *argv[])
 {
     Icar icar;
     const std::chrono::milliseconds durations(1000 / 30); // 控制周期：30Fps
-    while (1)
+    while (!icar.shouldShutdown())
     {
         auto timeStart = std::chrono::high_resolution_clock::now();
         icar.running(); // 系统主线程

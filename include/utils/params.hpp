@@ -28,8 +28,12 @@
 #include <unistd.h>
 #include <cmath>
 #include <fstream>
+#include <sstream>
+#include <stdexcept>
 #include "utils/json.hpp"
 #include "ctrl/track.hpp"
+#include "runtime/path_override.hpp"
+#include "utils/config_validation.hpp"
 
 using namespace std;
 
@@ -203,8 +207,7 @@ public:
         std::ifstream fileStr(path);
         if (!fileStr.good())
         {
-            std::cout << "Error: Params file path:[" << path << "] not find !!!" << std::endl;
-            exit(-1);
+            throw std::runtime_error("[Config] file not found: " + path);
         }
         nlohmann::json configs;
         fileStr >> configs;
@@ -306,9 +309,10 @@ public:
         }
         catch (const nlohmann::detail::exception &e)
         {
-            std::cerr << "Json Params Parse failed :" << e.what() << std::endl;
-            exit(-1);
+            throw std::runtime_error(std::string("[Config] JSON parse failed: ") + e.what());
         }
+
+        validateConfig();
 
         mode = FsmMode::NORMAL;                    // 初始化控制模式
         modeLast = FsmMode::NORMAL;                // 初始化控制模式
@@ -331,6 +335,7 @@ public:
     Config config;                      // 系统配置
     FsmMode mode, modeLast;             // FSM状态场景
     shared_ptr<Track> track;            // 赛道识别类
+    PathOverride pathOverride;
     std::vector<PredictResult> results; // AI推理结果
     bool aiResultFresh = false;         // 本控制帧是否收到了一组新的AI结果
     int totalLaps;                      // 总圈数
@@ -351,6 +356,27 @@ public:
     bool lapTaskCompleted = false;      // 当前圈主任务是否已可靠完成
 
 public:
+    void validateConfig() const
+    {
+        validateIcarConfig(config, ROWSIMAGE);
+    }
+
+    void beginPathOverride(PathSource source)
+    {
+        const bool composeExisting = pathOverride.active &&
+                                     pathOverride.source != source;
+        const auto left = composeExisting ? pathOverride.leftEdge :
+                                            track->pointsEdgeLeft;
+        const auto right = composeExisting ? pathOverride.rightEdge :
+                                             track->pointsEdgeRight;
+        pathOverride.setEdges(source, left, right);
+    }
+
+    void clearPathOverride(PathSource source)
+    {
+        pathOverride.clear(source);
+    }
+
     const Config::LapConfig &activeLapConfig() const
     {
         return *config.currentLapConfig;

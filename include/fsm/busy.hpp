@@ -23,6 +23,7 @@
  */
 
 #include "fsm/fsm.hpp"
+#include "fsm/busy_exit_state.hpp"
 
 /**
  * @brief 避障（施工区）控制
@@ -51,9 +52,7 @@ private:
     int timeout = 0;
     control_algorithms::BusyConfirmationState busyConfirmation;
     bool drivingThrough = false;    // 退出手动接管后继续在施工区模式行驶，等待左拐退出
-    bool exiting = false;           // 退出转向中（看到左转标志后重绘车道线引导转向）
-    std::chrono::steady_clock::time_point exitStartedAt; // 退出转向真实时间起点
-    int countRes = 0;               // 场景识别计数器（退出转向标志丢失计数）
+    BusyExitState exitState;
     int stationExitCooldown = 0;    // 第一个框停车后等待检测左转的冷却（30帧=1秒）
 
 };
