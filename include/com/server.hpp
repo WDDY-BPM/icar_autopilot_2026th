@@ -14,6 +14,7 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <string.h>
+#include "control_watchdog.hpp"
 #include "uart.hpp"
 
 class Server
@@ -30,7 +31,7 @@ private:
     std::atomic<bool> running{false};
     std::atomic<bool> clientConnected{false};
     std::atomic<bool> connectionValid{false};
-    std::atomic<int64_t> lastValidFrameMs{0};
+    ControlWatchdogState controlWatchdog;
     std::mutex forwardMutex;
     std::vector<uint8_t> rxBuffer;
 
@@ -50,6 +51,7 @@ private:
     {
         connectionValid = false;
         clientConnected = false;
+        controlWatchdog.reset();
         if (socket >= 0)
             shutdown(socket, SHUT_RDWR);
         std::lock_guard<std::mutex> lock(forwardMutex);
@@ -84,7 +86,8 @@ private:
                 if (connectionValid)
                 {
                     uart.transmitFrame(rxBuffer.data(), frameLength);
-                    lastValidFrameMs = nowMs();
+                    controlWatchdog.onValidFrame(
+                        rxBuffer[1], USB_ADDR_CARCTRL, nowMs());
                 }
             }
             else
@@ -111,9 +114,13 @@ private:
 
             clientSocket = client;
             rxBuffer.clear();
-            lastValidFrameMs = nowMs();
+            controlWatchdog.onConnected();
             connectionValid = true;
             clientConnected = true;
+            {
+                std::lock_guard<std::mutex> lock(forwardMutex);
+                stopVehicleLocked();
+            }
 
             uint8_t buffer[1024];
             while (running && connectionValid)
@@ -180,8 +187,10 @@ public:
 
     bool watchdogExpired(int64_t timeoutMs) const
     {
-        return clientConnected && nowMs() - lastValidFrameMs.load() > timeoutMs;
+        return clientConnected && controlWatchdog.expired(nowMs(), timeoutMs);
     }
+
+    bool watchdogArmed() const { return controlWatchdog.armed(); }
 
     void handleWatchdogTimeout()
     {

@@ -5,10 +5,23 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
+def read_runtime_sources():
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "src" / "runtime").glob("*.cpp"))
+    )
+
+
+def read_algorithm_headers():
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "include" / "ctrl").glob("*.hpp"))
+    )
+
 
 class SafetyInvariantTests(unittest.TestCase):
     def test_emergency_recovery_preserves_fsm_state(self):
-        source = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
+        source = read_runtime_sources()
         self.assertNotIn("resetSpecialElementsAfterEmergency", source)
         self.assertIn(
             "params->autoRecoveryFrames <= 0 && !params->laneSafetyStop &&",

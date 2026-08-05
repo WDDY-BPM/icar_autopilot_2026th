@@ -48,12 +48,11 @@ FsmPark::~FsmPark()
 FsmMode FsmPark::getMode()
 {
     // std::cout << "[Park::getMode] step=" << (int)step
-    //           << " config.park=" << params->config.park
     //           << " currentLapConfig->park=" << params->config.currentLapConfig->park
     //           << " parkSpot=" << params->config.currentLapConfig->parkSpot
     //           << " currentLap=" << params->currentLap << std::endl;
 
-    if (step == Step::NONE || !params->config.park || !params->config.currentLapConfig->park)
+    if (step == Step::NONE || !params->featureEnabled(Feature::PARK))
     {
         params->ctrl.parking = false;
         return FsmMode::NORMAL;
@@ -71,7 +70,7 @@ FsmMode FsmPark::getMode()
  */
 void FsmPark::run(Mat &img)
 {
-    if (!params->config.park) // 该模式未启用
+    if (!params->featureEnabled(Feature::PARK)) // 该模式未启用
         return;
     if (params->mustStop() &&
         !params->hasStopReason(control_algorithms::StopReason::PARK))
@@ -353,7 +352,7 @@ void FsmPark::run(Mat &img)
         }
 
         //[04] 入库检测
-        if (params->aiResultFresh && spots.checked && params->config.spot)
+        if (params->aiResultFresh && spots.checked)
         {
             // 远处车位 1/4号（左前/右前）→ 第一个叉
             if (spots.spotEnable[0] || spots.spotEnable[3])
@@ -934,9 +933,6 @@ vector<PredictResult> FsmPark::findParkStation(vector<PredictResult> results)
             {
                 resFork.push_back(results[i]);
             }
-            else
-            {
-            }
         }
     }
     vector<PredictResult> resSpot;   // size=0:无停车位，size=1:停车位1/2，size=2:停车位1/2/3/4
@@ -1008,9 +1004,6 @@ vector<PredictResult> FsmPark::findParkStation(vector<PredictResult> results)
             resSpot.push_back(resFilter[1]);
             resSpot.push_back(resFilter[0]);
         }
-    }
-    else
-    {
     }
     return resSpot;
 }

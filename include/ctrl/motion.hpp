@@ -146,8 +146,6 @@ public:
             desiredSpeed = params->config.velSlow;
         else if (params->mode == FsmMode::BUSY || params->busyZone)
             desiredSpeed = params->config.velBusy;
-        else if (params->mode == FsmMode::CURVE)
-            desiredSpeed = params->config.velCurve;
         else if (params->mode == FsmMode::YFORK)
             desiredSpeed = params->config.velYfork;
         else if (params->ctrl.slow || params->ctrl.obstacleSlow)

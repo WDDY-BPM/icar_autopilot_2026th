@@ -5,8 +5,55 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
+def read_runtime_sources():
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "src" / "runtime").glob("*.cpp"))
+    )
+
+
+def read_algorithm_headers():
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "include" / "ctrl").glob("*.hpp"))
+    )
+
 
 class RouteTaskInvariantTests(unittest.TestCase):
+    def test_runtime_orchestration_stays_split(self):
+        header = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
+        running = (ROOT / "src" / "runtime" / "running.cpp").read_text(encoding="utf-8")
+        cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertLessEqual(len(header.splitlines()), 300)
+        self.assertLessEqual(len(running.splitlines()), 120)
+        self.assertNotIn("GLOB_RECURSE SRC_LIST", cmake)
+        for source in (ROOT / "src" / "runtime").glob("*.cpp"):
+            self.assertIn(f"src/runtime/{source.name}", cmake)
+
+    def test_control_algorithm_compatibility_header_is_thin(self):
+        compatibility = (ROOT / "include" / "ctrl" / "control_algorithms.hpp").read_text(encoding="utf-8")
+        self.assertLessEqual(len(compatibility.splitlines()), 10)
+        for header in (
+            "stop_reasons.hpp", "alert_logic.hpp", "scene_confirmation.hpp",
+            "lane_quality.hpp", "lane_control.hpp",
+        ):
+            self.assertIn(f'#include "{header}"', compatibility)
+
+    def test_active_lap_configuration_is_read_only(self):
+        params = (ROOT / "include" / "utils" / "params.hpp").read_text(encoding="utf-8")
+        fsm = (ROOT / "src" / "runtime" / "fsm.cpp").read_text(encoding="utf-8")
+        self.assertIn("const Config::LapConfig &activeLapConfig() const", params)
+        self.assertIn("bool featureEnabled(Feature feature) const", params)
+        self.assertNotRegex(fsm, r"params->config\.(?:fork|park|busy|slow|stop|cross|yfork|station|obstacle)\s*=")
+
+    def test_latest_frame_capture_keeps_shutdown_safe(self):
+        capture = (ROOT / "src" / "runtime" / "latest_frame_capture.cpp").read_text(encoding="utf-8")
+        risk = (ROOT / "docs" / "camera_shutdown_risk.md").read_text(encoding="utf-8")
+        self.assertNotIn("detach()", capture)
+        self.assertNotIn("release()", capture)
+        self.assertIn("thread_.join()", capture)
+        self.assertIn("poll()", risk)
+
     def test_steering_polarity_matches_vehicle(self):
         motion = (ROOT / "include" / "ctrl" / "motion.hpp").read_text(encoding="utf-8")
         manual = (ROOT / "src" / "fsm" / "manualControl.cpp").read_text(encoding="utf-8")
@@ -16,7 +63,7 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIn("std::clamp(PWMSERVOMID - pwmDiff", motion)
         self.assertIn("lastServo - maxServoStep", motion)
         self.assertIn("void reset()", motion)
-        icar = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
+        icar = read_runtime_sources()
         self.assertIn("motion->reset();", icar)
         self.assertIn("(error - errorLast) / dt", motion)
         self.assertIn("servoRatePerSecond * dt", motion)
@@ -30,11 +77,11 @@ class RouteTaskInvariantTests(unittest.TestCase):
         track_h = (ROOT / "include" / "ctrl" / "track.hpp").read_text(encoding="utf-8")
         track = (ROOT / "src" / "ctrl" / "track.cpp").read_text(encoding="utf-8")
         center = (ROOT / "src" / "ctrl" / "center.cpp").read_text(encoding="utf-8")
-        core = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
+        core = read_runtime_sources()
         predeal = (ROOT / "src" / "ctrl" / "predeal.cpp").read_text(encoding="utf-8")
         self.assertIn("struct LaneQuality", track_h)
         self.assertIn("candidateAcceptable", track)
-        algorithms = (ROOT / "include" / "ctrl" / "control_algorithms.hpp").read_text(encoding="utf-8")
+        algorithms = read_algorithm_headers()
         self.assertIn("rowGap > 1 && rowGap <= maxGapRows", algorithms)
         self.assertIn("evaluateQuality();", track)
         self.assertIn("buildRowAlignedCenter", center)
@@ -100,7 +147,7 @@ class RouteTaskInvariantTests(unittest.TestCase):
 
     def test_obstacle_edits_only_in_path_and_slowdown_is_frame_scoped(self):
         obstacle = (ROOT / "src" / "fsm" / "obstacle.cpp").read_text(encoding="utf-8")
-        core = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
+        core = read_runtime_sources()
         motion = (ROOT / "include" / "ctrl" / "motion.hpp").read_text(encoding="utf-8")
         guard = obstacle.index("if (!obstacleInDrivingPath)")
         truncation = obstacle.index("pointsEdgeLeft.resize", guard)
@@ -166,23 +213,22 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIn("stopCounter > 90", station)
 
     def test_emergency_stop_freezes_all_fsm_progress(self):
-        source = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "runtime" / "state_machines.cpp").read_text(encoding="utf-8")
         self.assertIn(
-            "params->autoRecoveryFrames <= 0 && !params->laneSafetyStop &&\n            (manualBeforeFsm || !aiStale))\n            runFsm(imgBin);",
+            "params->autoRecoveryFrames <= 0 && !params->laneSafetyStop &&\n            (frame.manualBeforeFsm || !frame.aiStale))\n            runFsm(frame.binary);",
             source,
         )
 
     def test_live_video_is_published_before_control_processing(self):
-        source = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
-        publish = source.index("fsmFactory.manual->sendImage(")
-        predeal = source.index("predeal->correction(img);")
-        startup_gate = source.index("updateStartupGate(receivedNewAiResult)")
-        run_fsm = source.index("runFsm(imgBin);")
-        # The unannotated frame is sent immediately after geometric correction
-        # so transmitted lane coordinates share the same pixel space.
-        self.assertLess(predeal, publish)
-        self.assertLess(publish, startup_gate)
-        self.assertLess(publish, run_fsm)
+        preprocess = (ROOT / "src" / "runtime" / "preprocess.cpp").read_text(encoding="utf-8")
+        snapshot = (ROOT / "src" / "runtime" / "ai_snapshot.cpp").read_text(encoding="utf-8")
+        running = (ROOT / "src" / "runtime" / "running.cpp").read_text(encoding="utf-8")
+        self.assertLess(preprocess.index("predeal->correction(frame.image);"),
+                        preprocess.index("fsmFactory.manual->sendImage("))
+        self.assertLess(running.index("preprocessFrame(frame);"),
+                        running.index("consumeAiSnapshot(frame);"))
+        self.assertLess(running.index("consumeAiSnapshot(frame);"),
+                        running.index("runStateMachines(frame);"))
 
     def test_manual_control_requires_fresh_video_and_serializes_sends(self):
         source = (ROOT / "tools" / "manual_control_client.py").read_text(encoding="utf-8")
@@ -211,7 +257,7 @@ class RouteTaskInvariantTests(unittest.TestCase):
             encoding="utf-8")
         server = (ROOT / "src" / "fsm" / "manualControl.cpp").read_text(
             encoding="utf-8")
-        core = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
+        core = read_runtime_sources()
         client = (ROOT / "tools" / "manual_control_client.py").read_text(
             encoding="utf-8")
         self.assertIn("std::atomic<bool> hasOverlay", header)
@@ -269,11 +315,10 @@ class RouteTaskInvariantTests(unittest.TestCase):
 
 
     def test_hardware_independent_safety_states_are_wired(self):
-        algorithms = (ROOT / "include" / "ctrl" / "control_algorithms.hpp").read_text(
-            encoding="utf-8")
+        algorithms = read_algorithm_headers()
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
         cross = (ROOT / "src" / "fsm" / "cross.cpp").read_text(encoding="utf-8")
-        core = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
+        core = read_runtime_sources()
         self.assertIn("BUSY_CLEAR_NEGATIVE_FRAMES", algorithms)
         self.assertIn("updateBusyConfirmation", busy)
         self.assertNotIn("Fourth confirmation timed out", busy)
@@ -292,18 +337,15 @@ class RouteTaskInvariantTests(unittest.TestCase):
         )
         self.assertLess(reset, exit_complete)
     def test_stop_mode_survives_inactive_cross_and_alerts_run_outside_fsm(self):
-        core = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
-        self.assertIn("if (crossMode != FsmMode::NORMAL)", core)
-        update_start = core.index("void updateAlerts()")
-        run_start = core.index("void runFsm(Mat &img)")
-        running_start = core.index("void running()")
-        call = core.index("updateAlerts();", running_start)
-        guarded_fsm = core.index("runFsm(imgBin);", call)
-        self.assertLess(update_start, run_start)
-        self.assertLess(call, guarded_fsm)
-        run_body = core[run_start:running_start]
-        self.assertNotIn("advanceAlertCountdown", run_body)
-        self.assertNotIn("updateAlertDecelCountdown", run_body)
+        fsm = (ROOT / "src" / "runtime" / "fsm.cpp").read_text(encoding="utf-8")
+        alerts = (ROOT / "src" / "runtime" / "alerts.cpp").read_text(encoding="utf-8")
+        running = (ROOT / "src" / "runtime" / "running.cpp").read_text(encoding="utf-8")
+        self.assertIn("if (crossMode != FsmMode::NORMAL)", fsm)
+        self.assertIn("void Icar::updateAlerts()", alerts)
+        self.assertIn("updateAlerts();", (ROOT / "src" / "runtime" / "ai_snapshot.cpp").read_text(encoding="utf-8"))
+        self.assertLess(running.index("consumeAiSnapshot(frame);"), running.index("runStateMachines(frame);"))
+        self.assertNotIn("advanceAlertCountdown", fsm)
+        self.assertNotIn("updateAlertDecelCountdown", fsm)
 
     def test_boot_watchdog_is_half_second(self):
         boot = (ROOT / "src" / "tool" / "boot.cpp").read_text(encoding="utf-8")

@@ -104,11 +104,39 @@ target_link_libraries(collection pthread ${OpenCV_LIBS} ${SERIAL_LIBRARIES})
 #---------------------------------------------------------------------
 #               [ bin ] ==> [ main ]
 #---------------------------------------------------------------------
-file(GLOB_RECURSE SRC_LIST
-    "src/ctrl/*.cpp"
-    "src/fsm/*.cpp"
+set(ICAR_SOURCES
+  src/icar.cpp
+  src/ctrl/center.cpp
+  src/ctrl/predeal.cpp
+  src/ctrl/track.cpp
+  src/fsm/busy.cpp
+  src/fsm/cross.cpp
+  src/fsm/fork.cpp
+  src/fsm/manualControl.cpp
+  src/fsm/obstacle.cpp
+  src/fsm/park.cpp
+  src/fsm/slow.cpp
+  src/fsm/station.cpp
+  src/fsm/stop.cpp
+  src/fsm/yfork.cpp
+  src/runtime/alerts.cpp
+  src/runtime/ai_snapshot.cpp
+  src/runtime/arbitration.cpp
+  src/runtime/capture.cpp
+  src/runtime/control.cpp
+  src/runtime/frame_safety.cpp
+  src/runtime/fsm.cpp
+  src/runtime/icar.cpp
+  src/runtime/inference.cpp
+  src/runtime/latest_frame_capture.cpp
+  src/runtime/preprocess.cpp
+  src/runtime/running.cpp
+  src/runtime/safety.cpp
+  src/runtime/state_machines.cpp
+  src/runtime/telemetry.cpp
+  src/runtime/vehicle_output.cpp
 )
-add_executable(icar src/icar.cpp ${SRC_LIST})
+add_executable(icar ${ICAR_SOURCES})
 target_include_directories(icar PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)

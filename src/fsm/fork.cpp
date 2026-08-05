@@ -48,7 +48,7 @@ FsmFork::~FsmFork()
 FsmMode FsmFork::getMode()
 {
     // 输出场景状态结果
-    if (!params->config.fork || !params->config.currentLapConfig->fork || !enable)
+    if (!params->featureEnabled(Feature::FORK) || !enable)
         return FsmMode::NORMAL;
 
     return FsmMode::FORK;
@@ -60,7 +60,7 @@ FsmMode FsmFork::getMode()
  */
 void FsmFork::run(Mat &img)
 {
-    if (!params->config.fork) // 该模式未启用
+    if (!params->featureEnabled(Feature::FORK)) // 该模式未启用
         return;
 
     enable = handle(img, 0); // 处理T形岔路口

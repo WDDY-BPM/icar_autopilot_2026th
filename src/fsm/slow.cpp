@@ -48,7 +48,7 @@ FsmSlow::~FsmSlow()
 FsmMode FsmSlow::getMode()
 {
     // 输出场景状态结果
-    if (!params->config.slow || !params->config.currentLapConfig->slow || step == Step::NONE)
+    if (!params->featureEnabled(Feature::SLOW) || step == Step::NONE)
         return FsmMode::NORMAL;
 
     return FsmMode::SLOW;
@@ -60,7 +60,7 @@ FsmMode FsmSlow::getMode()
  */
 void FsmSlow::run(Mat &img)
 {
-    if (!params->config.slow) // 该模式未开启
+    if (!params->featureEnabled(Feature::SLOW)) // 该模式未开启
         return;
 
     switch (step)

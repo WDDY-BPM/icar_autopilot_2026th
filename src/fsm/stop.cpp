@@ -48,7 +48,7 @@ FsmStop::~FsmStop()
 FsmMode FsmStop::getMode()
 {
     // 输出场景状态结果
-    if (step == Step::NONE || !params->config.stop || !params->config.currentLapConfig->stop)
+    if (step == Step::NONE || !params->featureEnabled(Feature::STOP))
         return FsmMode::NORMAL;
     else
         return FsmMode::STOP;
@@ -60,7 +60,7 @@ FsmMode FsmStop::getMode()
  */
 void FsmStop::run(Mat &img)
 {
-    if (!params->config.stop) // 该模式未启用
+    if (!params->featureEnabled(Feature::STOP)) // 该模式未启用
         return;
 
     polyRoad.clear();

@@ -56,7 +56,7 @@ void FsmStation::run(Mat &img)
         return;
 
     // 当前圈未启用station
-    if (!params->config.station || !params->config.currentLapConfig->station)
+    if (!params->featureEnabled(Feature::STATION))
         return;
 
     countInit++;

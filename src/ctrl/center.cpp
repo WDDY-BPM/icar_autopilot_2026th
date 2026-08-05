@@ -119,7 +119,7 @@ void Center::fitting(shared_ptr<Params> &params)
     usableCenterRows = 0;
     recoveryMode = LaneRecoveryMode::INVALID;
     const bool visionLaneMode = !params->ctrl.fitting &&
-        (params->mode == FsmMode::NORMAL || params->mode == FsmMode::CURVE ||
+        (params->mode == FsmMode::NORMAL ||
          params->mode == FsmMode::CROSS || params->mode == FsmMode::STOP ||
          params->mode == FsmMode::SLOW || params->mode == FsmMode::STATION);
     const auto &laneQuality = params->track->quality;
@@ -435,7 +435,6 @@ void Center::fitting(shared_ptr<Params> &params)
         sigmaCenter = 1000;
 
     const bool strictLaneMode = params->mode == FsmMode::NORMAL ||
-                                params->mode == FsmMode::CURVE ||
                                 params->mode == FsmMode::CROSS ||
                                 params->mode == FsmMode::STOP ||
                                 params->mode == FsmMode::SLOW ||
@@ -586,14 +585,6 @@ void Center::showMode(Mat &img, FsmMode mode)
     case FsmMode::SLOW:
         str = "[Slow]";
         logo = "S";
-        break;
-    case FsmMode::CURVE:
-        str = "[Curve]";
-        logo = "C";
-        break;
-    case FsmMode::FINE:
-        str = "[Fine]";
-        logo = "X";
         break;
     case FsmMode::STOP:
         str = "[Stop]";

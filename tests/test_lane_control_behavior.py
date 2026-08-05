@@ -5,6 +5,19 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
+def read_runtime_sources():
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "src" / "runtime").glob("*.cpp"))
+    )
+
+
+def read_algorithm_headers():
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "include" / "ctrl").glob("*.hpp"))
+    )
+
 
 def launch_speed(desired, count, frames=60, start=0.10, low=0.30):
     if count >= frames:
@@ -88,8 +101,8 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertTrue(states[8][0])
 
     def test_one_invalid_frame_does_not_latch_safety_stop(self):
-        algorithms = (ROOT / "include/ctrl/control_algorithms.hpp").read_text(encoding="utf-8")
-        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        algorithms = read_algorithm_headers()
+        core = read_runtime_sources()
         self.assertIn("updateLaneSafetyStop", algorithms)
         self.assertIn("if (!latched)", algorithms)
         self.assertIn("invalidFrames >= stopAfterInvalidFrames", algorithms)
@@ -125,8 +138,8 @@ class LaneControlBehaviorTests(unittest.TestCase):
         held_servo = previous_final_servo
         self.assertEqual(held_servo, 1500)
 
-        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
-        final_override = core.index("if (!startupGateReleased)")
+        core = read_runtime_sources()
+        final_override = core.index("if (!frame.startupGateReleased)")
         cache_update = core.index("previousFinalServo = params->ctrl.servo;")
         publish = core.index("fsmFactory.manual->updateVehicleState", cache_update)
         self.assertLess(final_override, cache_update)
@@ -140,10 +153,10 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertFalse(continuous(176, 160))
 
     def test_border_clipped_single_edge_recovery_is_wired(self):
-        algorithms = (ROOT / "include/ctrl/control_algorithms.hpp").read_text(encoding="utf-8")
+        algorithms = read_algorithm_headers()
         track = (ROOT / "src/ctrl/track.cpp").read_text(encoding="utf-8")
         center = (ROOT / "src/ctrl/center.cpp").read_text(encoding="utf-8")
-        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        core = read_runtime_sources()
         self.assertIn("result.singleEdgeUsable", algorithms)
         self.assertIn("result.interiorPointCount >= interiorPointsMinimum", algorithms)
         self.assertIn("limitSingleLaneCenter", center)
@@ -157,7 +170,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("control_valid", core)
 
     def test_startup_does_not_accept_weakened_single_edge(self):
-        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        core = read_runtime_sources()
         lane_valid = core[core.index("const bool laneValid ="):]
         lane_valid = lane_valid[:lane_valid.index(";")]
         self.assertIn("leftReliable", lane_valid)
@@ -175,7 +188,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
 
     def test_degraded_modes_and_stop_arbitration_are_published(self):
         center = (ROOT / "src/ctrl/center.cpp").read_text(encoding="utf-8")
-        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        core = read_runtime_sources()
         self.assertNotIn("params->track->pointsEdgeLeft.clear()", center)
         self.assertNotIn("params->track->pointsEdgeRight.clear()", center)
         self.assertIn("buildDegradedLaneCenter", center)
@@ -187,7 +200,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertEqual(core.count("params->ctrl.stop = params->mustStop();"), 2)
 
     def test_recovery_controls_and_fsm_freezing_are_wired(self):
-        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        core = read_runtime_sources()
         center = (ROOT / "src/ctrl/center.cpp").read_text(encoding="utf-8")
         park = (ROOT / "src/fsm/park.cpp").read_text(encoding="utf-8")
         self.assertIn("nearSampleCount(params->ctrl.centerEdge) < 8", center)
@@ -202,7 +215,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("params->mustStop()", park)
 
     def test_single_reliable_edge_is_published_independently(self):
-        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        core = read_runtime_sources()
         self.assertIn("const bool leftOverlayValid", core)
         self.assertIn("const bool rightOverlayValid", core)
         self.assertIn("overlay[\"left\"] = leftOverlayValid", core)
@@ -218,9 +231,8 @@ class LaneControlBehaviorTests(unittest.TestCase):
     def test_normal_lane_speed_uses_centerline_curvature(self):
         motion = (ROOT / 'include/ctrl/motion.hpp').read_text(encoding='utf-8')
         center = (ROOT / 'src/ctrl/center.cpp').read_text(encoding='utf-8')
-        algorithms = (ROOT / 'include/ctrl/control_algorithms.hpp').read_text(
-            encoding='utf-8')
-        core = (ROOT / 'include/icar.hpp').read_text(encoding='utf-8')
+        algorithms = read_algorithm_headers()
+        core = read_runtime_sources()
         client = (ROOT / 'tools/manual_control_client.py').read_text(
             encoding='utf-8')
         self.assertIn('control_algorithms::calculateCenterlineSpeed', motion)
@@ -235,7 +247,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn('nearErr=%+d farErr=%+d ctrlErr=%+d', client)
 
     def test_curved_lane_can_release_startup_gate(self):
-        core = (ROOT / 'include/icar.hpp').read_text(encoding='utf-8')
+        core = read_runtime_sources()
         center = (ROOT / 'src/ctrl/center.cpp').read_text(encoding='utf-8')
         self.assertIn('laneQuality.leftReliable &&', core)
         self.assertIn('laneQuality.commonRows >= 20', core)
@@ -244,7 +256,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
 
     def test_visual_cone_confirmation_reaches_icar(self):
         launcher = (ROOT / 'src/start.py').read_text(encoding='utf-8')
-        core = (ROOT / 'include/icar.hpp').read_text(encoding='utf-8')
+        core = read_runtime_sources()
         self.assertIn('ICAR_START_CONE_PRECONFIRMED', launcher)
         self.assertIn('start_cone_preconfirmed=(label == "cone")', launcher)
         self.assertIn('ICAR_START_CONE_PRECONFIRMED', core)
@@ -252,7 +264,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn('icar.log', launcher)
 
     def test_low_latency_capture_and_heading_confidence_wiring(self):
-        core = (ROOT / 'include/icar.hpp').read_text(encoding='utf-8')
+        core = read_runtime_sources()
         predeal_h = (ROOT / 'include/ctrl/predeal.hpp').read_text(encoding='utf-8')
         predeal_cpp = (ROOT / 'src/ctrl/predeal.cpp').read_text(encoding='utf-8')
         center = (ROOT / 'src/ctrl/center.cpp').read_text(encoding='utf-8')
@@ -260,7 +272,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         client = (ROOT / 'tools/manual_control_client.py').read_text(encoding='utf-8')
         self.assertIn('cv::CAP_V4L2', core)
         self.assertIn('cv::CAP_PROP_BUFFERSIZE, 1', core)
-        self.assertIn('latestCaptureSequence', core)
+        self.assertIn('latestSequence_', (ROOT / 'include/runtime/latest_frame_capture.hpp').read_text(encoding='utf-8'))
         self.assertIn('undistortMapX', predeal_h)
         self.assertIn('undistortMapSize != sizeImage', predeal_cpp)
         self.assertIn('singleLaneHeadingConfidence', center)
@@ -272,7 +284,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
 
     def test_cached_rectification_and_startup_diagnostics(self):
         predeal = (ROOT / 'src/ctrl/predeal.cpp').read_text(encoding='utf-8')
-        core = (ROOT / 'include/icar.hpp').read_text(encoding='utf-8')
+        core = read_runtime_sources()
         launcher = (ROOT / 'src/start.py').read_text(encoding='utf-8')
         self.assertIn('!enable || img.empty()', predeal)
         self.assertNotIn('remap(img, img', predeal)
@@ -295,7 +307,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertEqual(config['velCurve'], 0.18)
 
     def test_startup_single_lane_remains_locked(self):
-        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        core = read_runtime_sources()
         track = (ROOT / "src/ctrl/track.cpp").read_text(encoding="utf-8")
         self.assertIn("const bool laneValid = laneQuality.leftReliable", core)
         self.assertIn("laneQuality.rightReliable", core)
@@ -306,12 +318,12 @@ class LaneControlBehaviorTests(unittest.TestCase):
         track = (ROOT / "src/ctrl/track.cpp").read_text(encoding="utf-8")
         center = (ROOT / "src/ctrl/center.cpp").read_text(encoding="utf-8")
         motion = (ROOT / "include/ctrl/motion.hpp").read_text(encoding="utf-8")
-        core = (ROOT / "include/icar.hpp").read_text(encoding="utf-8")
+        core = read_runtime_sources()
         predeal = (ROOT / "src/ctrl/predeal.cpp").read_text(encoding="utf-8")
         self.assertIn("quality = LaneQuality{};", track)
         self.assertIn("assessEdgeReliability", track)
         self.assertIn("initialStableRows >= 3", track)
-        algorithms = (ROOT / "include/ctrl/control_algorithms.hpp").read_text(encoding="utf-8")
+        algorithms = read_algorithm_headers()
         self.assertIn("widthFilled.emplace_back(row, rightColumn - leftColumn)", algorithms)
         self.assertIn("if (updateHistory)", center)
         self.assertIn("laneWidthProfileReady()", center)

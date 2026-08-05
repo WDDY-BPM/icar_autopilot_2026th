@@ -47,7 +47,7 @@ FsmYfork::~FsmYfork()
  */
 FsmMode FsmYfork::getMode()
 {
-    if (!params->config.yfork || !params->config.currentLapConfig->yfork || !enable)
+    if (!params->featureEnabled(Feature::YFORK) || !enable)
         return FsmMode::NORMAL;
 
     return FsmMode::YFORK;
@@ -59,7 +59,7 @@ FsmMode FsmYfork::getMode()
  */
 void FsmYfork::run(Mat &img)
 {
-    if (!params->config.yfork) // 该模式未启用
+    if (!params->featureEnabled(Feature::YFORK)) // 该模式未启用
     {
         completed = false; // 失能时复位，确保下次使能时能重新检测
         return;
@@ -304,7 +304,7 @@ bool FsmYfork::detectYfork(Mat &img)
 
     // 当前圈使能了停车场时：画面有PARK标志说明叉形箭头是车位标识，非Y型岔路
     // 当前圈未使能停车场时（如第二圈）：PARK标志不阻断Y型岔路检测
-    if (params->config.park)
+    if (params->featureEnabled(Feature::PARK))
     {
         for (int i = 0; i < params->results.size(); i++)
         {

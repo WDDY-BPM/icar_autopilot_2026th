@@ -4,6 +4,19 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+def read_runtime_sources():
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "src" / "runtime").glob("*.cpp"))
+    )
+
+
+def read_algorithm_headers():
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "include" / "ctrl").glob("*.hpp"))
+    )
 SOURCE = (ROOT / "src" / "fsm" / "manualControl.cpp").read_text(encoding="utf-8")
 
 
@@ -50,7 +63,7 @@ class ManualProtocolTests(unittest.TestCase):
         self.assertIsNotNone(check)
         self.assertIn("manualControl.returnAuto.exchange(false)", check.group("body"))
 
-        icar = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
+        icar = read_runtime_sources()
         return_branch = re.search(
             r"if \(fsmFactory\.manual->checkForReturnKey\(\)\)(?P<body>.*?)\n            \}",
             icar,

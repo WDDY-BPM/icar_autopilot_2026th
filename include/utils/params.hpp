@@ -46,8 +46,6 @@ enum class FsmMode
     BUSY_WAIT, // 等待手动接管
     MANUAL,    // 手动接管模式
     SLOW,      // 慢行区
-    CURVE,     // 连续弯道
-    FINE,      // 禁行区
     STOP,      // 停车区
     CROSS,     // 斑马线
     YFORK,     // Y型岔路口
@@ -133,10 +131,7 @@ struct Config
     struct LapConfig
     {
         bool fork = false;
-        bool fine = false;
         bool park = false;
-        bool spot = false;
-        bool curve = false;
         bool busy = false;
         bool slow = false;
         bool stop = false;
@@ -161,23 +156,22 @@ struct Config
     // 当前圈配置指针
     LapConfig *currentLapConfig = nullptr;
 
-    // 全局功能使能（默认值，可被单圈配置覆盖）
-    bool fork = true;    // 岔路使能
-    bool fine = true;    // 禁行区使能
-    bool park = true;    // 停车场使能
-    bool spot = true;    // 停车位使能
-    bool curve = true;   // 连续弯道使能
-    bool busy = true;    // 施工区使能
-    bool slow = true;    // 慢行区使能
-    bool stop = true;    // 停车区使能
-    bool cross = true;   // 斑马线停车使能
-    bool yfork = true;   // Y型岔路口使能
-    bool station = true; // 停靠站停车使能
-    bool obstacle = true; // 障碍物避障使能（锥桶/行人）
-
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(Config, velLow, velHigh, velSlow, velPark, velCurve, velBusy, velStop, velCross, velYfork,
                                    runP1, runP2, turnD, laneHeadingGain, laneHeadingMaxCorrection, laneHeadingFadeError, singleLaneHeadingConfidence, borderClippedHeadingConfidence, parkingHeadingConfidence, singleLaneInteriorPointsMin, singleLaneMaxCenterJump, singleLaneCenterStep, steeringFilterTau, maxErrorRate, servoRate, startupServoRate, startupServoLimit, startupStableFrames, startupRampFrames, startupSpeed, maxGapRows, debug, saveImg, saveIpm, rowCutUp, rowCutBottom,
-                                   overlap, score, binary, model, video, alertTarget, totalLaps, fork, fine, park, spot, curve, busy, slow, stop, cross, yfork, station);
+                                   overlap, score, binary, model, video, alertTarget, totalLaps);
+};
+
+enum class Feature
+{
+    FORK,
+    PARK,
+    BUSY,
+    SLOW,
+    STOP,
+    CROSS,
+    YFORK,
+    STATION,
+    OBSTACLE
 };
 
 /**
@@ -261,32 +255,11 @@ public:
             config.requireStartCone = configs["通用配置参数"].value("requireStartCone", true);
             config.totalLaps = configs["圈数配置"]["totalLaps"];
 
-            // 加载crossStop: 第几次见cross停车totalLaps
-            crossStop = configs["圈数配置"].value("crossStop", 0);
-
-            // 加载全局功能使能
-            auto globalFeatures = configs["全局功能使能"];
-            config.fork = globalFeatures["fork"];
-            config.fine = globalFeatures["fine"];
-            config.park = globalFeatures["park"];
-            config.spot = globalFeatures.value("spot", true);
-            config.curve = globalFeatures["curve"];
-            config.busy = globalFeatures["busy"];
-            config.slow = globalFeatures["slow"];
-            config.stop = globalFeatures["stop"];
-            config.cross = globalFeatures["cross"];
-            config.yfork = globalFeatures["yfork"];
-            config.station = globalFeatures["station"];
-            config.obstacle = globalFeatures.value("obstacle", true);
-
             // 加载每圈配置
             auto lap1Config = configs["每圈功能使能配置"]["lap1"];
             config.lap1.fork = lap1Config["fork"];
-            config.lap1.fine = lap1Config["fine"];
             config.lap1.park = lap1Config["park"];
             config.lap1.parkSpot = lap1Config["parkSpot"];
-            config.lap1.spot = lap1Config.value("spot", true);
-            config.lap1.curve = lap1Config["curve"];
             config.lap1.busy = lap1Config["busy"];
             config.lap1.slow = lap1Config["slow"];
             config.lap1.stop = lap1Config["stop"];
@@ -301,11 +274,8 @@ public:
 
             auto lap2Config = configs["每圈功能使能配置"]["lap2"];
             config.lap2.fork = lap2Config["fork"];
-            config.lap2.fine = lap2Config["fine"];
             config.lap2.park = lap2Config["park"];
             config.lap2.parkSpot = lap2Config["parkSpot"];
-            config.lap2.spot = lap2Config.value("spot", true);
-            config.lap2.curve = lap2Config["curve"];
             config.lap2.busy = lap2Config["busy"];
             config.lap2.slow = lap2Config["slow"];
             config.lap2.stop = lap2Config["stop"];
@@ -320,11 +290,8 @@ public:
 
             auto lap3Config = configs["每圈功能使能配置"]["lap3"];
             config.lap3.fork = lap3Config["fork"];
-            config.lap3.fine = lap3Config["fine"];
             config.lap3.park = lap3Config["park"];
             config.lap3.parkSpot = lap3Config["parkSpot"];
-            config.lap3.spot = lap3Config.value("spot", true);
-            config.lap3.curve = lap3Config["curve"];
             config.lap3.busy = lap3Config["busy"];
             config.lap3.slow = lap3Config["slow"];
             config.lap3.stop = lap3Config["stop"];
@@ -368,7 +335,6 @@ public:
     bool aiResultFresh = false;         // 本控制帧是否收到了一组新的AI结果
     int totalLaps;                      // 总圈数
     int currentLap;                     // 当前圈数
-    int crossStop;                      // 第几次检测到cross停车
     std::atomic<bool> manualTakeover{false}; // 手动接管模式（跨 AI/主线程共享）
     bool stationStopCompleted = false;  // station已完成一次停车
     bool stationStarted = false;        // station已触发检测（pressTimer启动）
@@ -385,6 +351,29 @@ public:
     bool lapTaskCompleted = false;      // 当前圈主任务是否已可靠完成
 
 public:
+    const Config::LapConfig &activeLapConfig() const
+    {
+        return *config.currentLapConfig;
+    }
+
+    bool featureEnabled(Feature feature) const
+    {
+        const auto &lap = activeLapConfig();
+        switch (feature)
+        {
+        case Feature::FORK: return lap.fork;
+        case Feature::PARK: return lap.park;
+        case Feature::BUSY: return lap.busy;
+        case Feature::SLOW: return lap.slow;
+        case Feature::STOP: return lap.stop;
+        case Feature::CROSS: return lap.cross;
+        case Feature::YFORK: return lap.yfork;
+        case Feature::STATION: return lap.station;
+        case Feature::OBSTACLE: return lap.obstacle;
+        }
+        return false;
+    }
+
     /**
      * @brief 更新当前圈配置
      */

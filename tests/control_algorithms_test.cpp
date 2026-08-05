@@ -1,4 +1,5 @@
 #include "ctrl/control_algorithms.hpp"
+#include "com/control_watchdog.hpp"
 #include <cassert>
 #include <cmath>
 #include <vector>
@@ -12,6 +13,76 @@ struct TestPoint
 
 int main()
 {
+    {
+        ControlWatchdogState watchdog;
+        watchdog.onConnected();
+        assert(!watchdog.armed());
+        assert(!watchdog.expired(30000, 500));
+
+        constexpr std::uint8_t controlAddress = 1;
+        assert(!watchdog.onValidFrame(2, controlAddress, 30000));
+        assert(!watchdog.armed());
+        assert(!watchdog.onValidFrame(3, controlAddress, 30100));
+        assert(!watchdog.armed());
+
+        assert(watchdog.onValidFrame(controlAddress, controlAddress, 31000));
+        assert(watchdog.armed());
+        assert(!watchdog.expired(31499, 500));
+        assert(!watchdog.expired(31500, 500));
+        assert(watchdog.expired(31501, 500));
+
+        watchdog.onValidControlFrame(32000);
+        assert(!watchdog.expired(32500, 500));
+        assert(watchdog.expired(32501, 500));
+
+        watchdog.reset();
+        assert(!watchdog.armed());
+        assert(!watchdog.expired(90000, 500));
+        watchdog.onConnected();
+        assert(!watchdog.armed());
+        assert(!watchdog.expired(120000, 500));
+    }
+    {
+        int busyCountdown = 40;
+        int alertCountdown = 0;
+        int decelCountdown = 0;
+        std::vector<int> busyBeeps;
+        for (int frame = 0; frame < 40; ++frame)
+        {
+            const auto events = control_algorithms::advanceAlertTimers(
+                busyCountdown, alertCountdown, decelCountdown, false);
+            if (events.busyBeep)
+                busyBeeps.push_back(40 - frame);
+        }
+        assert((busyBeeps == std::vector<int>{40, 30, 20, 10}));
+        assert(busyCountdown == 0);
+
+        control_algorithms::refreshAlertEvidence(
+            true, true, alertCountdown);
+        assert(alertCountdown == 30);
+        for (int frame = 0; frame < 30; ++frame)
+            control_algorithms::advanceAlertTimers(
+                busyCountdown, alertCountdown, decelCountdown, false);
+        assert(alertCountdown == 0);
+
+        control_algorithms::refreshAlertEvidence(
+            false, true, alertCountdown);
+        assert(alertCountdown == 0);
+        control_algorithms::refreshAlertEvidence(
+            true, false, alertCountdown);
+        assert(alertCountdown == 0);
+        control_algorithms::refreshAlertEvidence(
+            true, true, alertCountdown);
+        assert(alertCountdown == 30);
+
+        auto events = control_algorithms::advanceAlertTimers(
+            busyCountdown, alertCountdown, decelCountdown, true);
+        assert(decelCountdown == 5);
+        assert(!events.busyBeep);
+        events = control_algorithms::advanceAlertTimers(
+            busyCountdown, alertCountdown, decelCountdown, false);
+        assert(decelCountdown == 4);
+    }
     control_algorithms::StopReasonState stopReasons;
     stopReasons.set(control_algorithms::StopReason::CAMERA, true);
     stopReasons.set(control_algorithms::StopReason::EMERGENCY, true);

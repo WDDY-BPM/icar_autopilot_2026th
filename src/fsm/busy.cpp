@@ -47,7 +47,7 @@ FsmBusy::~FsmBusy()
  */
 FsmMode FsmBusy::getMode()
 {
-    if (enable && params->config.busy && params->config.currentLapConfig->busy)
+    if (enable && params->featureEnabled(Feature::BUSY))
     {
         if (manualTakeover)
         {
@@ -71,7 +71,7 @@ FsmMode FsmBusy::getMode()
  */
 void FsmBusy::run(Mat &img)
 {
-    if (!params->config.busy) // 该模式未启用
+    if (!params->featureEnabled(Feature::BUSY)) // 该模式未启用
         return;
     // 手动接管恢复期递减
     enable = false;

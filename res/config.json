@@ -44,8 +44,7 @@
     "requireStartCone": true
   },
   "圈数配置": {
-    "totalLaps": 3,
-    "crossStop": 1
+    "totalLaps": 3
   },
   "每圈功能使能配置": {
     "lap1": {
@@ -57,8 +56,6 @@
       "cross": true,
       "station": false,
       "stop": true,
-      "curve": false,
-      "fine": false,
       "yfork": false,
       "yforkLeft": false,
       "manualTakeover": false,
@@ -74,8 +71,6 @@
       "cross": true,
       "station": true,
       "stop": false,
-      "curve": false,
-      "fine": false,
       "yfork": false,
       "yforkLeft": false,
       "manualTakeover": true,
@@ -91,27 +86,12 @@
       "cross": true,
       "station": false,
       "stop": true,
-      "curve": false,
-      "fine": false,
       "yfork": true,
       "yforkLeft": false,
       "manualTakeover": false,
       "busyStopEnable": false,
       "busyStopPoint": 0
     }
-  },
-  "全局功能使能": {
-    "fork": true,
-    "fine": false,
-    "park": true,
-    "curve": true,
-    "busy": true,
-    "slow": true,
-    "stop": true,
-    "cross": false,
-    "yfork": true,
-    "station": true,
-    "obstacle": true
   },
   "参数说明": {
     "velLow": "智能车最低速度: 0.18m/s",
@@ -150,10 +130,7 @@
     "rowCutUp": "图像顶部切行（前瞻距离）",
     "rowCutBottom": "图像底部切行（盲区距离）",
     "#fork": "岔路使能",
-    "#fine": "禁行区使能",
     "#park": "停车场使能",
-    "#spot": "停车位使能",
-    "#curve": "连续弯道使能",
     "#busy": "施工绕行使能",
     "#slow": "慢行区使能",
     "#stop": "道闸前方停车使能",
