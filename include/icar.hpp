@@ -377,12 +377,22 @@ private:
         params->config.station = params->config.currentLapConfig->station;
         params->config.obstacle = params->config.currentLapConfig->obstacle;
 
+        // Run the construction-zone alert independently of FSM early returns.
+        if (params->busyAlertCountdown > 0)
+        {
+            if (params->busyAlertCountdown % 10 == 0)
+                client->buzzerSound(client->BUZZER_WARNNING);
+            params->busyAlertCountdown--;
+        }
+
         fsmFactory.stop->run(img); // 停车区识别与规划
         params->mode = fsmFactory.stop->getMode();
         if (params->hasStopReason(control_algorithms::StopReason::GATE))
             return;
         fsmFactory.cross->run(img); // 斑马线停车识别与规划
-        params->mode = fsmFactory.cross->getMode();
+        const FsmMode crossMode = fsmFactory.cross->getMode();
+        if (crossMode != FsmMode::NORMAL)
+            params->mode = crossMode;
         if (params->hasStopReason(control_algorithms::StopReason::CROSS))
             return;
 
@@ -447,13 +457,7 @@ private:
                 params->mode = fsmFactory.busy->getMode();
             if (params->hasStopReason(control_algorithms::StopReason::BUSY))
                 return;
-            // 施工区鸣笛（每秒3次，间隔10帧≈333ms）
-            if (params->busyAlertCountdown > 0)
-            {
-                if (params->busyAlertCountdown % 10 == 0)
-                    client->buzzerSound(client->BUZZER_WARNNING);
-                params->busyAlertCountdown--;
-            }
+
         }
         if (params->config.station)
         {

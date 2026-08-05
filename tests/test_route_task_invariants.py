@@ -275,5 +275,27 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIn("!countedBusyThisFrame", busy)
 
 
+    def test_busy_confirmation_timeout_is_independent_of_lane_and_ai(self):
+        busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
+        lane_guard = busy.index("pointsEdgeLeft.size() < ROWSIMAGE / 2")
+        timeout = busy.index("awaitingBusyConfirmation &&")
+        self.assertLess(timeout, lane_guard)
+        self.assertIn("busyConfirmationStartedAt", busy)
+        self.assertIn("Fourth confirmation timed out; BUSY stop released", busy)
+        self.assertIn("setStopReason(control_algorithms::StopReason::BUSY, false)", busy)
+
+    def test_cross_only_stops_on_last_lap(self):
+        cross = (ROOT / "src" / "fsm" / "cross.cpp").read_text(encoding="utf-8")
+        self.assertEqual(
+            cross.count("crossCount < params->totalLaps ? Step::NONE : Step::STOP"), 2)
+        self.assertIn("st == Step::STOP", cross)
+
+    def test_stop_mode_survives_inactive_cross_and_busy_alert_runs_first(self):
+        core = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
+        self.assertIn("if (crossMode != FsmMode::NORMAL)", core)
+        alert = core.index("if (params->busyAlertCountdown > 0)")
+        busy_return = core.index("hasStopReason(control_algorithms::StopReason::BUSY)")
+        self.assertLess(alert, busy_return)
+
 if __name__ == "__main__":
     unittest.main()

@@ -331,5 +331,13 @@ class LaneControlBehaviorTests(unittest.TestCase):
                         predeal.index("morphologyEx(imgInv, imgInv, MORPH_CLOSE"))
 
 
+    def test_weak_hybrid_scores_both_single_edge_candidates(self):
+        center = (ROOT / "src" / "ctrl" / "center.cpp").read_text(encoding="utf-8")
+        self.assertIn("leftCandidate = centerCompute(interiorOnly(detectedLeft), 0)", center)
+        self.assertIn("rightCandidate = centerCompute(interiorOnly(detectedRight), 1)", center)
+        self.assertIn("windows.nearValid", center)
+        self.assertIn("windows.nearSamples * 100 + windows.farSamples * 10", center)
+        self.assertIn("!heldCandidateValid", center)
+
 if __name__ == "__main__":
     unittest.main()

@@ -177,6 +177,19 @@ void Center::fitting(shared_ptr<Params> &params)
             return static_cast<int>(std::count_if(centerline.begin(), centerline.end(),
                 [](const PointX &point) { return point.x >= 176 && point.x <= 220; }));
         };
+        const auto singleCandidateScore = [](const vector<PointX> &centerline) {
+            const auto windows = control_algorithms::calculateLaneControlCenters(
+                centerline, COLSIMAGE / 2.0f, 0.65f, 8, false);
+            const bool continuous = std::adjacent_find(
+                centerline.begin(), centerline.end(),
+                [](const PointX &a, const PointX &b) {
+                    return std::abs(a.y - b.y) > 45;
+                }) == centerline.end();
+            if (!windows.nearValid || !continuous)
+                return -1;
+            return windows.nearSamples * 100 + windows.farSamples * 10 +
+                std::min(static_cast<int>(centerline.size()), 99);
+        };
         if (recoveryMode == LaneRecoveryMode::STRICT_DUAL ||
             recoveryMode == LaneRecoveryMode::RELAXED_DUAL)
             params->ctrl.centerEdge = buildRowAlignedCenter(
@@ -191,26 +204,29 @@ void Center::fitting(shared_ptr<Params> &params)
             if (params->ctrl.centerEdge.size() < 12 ||
                 nearSampleCount(params->ctrl.centerEdge) < 8)
             {
-                if (recoverySideHoldFrames <= 0 || selectedRecoverySide == 0)
+                const vector<PointX> leftCandidate = centerCompute(interiorOnly(detectedLeft), 0);
+                const vector<PointX> rightCandidate = centerCompute(interiorOnly(detectedRight), 1);
+                const int leftScore = singleCandidateScore(leftCandidate);
+                const int rightScore = singleCandidateScore(rightCandidate);
+                const bool heldCandidateValid = selectedRecoverySide < 0
+                    ? leftScore >= 0 : selectedRecoverySide > 0 && rightScore >= 0;
+                if (recoverySideHoldFrames <= 0 || selectedRecoverySide == 0 ||
+                    !heldCandidateValid)
                 {
-                    if (laneQuality.leftInteriorPoints != laneQuality.rightInteriorPoints)
+                    if (leftScore != rightScore)
+                        selectedRecoverySide = leftScore > rightScore ? -1 : 1;
+                    else if (laneQuality.leftInteriorPoints != laneQuality.rightInteriorPoints)
                         selectedRecoverySide = laneQuality.leftInteriorPoints >
                             laneQuality.rightInteriorPoints ? -1 : 1;
-                    else if (laneQuality.leftBorderRatio != laneQuality.rightBorderRatio)
-                        selectedRecoverySide = laneQuality.leftBorderRatio <
-                            laneQuality.rightBorderRatio ? -1 : 1;
                     else
-                        selectedRecoverySide = laneQuality.leftLongestBorderRun <=
-                            laneQuality.rightLongestBorderRun ? -1 : 1;
+                        selectedRecoverySide = laneQuality.leftBorderRatio <=
+                            laneQuality.rightBorderRatio ? -1 : 1;
                     recoverySideHoldFrames = 3;
                 }
-                else recoverySideHoldFrames--;
-                vector<PointX> interior;
-                const auto &selected = selectedRecoverySide < 0 ? detectedLeft : detectedRight;
-                std::copy_if(selected.begin(), selected.end(), std::back_inserter(interior),
-                    [](const PointX &point) { return point.y > 2 && point.y < COLSIMAGE - 3; });
-                params->ctrl.centerEdge = centerCompute(
-                    interior, selectedRecoverySide < 0 ? 0 : 1);
+                else
+                    recoverySideHoldFrames--;
+                params->ctrl.centerEdge = selectedRecoverySide < 0
+                    ? leftCandidate : rightCandidate;
                 singleSide = selectedRecoverySide;
             }
             else

@@ -219,8 +219,8 @@ void FsmCross::run(Mat &img)
             crossLostStepCount++;
             if (crossLostStepCount >= 3) // 连续3帧未检测到斑马线
             {
-                // 最后一圈不在此停车，等待cross完全离开后由crossPassed处理
-                setStep(crossCount >= params->totalLaps ? Step::NONE : Step::STOP);
+                // 非最后一圈直接结束；只有最后一圈进入STOP
+                setStep(crossCount < params->totalLaps ? Step::NONE : Step::STOP);
                 return;
             }
         }
@@ -230,8 +230,8 @@ void FsmCross::run(Mat &img)
         }
 
         if (countRec >= 2)
-            // 最后一圈不在此停车，等待cross完全离开后由crossPassed处理
-            setStep(crossCount >= params->totalLaps ? Step::NONE : Step::STOP);
+            // 非最后一圈直接结束；只有最后一圈进入STOP
+            setStep(crossCount < params->totalLaps ? Step::NONE : Step::STOP);
         if (timeout > 30)
         {
             setStep(Step::NONE); // 设置新状态

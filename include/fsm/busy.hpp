@@ -51,6 +51,8 @@ private:
     int countRec = 0;               // AI场景识别计数器
     int countSes = 0;               // 场次计数器
     int timeout = 0;                // 超时计数器
+    bool awaitingBusyConfirmation = false;
+    std::chrono::steady_clock::time_point busyConfirmationStartedAt;
     int busyStopCount = 0;          // 停靠点计数器
     int busyStopMaskTime = 0;       // 停靠点时间屏蔽
     int recoveryFrames = 0;         // 手动接管后的恢复帧计数（防止重新触发接管）

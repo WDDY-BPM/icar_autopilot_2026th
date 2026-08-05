@@ -81,7 +81,21 @@ void FsmBusy::run(Mat &img)
     if (recoveryFrames > 0)
         recoveryFrames--;
 
-    enable = false; // 场景检测使能标志
+    enable = false;
+    // The third detection stops the vehicle while a fourth detection confirms
+    // the scene. This timeout is independent of AI and lane availability.
+    if (awaitingBusyConfirmation &&
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - busyConfirmationStartedAt).count() >= 2000)
+    {
+        awaitingBusyConfirmation = false;
+        countRec = 0;
+        countSes = 0;
+        params->busyZone = false;
+        params->setStopReason(control_algorithms::StopReason::BUSY, false);
+        printf("[Busy] Fourth confirmation timed out; BUSY stop released\n");
+    }
+ // 场景检测使能标志
 
     // 行驶通过施工区模式（退出手动接管后）：左转标志触发退出转向，和出停车场一致
     if (drivingThrough)
@@ -173,6 +187,7 @@ void FsmBusy::run(Mat &img)
                 drivingThrough = false;
                 exiting = false;
                 enable = false;
+
                 countRes = 0;
                 params->busyZone = false;  // 施工区结束
                 params->ctrl.countAcc = 0; // 出库缓加速，约1.7s后恢复正常速度
@@ -222,12 +237,18 @@ void FsmBusy::run(Mat &img)
                     enable = true;                       // 设置场景检测使能标志
                     if (!params->busyZone)               // 只在首次进入施工区时触发蜂鸣
                         params->busyAlertCountdown = 40; // 触发1秒以上蜂鸣
-                    params->busyZone = true;             // 标记驶入施工区
+                    params->busyZone = true;
+                    if (countRec == 3 && !awaitingBusyConfirmation)
+                    {
+                        awaitingBusyConfirmation = true;
+                        busyConfirmationStartedAt = std::chrono::steady_clock::now();
+                    }
                 }
 
                 // 持续检测，触发手动接管
                 if (countRec > 3)
                 {
+                    awaitingBusyConfirmation = false;
                     cout << "[Busy] === 手动接管检查 ===" << endl;
                     cout << "[Busy] countRec: " << countRec << endl;
                     cout << "[Busy] waitingForTakeover: " << waitingForTakeover << endl;
@@ -465,6 +486,7 @@ void FsmBusy::endManualTakeover()
 {
     params->setStopReason(control_algorithms::StopReason::MANUAL, false);
     params->setStopReason(control_algorithms::StopReason::BUSY, false);
+    awaitingBusyConfirmation = false;
     manualTakeover = false;
     waitingForTakeover = false; // 改为false，不进入BUSY_WAIT
     enable = true;              // 保持在施工区模式
@@ -506,6 +528,8 @@ void FsmBusy::resetLap()
     params->setStopReason(control_algorithms::StopReason::BUSY, false);
     params->setStopReason(control_algorithms::StopReason::MANUAL, false);
     enable = false;
+
+    awaitingBusyConfirmation = false;
     manualTakeover = false;
     waitingForTakeover = true;
     countRec = 0;
