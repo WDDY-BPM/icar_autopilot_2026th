@@ -32,6 +32,7 @@
 #include <stdexcept>
 #include "utils/json.hpp"
 #include "ctrl/track.hpp"
+#include "runtime/fsm_mode.hpp"
 #include "runtime/path_override.hpp"
 #include "utils/config_validation.hpp"
 
@@ -41,21 +42,6 @@ using namespace std;
  * @brief FSM状态场景
  *
  */
-enum class FsmMode
-{
-    NORMAL,    // 基础赛道
-    FORK,      // 岔路
-    PARK,      // 停车场
-    BUSY,      // 施工障碍
-    BUSY_WAIT, // 等待手动接管
-    MANUAL,    // 手动接管模式
-    SLOW,      // 慢行区
-    STOP,      // 停车区
-    CROSS,     // 斑马线
-    YFORK,     // Y型岔路口
-    STATION,   // 停靠站
-};
-
 /**
  * @brief 车辆控制指令
  *
@@ -141,7 +127,7 @@ struct Config
         bool stop = false;
         bool cross = true;
         bool yfork = false;
-        bool yforkLeft = true; // Y型岔路口走左分支(true)或右分支(false)
+        bool yforkLeft = false; // Y型岔路口走左分支(true)或右分支(false)
         bool station = true;   // 停靠站停车
         bool obstacle = true;   // 障碍物避障使能（锥桶/行人）
         int parkSpot = 0;
@@ -268,7 +254,8 @@ public:
             config.lap1.stop = lap1Config["stop"];
             config.lap1.cross = lap1Config["cross"];
             config.lap1.yfork = lap1Config["yfork"];
-            config.lap1.yforkLeft = lap1Config.value("yforkLeft", true);
+            config.lap1.yforkLeft = config.lap1.yfork
+                ? lap1Config.value("yforkLeft", false) : false;
             config.lap1.station = lap1Config["station"];
             config.lap1.obstacle = lap1Config.value("obstacle", true);
             config.lap1.manualTakeover = lap1Config.value("manualTakeover", false);
@@ -284,7 +271,8 @@ public:
             config.lap2.stop = lap2Config["stop"];
             config.lap2.cross = lap2Config["cross"];
             config.lap2.yfork = lap2Config["yfork"];
-            config.lap2.yforkLeft = lap2Config.value("yforkLeft", true);
+            config.lap2.yforkLeft = config.lap2.yfork
+                ? lap2Config.value("yforkLeft", false) : false;
             config.lap2.station = lap2Config["station"];
             config.lap2.obstacle = lap2Config.value("obstacle", true);
             config.lap2.manualTakeover = lap2Config.value("manualTakeover", false);
@@ -300,7 +288,8 @@ public:
             config.lap3.stop = lap3Config["stop"];
             config.lap3.cross = lap3Config["cross"];
             config.lap3.yfork = lap3Config["yfork"];
-            config.lap3.yforkLeft = lap3Config.value("yforkLeft", true);
+            config.lap3.yforkLeft = config.lap3.yfork
+                ? lap3Config.value("yforkLeft", false) : false;
             config.lap3.station = lap3Config["station"];
             config.lap3.obstacle = lap3Config.value("obstacle", true);
             config.lap3.manualTakeover = lap3Config.value("manualTakeover", false);
@@ -336,6 +325,7 @@ public:
     FsmMode mode, modeLast;             // FSM状态场景
     shared_ptr<Track> track;            // 赛道识别类
     PathOverride pathOverride;
+    uint64_t pathFrameId{0};
     std::vector<PredictResult> results; // AI推理结果
     bool aiResultFresh = false;         // 本控制帧是否收到了一组新的AI结果
     int totalLaps;                      // 总圈数
@@ -363,18 +353,32 @@ public:
 
     void beginPathOverride(PathSource source)
     {
-        const bool composeExisting = pathOverride.active &&
-                                     pathOverride.source != source;
-        const auto left = composeExisting ? pathOverride.leftEdge :
-                                            track->pointsEdgeLeft;
-        const auto right = composeExisting ? pathOverride.rightEdge :
-                                             track->pointsEdgeRight;
-        pathOverride.setEdges(source, left, right);
+        pathOverride.clear();
+        pathOverride.setEdges(source, track->pointsEdgeLeft,
+                              track->pointsEdgeRight);
     }
 
     void clearPathOverride(PathSource source)
     {
         pathOverride.clear(source);
+    }
+
+    void advancePathFrame()
+    {
+        pathOverride.tick(++pathFrameId);
+    }
+
+    bool dropPathOverrideIfDisallowed(FsmMode currentMode)
+    {
+        if (!pathOverride.active ||
+            pathSourceAllowed(pathOverride.source, currentMode))
+            return false;
+        const PathSource staleSource = pathOverride.source;
+        std::cout << "[Path] Dropped stale " << pathSourceName(staleSource)
+                  << " path in " << fsmModeName(currentMode) << " mode."
+                  << std::endl;
+        pathOverride.clear(staleSource);
+        return true;
     }
 
     const Config::LapConfig &activeLapConfig() const

@@ -16,10 +16,13 @@ void Icar::calculateControl(FrameCycle &frame)
                                         params->mode == FsmMode::STOP ||
                                         params->mode == FsmMode::SLOW ||
                                         params->mode == FsmMode::STATION;
-            params->laneSafetyStop = control_algorithms::updateLaneSafetyStop(
-                params->laneSafetyStop, safetyLaneMode, center->controlValid,
-                center->laneInvalidFrames, center->laneRecoveryFrames, 7, 5,
-                laneUnconfirmedFrames, 30);
+            if (center->plannedPathRejected)
+                params->laneSafetyStop = true;
+            else
+                params->laneSafetyStop = control_algorithms::updateLaneSafetyStop(
+                    params->laneSafetyStop, safetyLaneMode, center->controlValid,
+                    center->laneInvalidFrames, center->laneRecoveryFrames, 7, 5,
+                    laneUnconfirmedFrames, 30);
             params->setStopReason(control_algorithms::StopReason::LANE,
                                   params->laneSafetyStop);
         }

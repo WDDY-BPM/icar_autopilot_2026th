@@ -8,6 +8,7 @@ void Icar::running()
     if (frame.frameAvailable)
     {
         preprocessFrame(frame);
+        params->advancePathFrame();
         lastTelemetryFrameId = frame.frameId;
         lastTelemetryTimestampMs = frame.timestampMs;
         consumeAiSnapshot(frame);

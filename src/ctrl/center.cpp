@@ -118,6 +118,8 @@ void Center::fitting(shared_ptr<Params> &params)
     appliedCenterStep = 0;
     usableCenterRows = 0;
     recoveryMode = LaneRecoveryMode::INVALID;
+    plannedPathRejected = false;
+    plannedValidation = PlannedPathValidation{};
     const LaneInput laneInput = selectLaneInput(
         params->track->pointsEdgeLeft, params->track->pointsEdgeRight,
         params->pathOverride);
@@ -458,8 +460,13 @@ void Center::fitting(shared_ptr<Params> &params)
     const bool singleValid = (recoveryMode == LaneRecoveryMode::LEFT_SINGLE ||
         recoveryMode == LaneRecoveryMode::RIGHT_SINGLE) &&
         params->ctrl.centerEdge.size() >= 20 && degradedCenterContinuous;
+    if (plannedPath)
+        plannedValidation = validatePlannedPath(
+            params->ctrl.centerEdge, ROWSIMAGE, COLSIMAGE);
     const bool candidateValid = plannedPath
-        ? controlWindowValid && params->ctrl.centerEdge.size() >= 8
+        ? controlWindowValid && plannedValidation.valid &&
+            params->pathOverride.validFor(laneInput.source) &&
+            pathSourceAllowed(laneInput.source, params->mode)
         : controlWindowValid &&
             (strictValid || relaxedValid || weakHybridValid || singleValid);
     if (strictLaneMode && !plannedPath && !params->ctrl.parking &&
@@ -481,13 +488,18 @@ void Center::fitting(shared_ptr<Params> &params)
     }
     else
     {
-        // FSM-generated parking/fork/construction paths use their own validity.
         laneRecoveryState = control_algorithms::LaneRecoveryState{};
-        controlValid = !params->ctrl.centerEdge.empty();
+        controlValid = candidateValid;
         laneInvalidFrames = 0;
         laneRecoveryFrames = 0;
         if (controlValid)
             lastValidCenter = params->ctrl.center;
+        else if (plannedPath)
+        {
+            plannedPathRejected = true;
+            params->clearPathOverride(laneInput.source);
+            params->ctrl.centerEdge.clear();
+        }
     }
     const bool dualStrict = laneQuality.leftReliable && laneQuality.rightReliable;
     const int laneDiagnosticState = dualStrict ? 0 :

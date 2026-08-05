@@ -166,6 +166,9 @@ public:
 
         if (params->alertDecelCount > 0)
             params->ctrl.speed = std::max(0.0f, params->ctrl.speed - 0.1f);
+
+        params->ctrl.speed = applyPathSpeedLimit(
+            params->ctrl.speed, params->pathOverride);
     }
     /**
      * @brief 显示赛道线识别结果

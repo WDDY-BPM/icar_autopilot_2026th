@@ -8,13 +8,17 @@ void FsmObstacle::run(Mat &img)
 {
     (void)img;
     resultObs = PredictResult();
+    if (params->pathOverride.active &&
+        params->pathOverride.source != PathSource::OBSTACLE)
+        return;
     params->clearPathOverride(PathSource::OBSTACLE);
+    if (!params->aiResultFresh)
+        return;
 
-    const LaneInput lane = selectLaneInput(
-        params->track->pointsEdgeLeft, params->track->pointsEdgeRight,
-        params->pathOverride);
-    if (!lane.left || !lane.right || lane.left->size() < ROWSIMAGE / 2 ||
-        lane.right->size() < ROWSIMAGE / 2)
+    const auto &trackLeft = params->track->pointsEdgeLeft;
+    const auto &trackRight = params->track->pointsEdgeRight;
+    if (trackLeft.size() < ROWSIMAGE / 2 ||
+        trackRight.size() < ROWSIMAGE / 2)
         return;
 
     vector<PredictResult> obstacles;
@@ -37,25 +41,24 @@ void FsmObstacle::run(Mat &img)
 
     size_t row = 0;
     int closestDistance = COLSIMAGE;
-    for (size_t index = 0; index < lane.left->size(); ++index)
+    for (size_t index = 0; index < trackLeft.size(); ++index)
     {
-        const int distance = abs(resultObs.y - (*lane.left)[index].x);
+        const int distance = abs(resultObs.y - trackLeft[index].x);
         if (distance < closestDistance)
         {
             closestDistance = distance;
             row = index;
         }
     }
-    row = std::min(row, lane.right->size() - 1);
+    row = std::min(row, trackRight.size() - 1);
     const int obstacleRight = resultObs.x + resultObs.width;
-    const int leftColumn = (*lane.left)[row].y;
-    const int rightColumn = (*lane.right)[row].y;
+    const int leftColumn = trackLeft[row].y;
+    const int rightColumn = trackRight[row].y;
     if (obstacleRight <= leftColumn || rightColumn <= resultObs.x)
         return;
 
-    params->beginPathOverride(PathSource::OBSTACLE);
-    auto &left = params->pathOverride.leftEdge;
-    auto &right = params->pathOverride.rightEdge;
+    vector<PointX> left = trackLeft;
+    vector<PointX> right = trackRight;
     row = std::min(row, std::min(left.size(), right.size()) - 1);
     const int distanceLeft = resultObs.x - left[row].y;
     const int distanceRight = right[row].y - obstacleRight;
@@ -63,7 +66,7 @@ void FsmObstacle::run(Mat &img)
     if (abs(distanceLeft) <= abs(distanceRight))
     {
         if (resultObs.type == LABEL_PERSON)
-            curtailTracking(false);
+            curtailTracking(false, left, right);
         else
         {
             vector<PointX> points(4);
@@ -82,7 +85,7 @@ void FsmObstacle::run(Mat &img)
     else
     {
         if (resultObs.type == LABEL_PERSON)
-            curtailTracking(true);
+            curtailTracking(true, left, right);
         else
         {
             vector<PointX> points(4);
@@ -101,9 +104,9 @@ void FsmObstacle::run(Mat &img)
 
     left.resize(static_cast<size_t>(left.size() * 0.7));
     right.resize(static_cast<size_t>(right.size() * 0.7));
-    params->pathOverride.hasLeftEdge = !left.empty();
-    params->pathOverride.hasRightEdge = !right.empty();
-    params->pathOverride.headingConfidence = 0.45f;
+    params->pathOverride.setEdges(
+        PathSource::OBSTACLE, std::move(left), std::move(right),
+        0.45f, std::min(params->config.velSlow, 0.15f), 1);
     params->ctrl.obstacleSlow = true;
 }
 
@@ -121,10 +124,9 @@ void FsmObstacle::show(Mat &img)
             cv::Scalar(0, 0, 255), 1);
 }
 
-void FsmObstacle::curtailTracking(bool leftSide)
+void FsmObstacle::curtailTracking(bool leftSide, vector<PointX> &left,
+                                  vector<PointX> &right)
 {
-    auto &left = params->pathOverride.leftEdge;
-    auto &right = params->pathOverride.rightEdge;
     const size_t common = std::min(left.size(), right.size());
     left.resize(common);
     right.resize(common);

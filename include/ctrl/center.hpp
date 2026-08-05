@@ -28,6 +28,7 @@
 #include "utils/tools.hpp"
 #include "utils/params.hpp"
 #include "ctrl/control_algorithms.hpp"
+#include "runtime/planned_path_validation.hpp"
 
 #define DIS_MOVE 48       // 偏移距离，对应赛道距离的一般，在我的打表软件中默认48像素对应20cm
 #define MAX_POINT_NUM 240 // 无需修改
@@ -51,6 +52,8 @@ public:
     uint16_t validRowsRight = 0; // 边缘有效行数（右）
     double sigmaCenter = 0;
     bool controlValid = false;
+    bool plannedPathRejected = false;
+    PlannedPathValidation plannedValidation;
     int laneInvalidFrames = 0;
     int laneRecoveryFrames = 0;
     int nearCenter = COLSIMAGE / 2;

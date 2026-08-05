@@ -153,10 +153,11 @@ void Icar::runFsm(Mat &img)
 
         // 全局障碍物检测（锥桶/行人），施工区/停车场/Y型岔路口期间不检测
         params->ctrl.obstacleSlow = false;
-        if (params->featureEnabled(Feature::OBSTACLE) &&
-            params->mode != FsmMode::BUSY &&
-            params->mode != FsmMode::PARK &&
-            params->mode != FsmMode::YFORK)
+        const bool obstacleAllowed = pathSourceAllowed(
+            PathSource::OBSTACLE, params->mode);
+        if (!obstacleAllowed)
+            params->clearPathOverride(PathSource::OBSTACLE);
+        if (params->featureEnabled(Feature::OBSTACLE) && obstacleAllowed)
             fsmFactory.obstacle->run(img);
 
 

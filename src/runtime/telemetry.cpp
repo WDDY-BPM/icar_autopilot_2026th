@@ -60,12 +60,17 @@ void Icar::publishTelemetry(const FrameCycle &frame)
             overlay["camera_timed_out"] = frame.cameraTimedOut;
             overlay["path_override_active"] = params->pathOverride.active;
             overlay["path_source"] = pathSourceName(params->pathOverride.source);
+            overlay["path_ttl_frames"] = params->pathOverride.ttlFrames;
+            overlay["path_generated_frame_id"] = params->pathOverride.generatedFrameId;
+            overlay["path_speed_limit"] = params->pathOverride.speedLimit;
             overlay["perception_left_count"] = params->track->pointsEdgeLeft.size();
             overlay["perception_right_count"] = params->track->pointsEdgeRight.size();
             overlay["planned_left_count"] = params->pathOverride.active
                 ? params->pathOverride.leftEdge.size() : 0;
             overlay["planned_right_count"] = params->pathOverride.active
                 ? params->pathOverride.rightEdge.size() : 0;
+            overlay["planned_center_count"] = params->pathOverride.active
+                ? params->pathOverride.centerLine.size() : 0;
             overlay["lane_safety_stop"] = params->laneSafetyStop;
             overlay["lanes_valid"] = lanesValid;
             overlay["lanes_frame_id"] = lanesValid ? frame.frameId : 0;

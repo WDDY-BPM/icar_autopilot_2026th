@@ -118,9 +118,11 @@ private:
   uint16_t countSes = 0;                                          // 场次计数器
   uint16_t timeout = 0;                                           // 超时计数器
   std::chrono::steady_clock::time_point forkOutStartedAt;         // 出库转向真实时间起点
+  std::chrono::steady_clock::time_point stepStartedAt;
+  std::chrono::steady_clock::time_point waitStartedAt;
+  bool waitTimerActive = false;
   int countOut = 0;                                               // 出库检测计数
   bool waiting = false;                                           // 停车等待使能
-  int countWait = 0;                                              // 停车等待计数器
   int countIn = 0;                                                // 入库矫正计数器
   vector<vector<PointX>> pointsEdgeLeftPast, pointsEdgeRightPast; // 记录赛道入库车道线
 

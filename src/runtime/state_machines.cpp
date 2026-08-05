@@ -8,6 +8,8 @@ void Icar::runStateMachines(FrameCycle &frame)
             (frame.manualBeforeFsm || !frame.aiStale))
             runFsm(frame.binary);
 
+        params->dropPathOverrideIfDisallowed(params->mode);
+
         // 同步手动接管状态（runFsm中endManualTakeover可能改变了状态，但params->manualTakeover未更新）
         params->manualTakeover = fsmFactory.busy->isInManualTakeover();
         if (params->manualTakeover != frame.manualBeforeFsm)

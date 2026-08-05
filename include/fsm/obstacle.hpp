@@ -40,5 +40,6 @@ public:
 
 private:
   std::shared_ptr<Params> params;
-  void curtailTracking(bool left);  // 缩减优化车道线（双车道→单车道）
+  static void curtailTracking(bool left, vector<PointX> &leftEdge,
+                              vector<PointX> &rightEdge);
 };
