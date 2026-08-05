@@ -164,6 +164,8 @@ void FsmBusy::run(Mat &img)
                 exiting = false;
                 enable = false;
 
+                busyConfirmation = control_algorithms::BusyConfirmationState{};
+
                 countRes = 0;
                 params->busyZone = false;  // 施工区结束
                 params->ctrl.countAcc = 0; // 出库缓加速，约1.7s后恢复正常速度
@@ -224,8 +226,11 @@ void FsmBusy::run(Mat &img)
         else
         {
             slowing = true;
+            drivingThrough = true;
+            waitingForTakeover = false;
             params->setStopReason(control_algorithms::StopReason::BUSY, false);
             timeout = 0;
+            cout << "[Busy] Automatic construction traversal active" << endl;
         }
     }
 

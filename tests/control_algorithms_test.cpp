@@ -397,11 +397,26 @@ int main()
         control_algorithms::updateCrossConfirmation(
             taskBlockedCross, true, false, false, false, false);
     for (int i = 0; i < 2; ++i)
-        control_algorithms::updateCrossConfirmation(
-            taskBlockedCross, true, true, true, false, false);
+        assert(control_algorithms::updateCrossConfirmation(
+            taskBlockedCross, true, true, true, false, false) ==
+            control_algorithms::CrossConfirmationEvent::NONE);
+    assert(!taskBlockedCross.armed);
+    assert(!taskBlockedCross.linePassed);
     for (int i = 0; i < control_algorithms::CROSS_DISAPPEAR_FRAMES; ++i)
         assert(control_algorithms::updateCrossConfirmation(
-            taskBlockedCross, true, false, false, false, false) ==
+            taskBlockedCross, true, false, false, false, true) ==
+            control_algorithms::CrossConfirmationEvent::NONE);
+    assert(taskBlockedCross.armed);
+    assert(control_algorithms::updateCrossConfirmation(
+        taskBlockedCross, true, false, false, false, true) ==
+        control_algorithms::CrossConfirmationEvent::NONE);
+    for (int i = 0; i < 2; ++i)
+        assert(control_algorithms::updateCrossConfirmation(
+            taskBlockedCross, true, true, true, false, true) ==
+            control_algorithms::CrossConfirmationEvent::NONE);
+    for (int i = 0; i < control_algorithms::CROSS_DISAPPEAR_FRAMES - 1; ++i)
+        assert(control_algorithms::updateCrossConfirmation(
+            taskBlockedCross, true, false, false, false, true) ==
             control_algorithms::CrossConfirmationEvent::NONE);
     assert(control_algorithms::updateCrossConfirmation(
         taskBlockedCross, true, false, false, false, true) ==

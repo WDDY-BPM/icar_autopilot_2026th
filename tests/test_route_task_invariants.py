@@ -279,6 +279,18 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertNotIn("Fourth confirmation timed out", busy)
         self.assertIn("updateCrossConfirmation", cross)
         self.assertIn("StopReason::AI_STALE", core)
+    def test_automatic_busy_path_completes_and_resets_confirmation(self):
+        busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
+        confirmed = busy.index("BusyConfirmationEvent::CONFIRMED")
+        automatic = busy.index("drivingThrough = true;", confirmed)
+        self.assertGreater(automatic, confirmed)
+        exit_complete = busy.index('params->completeLapTask("construction-exit")')
+        reset = busy.rindex(
+            "busyConfirmation = control_algorithms::BusyConfirmationState{};",
+            0,
+            exit_complete,
+        )
+        self.assertLess(reset, exit_complete)
     def test_stop_mode_survives_inactive_cross_and_busy_alert_runs_first(self):
         core = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
         self.assertIn("if (crossMode != FsmMode::NORMAL)", core)

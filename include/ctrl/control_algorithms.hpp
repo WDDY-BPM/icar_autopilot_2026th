@@ -212,13 +212,21 @@ inline CrossConfirmationEvent updateCrossConfirmation(
         state.passFrames = passCandidate ? state.passFrames + 1 : 0;
         if (state.passFrames >= passConfirmFrames)
         {
+            // Only credit a crossing when the lap task was already complete
+            // while the line was actually being passed. Disarm until this
+            // same line disappears to prevent retroactive lap completion.
+            if (!lapTaskComplete)
+            {
+                state = CrossConfirmationState{};
+                return CrossConfirmationEvent::NONE;
+            }
             state.linePassed = true;
             state.missingFrames = 0;
         }
         return CrossConfirmationEvent::NONE;
     }
     state.missingFrames = crossDetected ? 0 : state.missingFrames + 1;
-    if (state.missingFrames < disappearFrames || !lapTaskComplete)
+    if (state.missingFrames < disappearFrames)
         return CrossConfirmationEvent::NONE;
     const auto event = finalLap
         ? CrossConfirmationEvent::FINAL_STOP
