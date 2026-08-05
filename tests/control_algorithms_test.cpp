@@ -1,6 +1,6 @@
 #include "ctrl/control_algorithms.hpp"
 #include "com/control_watchdog.hpp"
-#include <cassert>
+#include "test_check.hpp"
 #include <cmath>
 #include <vector>
 
@@ -16,31 +16,31 @@ int main()
     {
         ControlWatchdogState watchdog;
         watchdog.onConnected(0);
-        assert(!watchdog.armed());
-        assert(!watchdog.expired(30000, 500));
+        CHECK(!watchdog.armed());
+        CHECK(!watchdog.expired(30000, 500));
 
         constexpr std::uint8_t controlAddress = 1;
-        assert(!watchdog.onValidFrame(2, controlAddress, 30000));
-        assert(!watchdog.armed());
-        assert(!watchdog.onValidFrame(3, controlAddress, 30100));
-        assert(!watchdog.armed());
+        CHECK(!watchdog.onValidFrame(2, controlAddress, 30000));
+        CHECK(!watchdog.armed());
+        CHECK(!watchdog.onValidFrame(3, controlAddress, 30100));
+        CHECK(!watchdog.armed());
 
-        assert(watchdog.onValidFrame(controlAddress, controlAddress, 31000));
-        assert(watchdog.armed());
-        assert(!watchdog.expired(31499, 500));
-        assert(!watchdog.expired(31500, 500));
-        assert(watchdog.expired(31501, 500));
+        CHECK(watchdog.onValidFrame(controlAddress, controlAddress, 31000));
+        CHECK(watchdog.armed());
+        CHECK(!watchdog.expired(31499, 500));
+        CHECK(!watchdog.expired(31500, 500));
+        CHECK(watchdog.expired(31501, 500));
 
         watchdog.onValidControlFrame(32000);
-        assert(!watchdog.expired(32500, 500));
-        assert(watchdog.expired(32501, 500));
+        CHECK(!watchdog.expired(32500, 500));
+        CHECK(watchdog.expired(32501, 500));
 
         watchdog.reset();
-        assert(!watchdog.armed());
-        assert(!watchdog.expired(90000, 500));
+        CHECK(!watchdog.armed());
+        CHECK(!watchdog.expired(90000, 500));
         watchdog.onConnected(120000);
-        assert(!watchdog.armed());
-        assert(!watchdog.expired(120000, 500));
+        CHECK(!watchdog.armed());
+        CHECK(!watchdog.expired(120000, 500));
     }
     {
         int busyCountdown = 40;
@@ -54,134 +54,134 @@ int main()
             if (events.busyBeep)
                 busyBeeps.push_back(40 - frame);
         }
-        assert((busyBeeps == std::vector<int>{40, 30, 20, 10}));
-        assert(busyCountdown == 0);
+        CHECK((busyBeeps == std::vector<int>{40, 30, 20, 10}));
+        CHECK(busyCountdown == 0);
 
         control_algorithms::refreshAlertEvidence(
             true, true, alertCountdown);
-        assert(alertCountdown == 30);
+        CHECK(alertCountdown == 30);
         for (int frame = 0; frame < 30; ++frame)
             control_algorithms::advanceAlertTimers(
                 busyCountdown, alertCountdown, decelCountdown, false);
-        assert(alertCountdown == 0);
+        CHECK(alertCountdown == 0);
 
         control_algorithms::refreshAlertEvidence(
             false, true, alertCountdown);
-        assert(alertCountdown == 0);
+        CHECK(alertCountdown == 0);
         control_algorithms::refreshAlertEvidence(
             true, false, alertCountdown);
-        assert(alertCountdown == 0);
+        CHECK(alertCountdown == 0);
         control_algorithms::refreshAlertEvidence(
             true, true, alertCountdown);
-        assert(alertCountdown == 30);
+        CHECK(alertCountdown == 30);
 
         auto events = control_algorithms::advanceAlertTimers(
             busyCountdown, alertCountdown, decelCountdown, true);
-        assert(decelCountdown == 5);
-        assert(!events.busyBeep);
+        CHECK(decelCountdown == 5);
+        CHECK(!events.busyBeep);
         events = control_algorithms::advanceAlertTimers(
             busyCountdown, alertCountdown, decelCountdown, false);
-        assert(decelCountdown == 4);
+        CHECK(decelCountdown == 4);
     }
     control_algorithms::StopReasonState stopReasons;
     stopReasons.set(control_algorithms::StopReason::CAMERA, true);
     stopReasons.set(control_algorithms::StopReason::EMERGENCY, true);
-    assert(stopReasons.mustStop());
+    CHECK(stopReasons.mustStop());
     stopReasons.set(control_algorithms::StopReason::CAMERA, false);
-    assert(stopReasons.mustStop());
-    assert(stopReasons.has(control_algorithms::StopReason::EMERGENCY));
-    assert(stopReasons.string() == "EMERGENCY");
+    CHECK(stopReasons.mustStop());
+    CHECK(stopReasons.has(control_algorithms::StopReason::EMERGENCY));
+    CHECK(stopReasons.string() == "EMERGENCY");
     stopReasons.set(control_algorithms::StopReason::EMERGENCY, false);
-    assert(!stopReasons.mustStop());
+    CHECK(!stopReasons.mustStop());
 
     int alertCountdown = 21;
-    assert(!control_algorithms::advanceAlertCountdown(alertCountdown));
-    assert(alertCountdown == 20);
-    assert(control_algorithms::advanceAlertCountdown(alertCountdown));
-    assert(alertCountdown == 19);
+    CHECK(!control_algorithms::advanceAlertCountdown(alertCountdown));
+    CHECK(alertCountdown == 20);
+    CHECK(control_algorithms::advanceAlertCountdown(alertCountdown));
+    CHECK(alertCountdown == 19);
     for (int i = 0; i < 19; ++i)
         control_algorithms::advanceAlertCountdown(alertCountdown);
-    assert(alertCountdown == 0);
-    assert(!control_algorithms::advanceAlertCountdown(alertCountdown));
-    assert(control_algorithms::updateAlertDecelCountdown(0, true) == 5);
-    assert(control_algorithms::updateAlertDecelCountdown(5, false) == 4);
-    assert(control_algorithms::updateAlertDecelCountdown(0, false) == 0);
+    CHECK(alertCountdown == 0);
+    CHECK(!control_algorithms::advanceAlertCountdown(alertCountdown));
+    CHECK(control_algorithms::updateAlertDecelCountdown(0, true) == 5);
+    CHECK(control_algorithms::updateAlertDecelCountdown(5, false) == 4);
+    CHECK(control_algorithms::updateAlertDecelCountdown(0, false) == 0);
     int count = 0;
     const float crossStart = control_algorithms::applyStartupSpeed(
         0.35f, count, 60, 0.10f);
-    assert(crossStart > 0.10f && crossStart < 0.105f);
+    CHECK(crossStart > 0.10f && crossStart < 0.105f);
     float startupEnd = crossStart;
     for (int i = 1; i < 60; ++i)
         startupEnd = control_algorithms::applyStartupSpeed(
             0.35f, count, 60, 0.10f);
-    assert(std::abs(startupEnd - 0.35f) < 0.001f);
+    CHECK(std::abs(startupEnd - 0.35f) < 0.001f);
     const float afterStartup = control_algorithms::applyStartupSpeed(
         0.35f, count, 60, 0.10f);
-    assert(std::abs(afterStartup - startupEnd) < 0.001f);
+    CHECK(std::abs(afterStartup - startupEnd) < 0.001f);
 
-    assert(control_algorithms::applyStartupServoLimit(
+    CHECK(control_algorithms::applyStartupServoLimit(
         1880, 1500, 160, 0, 60) == 1660);
 
-    assert(control_algorithms::isSingleLaneCenterContinuous(175, 160));
-    assert(!control_algorithms::isSingleLaneCenterContinuous(176, 160));
+    CHECK(control_algorithms::isSingleLaneCenterContinuous(175, 160));
+    CHECK(!control_algorithms::isSingleLaneCenterContinuous(176, 160));
 
     control_algorithms::LaneRecoveryState lane;
     for (int i = 0; i < 7; ++i)
-        assert(!control_algorithms::updateLaneRecovery(lane, false));
-    assert(lane.invalidFrames == 7);
+        CHECK(!control_algorithms::updateLaneRecovery(lane, false));
+    CHECK(lane.invalidFrames == 7);
     for (int i = 0; i < 4; ++i)
-        assert(!control_algorithms::updateLaneRecovery(lane, true));
-    assert(control_algorithms::updateLaneRecovery(lane, true));
-    assert(lane.invalidFrames == 0);
-    assert(!lane.recovering);
+        CHECK(!control_algorithms::updateLaneRecovery(lane, true));
+    CHECK(control_algorithms::updateLaneRecovery(lane, true));
+    CHECK(lane.invalidFrames == 0);
+    CHECK(!lane.recovering);
 
     bool safetyStop = false;
     safetyStop = control_algorithms::updateLaneSafetyStop(
         safetyStop, true, false, 1, 0);
-    assert(!safetyStop);
+    CHECK(!safetyStop);
     control_algorithms::LaneUnconfirmedState unconfirmed;
     for (int i = 0; i < 30; ++i)
         control_algorithms::updateLaneUnconfirmed(unconfirmed, false, 5);
-    assert(unconfirmed.frames == 30);
-    assert(control_algorithms::updateLaneSafetyStop(
+    CHECK(unconfirmed.frames == 30);
+    CHECK(control_algorithms::updateLaneSafetyStop(
         false, true, false, 1, 0, 7, 5, unconfirmed.frames, 30));
     for (int recoveryFrame = 1; recoveryFrame <= 4; ++recoveryFrame)
     {
         safetyStop = control_algorithms::updateLaneSafetyStop(
             safetyStop, true, false, 0, recoveryFrame);
-        assert(!safetyStop);
+        CHECK(!safetyStop);
     }
     safetyStop = false;
     for (int invalidFrame = 1; invalidFrame <= 7; ++invalidFrame)
         safetyStop = control_algorithms::updateLaneSafetyStop(
             safetyStop, true, false, invalidFrame, 0);
-    assert(safetyStop);
+    CHECK(safetyStop);
     for (int recoveryFrame = 1; recoveryFrame <= 4; ++recoveryFrame)
     {
         safetyStop = control_algorithms::updateLaneSafetyStop(
             safetyStop, true, false, 0, recoveryFrame);
-        assert(safetyStop);
+        CHECK(safetyStop);
     }
     safetyStop = control_algorithms::updateLaneSafetyStop(
         safetyStop, true, true, 0, 5);
-    assert(!safetyStop);
+    CHECK(!safetyStop);
 
     control_algorithms::SingleLaneSpeedLimitState speedLimit;
-    assert(control_algorithms::updateSingleLaneSpeedLimit(
+    CHECK(control_algorithms::updateSingleLaneSpeedLimit(
         speedLimit, true, true, true, false));
     for (int i = 0; i < 4; ++i)
-        assert(control_algorithms::updateSingleLaneSpeedLimit(
+        CHECK(control_algorithms::updateSingleLaneSpeedLimit(
             speedLimit, true, true, true, true));
-    assert(speedLimit.dualLaneRecoveryFrames == 4);
-    assert(!control_algorithms::updateSingleLaneSpeedLimit(
+    CHECK(speedLimit.dualLaneRecoveryFrames == 4);
+    CHECK(!control_algorithms::updateSingleLaneSpeedLimit(
         speedLimit, true, true, true, true));
-    assert(!speedLimit.active);
-    assert(control_algorithms::updateSingleLaneSpeedLimit(
+    CHECK(!speedLimit.active);
+    CHECK(control_algorithms::updateSingleLaneSpeedLimit(
         speedLimit, true, true, false, true));
-    assert(control_algorithms::updateSingleLaneSpeedLimit(
+    CHECK(control_algorithms::updateSingleLaneSpeedLimit(
         speedLimit, true, false, false, false));
-    assert(speedLimit.dualLaneRecoveryFrames == 0);
-    assert(!control_algorithms::updateSingleLaneSpeedLimit(
+    CHECK(speedLimit.dualLaneRecoveryFrames == 0);
+    CHECK(!control_algorithms::updateSingleLaneSpeedLimit(
         speedLimit, false, true, false, true));
 
     std::vector<TestPoint> laneControlCenter;
@@ -192,14 +192,14 @@ int main()
     const auto laneCenters =
         control_algorithms::calculateLaneControlCenters(
             laneControlCenter, 160.0f);
-    assert(laneCenters.nearValid && laneCenters.farValid);
-    assert(laneCenters.nearSamples == 41);
-    assert(laneCenters.farSamples == 36);
-    assert(std::abs(laneCenters.nearCenter - 185.0f) < 0.001f);
-    assert(std::abs(laneCenters.farCenter - 125.0f) < 0.001f);
-    assert(std::abs(laneCenters.controlCenter - 164.0f) < 0.001f);
-    assert(std::abs(laneCenters.headingError - std::atan2(-60.0f, 85.0f)) < 0.001f);
-    assert(std::abs(laneCenters.headingCorrection) < 0.001f);
+    CHECK(laneCenters.nearValid && laneCenters.farValid);
+    CHECK(laneCenters.nearSamples == 41);
+    CHECK(laneCenters.farSamples == 36);
+    CHECK(std::abs(laneCenters.nearCenter - 185.0f) < 0.001f);
+    CHECK(std::abs(laneCenters.farCenter - 125.0f) < 0.001f);
+    CHECK(std::abs(laneCenters.controlCenter - 164.0f) < 0.001f);
+    CHECK(std::abs(laneCenters.headingError - std::atan2(-60.0f, 85.0f)) < 0.001f);
+    CHECK(std::abs(laneCenters.headingCorrection) < 0.001f);
 
     std::vector<TestPoint> earlyRightHeading;
     for (int row = 120; row <= 175; ++row)
@@ -211,19 +211,19 @@ int main()
             earlyRightHeading, 160.0f, 0.65f, 8, true,
             300.0f, 60.0f, 40.0f);
     const float expectedHeading = std::atan2(5.0f, 85.0f);
-    assert(std::abs(headingAssisted.headingError - expectedHeading) < 0.001f);
-    assert(std::abs(headingAssisted.headingCorrection -
+    CHECK(std::abs(headingAssisted.headingError - expectedHeading) < 0.001f);
+    CHECK(std::abs(headingAssisted.headingCorrection -
                     300.0f * expectedHeading * 0.925f) < 0.001f);
-    assert(std::abs(headingAssisted.controlCenter - 158.75f) < 0.001f);
+    CHECK(std::abs(headingAssisted.controlCenter - 158.75f) < 0.001f);
 
     const auto oppositeSideRecovery =
         control_algorithms::calculateLaneControlCenters(
             laneControlCenter, 160.0f, 0.65f, 8, true,
             300.0f, 60.0f, 40.0f);
     const float recoveryHeading = std::atan2(-60.0f, 85.0f);
-    assert(std::abs(oppositeSideRecovery.headingCorrection -
+    CHECK(std::abs(oppositeSideRecovery.headingCorrection -
                     300.0f * recoveryHeading * 0.375f * 0.25f) < 0.001f);
-    assert(std::abs(oppositeSideRecovery.controlCenter - 164.0f) < 0.001f);
+    CHECK(std::abs(oppositeSideRecovery.controlCenter - 164.0f) < 0.001f);
 
     std::vector<TestPoint> cappedHeading;
     for (int row = 120; row <= 175; ++row)
@@ -234,15 +234,15 @@ int main()
         control_algorithms::calculateLaneControlCenters(
             cappedHeading, 160.0f, 0.65f, 8, true,
             300.0f, 60.0f, 40.0f);
-    assert(std::abs(cappedHeadingAssist.headingCorrection - 60.0f) < 0.001f);
-    assert(std::abs(cappedHeadingAssist.controlCenter - 174.0f) < 0.001f);
+    CHECK(std::abs(cappedHeadingAssist.headingCorrection - 60.0f) < 0.001f);
+    CHECK(std::abs(cappedHeadingAssist.controlCenter - 174.0f) < 0.001f);
 
     const auto confidenceLimitedHeading =
         control_algorithms::calculateLaneControlCenters(
             earlyRightHeading, 160.0f, 0.65f, 8, true,
             300.0f, 60.0f, 40.0f, 0.45f);
-    assert(std::abs(confidenceLimitedHeading.headingConfidence - 0.45f) < 0.001f);
-    assert(std::abs(confidenceLimitedHeading.headingCorrection -
+    CHECK(std::abs(confidenceLimitedHeading.headingConfidence - 0.45f) < 0.001f);
+    CHECK(std::abs(confidenceLimitedHeading.headingCorrection -
                     headingAssisted.headingCorrection * 0.45f) < 0.001f);
 
     std::vector<TestPoint> missingNearCenter;
@@ -253,18 +253,18 @@ int main()
     const auto missingNear =
         control_algorithms::calculateLaneControlCenters(
             missingNearCenter, 160.0f);
-    assert(!missingNear.nearValid && missingNear.farValid);
-    assert(std::abs(missingNear.farCenter - 125.0f) < 0.001f);
-    assert(std::abs(missingNear.controlCenter - 160.0f) < 0.001f);
+    CHECK(!missingNear.nearValid && missingNear.farValid);
+    CHECK(std::abs(missingNear.farCenter - 125.0f) < 0.001f);
+    CHECK(std::abs(missingNear.controlCenter - 160.0f) < 0.001f);
 
     std::vector<TestPoint> straightCenter;
     for (int row = 90; row <= 210; ++row)
         straightCenter.emplace_back(row, 160);
     const auto straightSpeed = control_algorithms::calculateCenterlineSpeed(
         straightCenter, 0.35f, 0.25f);
-    assert(straightSpeed.valid);
-    assert(std::abs(straightSpeed.curveStrength) < 0.001f);
-    assert(std::abs(straightSpeed.speed - 0.35f) < 0.001f);
+    CHECK(straightSpeed.valid);
+    CHECK(std::abs(straightSpeed.curveStrength) < 0.001f);
+    CHECK(std::abs(straightSpeed.speed - 0.35f) < 0.001f);
 
     std::vector<TestPoint> curvedCenter;
     for (int row = 90; row <= 130; ++row)
@@ -273,9 +273,9 @@ int main()
         curvedCenter.emplace_back(row, 160);
     const auto curvedSpeed = control_algorithms::calculateCenterlineSpeed(
         curvedCenter, 0.35f, 0.25f);
-    assert(curvedSpeed.valid);
-    assert(std::abs(curvedSpeed.curveStrength - 40.0f) < 0.001f);
-    assert(std::abs(curvedSpeed.speed - 0.25f) < 0.001f);
+    CHECK(curvedSpeed.valid);
+    CHECK(std::abs(curvedSpeed.curveStrength - 40.0f) < 0.001f);
+    CHECK(std::abs(curvedSpeed.speed - 0.25f) < 0.001f);
 
     std::vector<TestPoint> mediumCurve;
     for (int row = 90; row <= 130; ++row)
@@ -284,14 +284,14 @@ int main()
         mediumCurve.emplace_back(row, 160);
     const auto mediumSpeed = control_algorithms::calculateCenterlineSpeed(
         mediumCurve, 0.35f, 0.25f);
-    assert(mediumSpeed.valid);
-    assert(mediumSpeed.speed > 0.25f && mediumSpeed.speed < 0.35f);
+    CHECK(mediumSpeed.valid);
+    CHECK(mediumSpeed.speed > 0.25f && mediumSpeed.speed < 0.35f);
 
     std::vector<TestPoint> partialCenter{{175, 160}, {180, 160}, {185, 160}};
     const auto partialSpeed = control_algorithms::calculateCenterlineSpeed(
         partialCenter, 0.35f, 0.25f);
-    assert(!partialSpeed.valid);
-    assert(std::abs(partialSpeed.speed - 0.25f) < 0.001f);
+    CHECK(!partialSpeed.valid);
+    CHECK(std::abs(partialSpeed.speed - 0.25f) < 0.001f);
 
     std::vector<TestPoint> goodLeft;
     std::vector<TestPoint> stuckLeft;
@@ -304,10 +304,10 @@ int main()
         goodLeft, true, 320, 240, 20);
     const auto stuckReliability = control_algorithms::assessEdgeReliability(
         stuckLeft, true, 320, 240, 20);
-    assert(goodReliability.reliable);
-    assert(!stuckReliability.reliable);
-    assert(stuckReliability.borderRatio > 0.99f);
-    assert(stuckReliability.longestBorderRun == 31);
+    CHECK(goodReliability.reliable);
+    CHECK(!stuckReliability.reliable);
+    CHECK(stuckReliability.borderRatio > 0.99f);
+    CHECK(stuckReliability.longestBorderRun == 31);
 
     std::vector<TestPoint> clippedRight;
     for (int row = 220; row >= 190; --row)
@@ -317,19 +317,19 @@ int main()
     }
     const auto clippedReliability = control_algorithms::assessEdgeReliability(
         clippedRight, false, 320, 240, 20, 12);
-    assert(!clippedReliability.reliable);
-    assert(clippedReliability.singleEdgeUsable);
-    assert(clippedReliability.interiorPointCount == 12);
+    CHECK(!clippedReliability.reliable);
+    CHECK(clippedReliability.singleEdgeUsable);
+    CHECK(clippedReliability.interiorPointCount == 12);
     std::vector<float> learnedWidths(240, 240.0f);
     const auto clippedCenter = control_algorithms::reconstructSingleLaneCenter(
         clippedRight, learnedWidths, false, 240, 320);
-    assert(clippedCenter.size() == clippedRight.size());
-    assert(clippedCenter.size() >= 20);
+    CHECK(clippedCenter.size() == clippedRight.size());
+    CHECK(clippedCenter.size() >= 20);
     const auto clippedControl = control_algorithms::limitSingleLaneCenter(
         clippedCenter.front().y, 160, 45, 8);
-    assert(clippedControl.valid);
+    CHECK(clippedControl.valid);
     control_algorithms::SingleLaneSpeedLimitState clippedSpeedLimit;
-    assert(control_algorithms::updateSingleLaneSpeedLimit(
+    CHECK(control_algorithms::updateSingleLaneSpeedLimit(
         clippedSpeedLimit, true, true, false, false, 5, true));
 
     std::vector<TestPoint> mostlyBorderRight;
@@ -340,9 +340,9 @@ int main()
     }
     const auto mostlyBorderReliability = control_algorithms::assessEdgeReliability(
         mostlyBorderRight, false, 320, 240, 20, 12);
-    assert(!mostlyBorderReliability.reliable);
-    assert(!mostlyBorderReliability.singleEdgeUsable);
-    assert(mostlyBorderReliability.interiorPointCount == 9);
+    CHECK(!mostlyBorderReliability.reliable);
+    CHECK(!mostlyBorderReliability.singleEdgeUsable);
+    CHECK(mostlyBorderReliability.interiorPointCount == 9);
 
     std::vector<TestPoint> wrongLeft, wrongRight;
     for (int row = 220; row >= 190; --row)
@@ -354,10 +354,10 @@ int main()
         wrongLeft, true, 320, 240, 20, 12);
     const auto wrongRightReliability = control_algorithms::assessEdgeReliability(
         wrongRight, false, 320, 240, 20, 12);
-    assert(!wrongLeftReliability.reliable && !wrongLeftReliability.singleEdgeUsable);
-    assert(!wrongRightReliability.reliable && !wrongRightReliability.singleEdgeUsable);
-    assert(wrongLeftReliability.oppositeBorderRun == 31);
-    assert(wrongRightReliability.oppositeBorderRun == 31);
+    CHECK(!wrongLeftReliability.reliable && !wrongLeftReliability.singleEdgeUsable);
+    CHECK(!wrongRightReliability.reliable && !wrongRightReliability.singleEdgeUsable);
+    CHECK(wrongLeftReliability.oppositeBorderRun == 31);
+    CHECK(wrongRightReliability.oppositeBorderRun == 31);
 
     std::vector<TestPoint> hybridLeft, hybridRight;
     for (int row = 176; row <= 220; ++row)
@@ -367,93 +367,93 @@ int main()
     }
     const auto hybridCenter = control_algorithms::buildDegradedLaneCenter(
         hybridLeft, hybridRight, learnedWidths, 240, 320);
-    assert(hybridCenter.size() >= 30);
+    CHECK(hybridCenter.size() >= 30);
     const auto hybridNear = control_algorithms::calculateCenterWindow(
         hybridCenter, 160.0f, 176, 220, 205, 26, 8);
-    assert(hybridNear.valid && hybridNear.samples >= 8);
+    CHECK(hybridNear.valid && hybridNear.samples >= 8);
     std::vector<TestPoint> bothBorders{{200, 0}};
     std::vector<TestPoint> bothBordersRight{{200, 319}};
-    assert(control_algorithms::buildDegradedLaneCenter(
+    CHECK(control_algorithms::buildDegradedLaneCenter(
         bothBorders, bothBordersRight, learnedWidths, 240, 320).empty());
 
-    assert(control_algorithms::reconstructSingleLaneCenterColumn(
+    CHECK(control_algorithms::reconstructSingleLaneCenterColumn(
         40, 240.0f, true) == 160);
-    assert(control_algorithms::reconstructSingleLaneCenterColumn(
+    CHECK(control_algorithms::reconstructSingleLaneCenterColumn(
         280, 240.0f, false) == 160);
     const auto acceptedCenter = control_algorithms::limitSingleLaneCenter(
         190, 160, 45, 8);
-    assert(acceptedCenter.valid && acceptedCenter.rawJump == 30);
-    assert(acceptedCenter.appliedCenter == 168 && acceptedCenter.appliedStep == 8);
+    CHECK(acceptedCenter.valid && acceptedCenter.rawJump == 30);
+    CHECK(acceptedCenter.appliedCenter == 168 && acceptedCenter.appliedStep == 8);
     const auto rejectedCenter = control_algorithms::limitSingleLaneCenter(
         206, 160, 45, 8);
-    assert(!rejectedCenter.valid && rejectedCenter.appliedCenter == 160);
+    CHECK(!rejectedCenter.valid && rejectedCenter.appliedCenter == 160);
 
     std::vector<TestPoint> left{{220, 40}, {216, 44}};
     std::vector<TestPoint> right{{220, 280}, {216, 276}};
     std::vector<TestPoint> width{{220, 240}, {216, 232}};
-    assert(control_algorithms::fillAlignedLaneGaps(left, right, width, 8));
-    assert(left.size() == 5 && right.size() == 5 && width.size() == 5);
+    CHECK(control_algorithms::fillAlignedLaneGaps(left, right, width, 8));
+    CHECK(left.size() == 5 && right.size() == 5 && width.size() == 5);
     for (std::size_t i = 0; i < left.size(); ++i)
-        assert(width[i].y == right[i].y - left[i].y);
+        CHECK(width[i].y == right[i].y - left[i].y);
     control_algorithms::BusyConfirmationState busy;
-    assert(control_algorithms::updateBusyConfirmation(busy, true, true) ==
+    CHECK(control_algorithms::updateBusyConfirmation(busy, true, true) ==
            control_algorithms::BusyConfirmationEvent::NONE);
-    assert(control_algorithms::updateBusyConfirmation(busy, true, true) ==
+    CHECK(control_algorithms::updateBusyConfirmation(busy, true, true) ==
            control_algorithms::BusyConfirmationEvent::NONE);
-    assert(control_algorithms::updateBusyConfirmation(busy, true, true) ==
+    CHECK(control_algorithms::updateBusyConfirmation(busy, true, true) ==
            control_algorithms::BusyConfirmationEvent::WAITING);
     for (int i = 0; i < 100; ++i)
-        assert(control_algorithms::updateBusyConfirmation(busy, false, false) ==
+        CHECK(control_algorithms::updateBusyConfirmation(busy, false, false) ==
                control_algorithms::BusyConfirmationEvent::NONE);
     for (int i = 0; i < control_algorithms::BUSY_CLEAR_NEGATIVE_FRAMES - 1; ++i)
-        assert(control_algorithms::updateBusyConfirmation(busy, true, false) ==
+        CHECK(control_algorithms::updateBusyConfirmation(busy, true, false) ==
                control_algorithms::BusyConfirmationEvent::NONE);
-    assert(control_algorithms::updateBusyConfirmation(busy, true, false) ==
+    CHECK(control_algorithms::updateBusyConfirmation(busy, true, false) ==
            control_algorithms::BusyConfirmationEvent::CLEARED);
     for (int i = 0; i < 3; ++i)
         control_algorithms::updateBusyConfirmation(busy, true, true);
-    assert(control_algorithms::updateBusyConfirmation(busy, true, true) ==
+    CHECK(control_algorithms::updateBusyConfirmation(busy, true, true) ==
            control_algorithms::BusyConfirmationEvent::CONFIRMED);
 
     control_algorithms::AiFreshnessState ai;
-    assert(!control_algorithms::updateAiFreshness(ai, true, false, 0));
-    assert(control_algorithms::updateAiFreshness(ai, true, false, 501));
-    assert(control_algorithms::updateAiFreshness(ai, true, true, 510));
-    assert(control_algorithms::updateAiFreshness(ai, true, true, 520));
-    assert(!control_algorithms::updateAiFreshness(ai, true, true, 530));
-    assert(!control_algorithms::updateAiFreshness(ai, false, false, 1000));
-    assert(control_algorithms::updateAiFreshness(ai, true, false, 1001));
-    assert(control_algorithms::updateAiFreshness(ai, true, true, 1010));
-    assert(control_algorithms::updateAiFreshness(ai, true, true, 1020));
-    assert(!control_algorithms::updateAiFreshness(ai, true, true, 1030));
+    CHECK(!control_algorithms::updateAiFreshness(ai, true, false, 0));
+    CHECK(control_algorithms::updateAiFreshness(ai, true, false, 501));
+    CHECK(control_algorithms::updateAiFreshness(ai, true, true, 510));
+    CHECK(control_algorithms::updateAiFreshness(ai, true, true, 520));
+    CHECK(!control_algorithms::updateAiFreshness(ai, true, true, 530));
+    CHECK(!control_algorithms::updateAiFreshness(ai, false, false, 1000));
+    CHECK(control_algorithms::updateAiFreshness(ai, true, false, 1001));
+    CHECK(control_algorithms::updateAiFreshness(ai, true, true, 1010));
+    CHECK(control_algorithms::updateAiFreshness(ai, true, true, 1020));
+    CHECK(!control_algorithms::updateAiFreshness(ai, true, true, 1030));
     control_algorithms::AiFreshnessState delayedAi;
-    assert(control_algorithms::updateAiFreshness(
+    CHECK(control_algorithms::updateAiFreshness(
         delayedAi, true, true, 600,
         control_algorithms::AI_STALE_TIMEOUT_MS,
         control_algorithms::AI_RECOVERY_FRESH_RESULTS, 0));
     stopReasons.set(control_algorithms::StopReason::AI_STALE, true);
-    assert(stopReasons.string() == "AI_STALE");
+    CHECK(stopReasons.string() == "AI_STALE");
     stopReasons.set(control_algorithms::StopReason::AI_STALE, false);
 
     control_algorithms::CrossConfirmationState cross;
     for (int i = 0; i < control_algorithms::CROSS_DISAPPEAR_FRAMES; ++i)
-        assert(control_algorithms::updateCrossConfirmation(
+        CHECK(control_algorithms::updateCrossConfirmation(
             cross, true, false, false, false, true) ==
             control_algorithms::CrossConfirmationEvent::NONE);
-    assert(cross.armed);
+    CHECK(cross.armed);
     for (int i = 0; i < 2; ++i)
-        assert(control_algorithms::updateCrossConfirmation(
+        CHECK(control_algorithms::updateCrossConfirmation(
             cross, true, true, true, false, true) ==
             control_algorithms::CrossConfirmationEvent::NONE);
     for (int i = 0; i < 100; ++i)
-        assert(control_algorithms::updateCrossConfirmation(
+        CHECK(control_algorithms::updateCrossConfirmation(
             cross, false, false, false, false, true) ==
             control_algorithms::CrossConfirmationEvent::NONE);
     for (int i = 0; i < control_algorithms::CROSS_DISAPPEAR_FRAMES - 1; ++i)
-        assert(control_algorithms::updateCrossConfirmation(
+        CHECK(control_algorithms::updateCrossConfirmation(
             cross, true, false, false, false, true) ==
             control_algorithms::CrossConfirmationEvent::NONE);
-    assert(control_algorithms::updateCrossConfirmation(
+    CHECK(control_algorithms::updateCrossConfirmation(
         cross, true, false, false, false, true) ==
         control_algorithms::CrossConfirmationEvent::LAP_PASSED);
 
@@ -465,13 +465,13 @@ int main()
         control_algorithms::updateCrossConfirmation(
             finalCross, true, true, true, true, true);
     for (int i = 0; i < 3; ++i)
-        assert(control_algorithms::updateCrossConfirmation(
+        CHECK(control_algorithms::updateCrossConfirmation(
             finalCross, true, false, false, true, true) ==
             control_algorithms::CrossConfirmationEvent::NONE);
     for (int i = 3; i < control_algorithms::CROSS_DISAPPEAR_FRAMES - 1; ++i)
         control_algorithms::updateCrossConfirmation(
             finalCross, true, false, false, true, true);
-    assert(control_algorithms::updateCrossConfirmation(
+    CHECK(control_algorithms::updateCrossConfirmation(
         finalCross, true, false, false, true, true) ==
         control_algorithms::CrossConfirmationEvent::FINAL_STOP);
 
@@ -480,28 +480,28 @@ int main()
         control_algorithms::updateCrossConfirmation(
             taskBlockedCross, true, false, false, false, false);
     for (int i = 0; i < 2; ++i)
-        assert(control_algorithms::updateCrossConfirmation(
+        CHECK(control_algorithms::updateCrossConfirmation(
             taskBlockedCross, true, true, true, false, false) ==
             control_algorithms::CrossConfirmationEvent::NONE);
-    assert(!taskBlockedCross.armed);
-    assert(!taskBlockedCross.linePassed);
+    CHECK(!taskBlockedCross.armed);
+    CHECK(!taskBlockedCross.linePassed);
     for (int i = 0; i < control_algorithms::CROSS_DISAPPEAR_FRAMES; ++i)
-        assert(control_algorithms::updateCrossConfirmation(
+        CHECK(control_algorithms::updateCrossConfirmation(
             taskBlockedCross, true, false, false, false, true) ==
             control_algorithms::CrossConfirmationEvent::NONE);
-    assert(taskBlockedCross.armed);
-    assert(control_algorithms::updateCrossConfirmation(
+    CHECK(taskBlockedCross.armed);
+    CHECK(control_algorithms::updateCrossConfirmation(
         taskBlockedCross, true, false, false, false, true) ==
         control_algorithms::CrossConfirmationEvent::NONE);
     for (int i = 0; i < 2; ++i)
-        assert(control_algorithms::updateCrossConfirmation(
+        CHECK(control_algorithms::updateCrossConfirmation(
             taskBlockedCross, true, true, true, false, true) ==
             control_algorithms::CrossConfirmationEvent::NONE);
     for (int i = 0; i < control_algorithms::CROSS_DISAPPEAR_FRAMES - 1; ++i)
-        assert(control_algorithms::updateCrossConfirmation(
+        CHECK(control_algorithms::updateCrossConfirmation(
             taskBlockedCross, true, false, false, false, true) ==
             control_algorithms::CrossConfirmationEvent::NONE);
-    assert(control_algorithms::updateCrossConfirmation(
+    CHECK(control_algorithms::updateCrossConfirmation(
         taskBlockedCross, true, false, false, false, true) ==
         control_algorithms::CrossConfirmationEvent::LAP_PASSED);
     return 0;

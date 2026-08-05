@@ -211,7 +211,7 @@ class RouteTaskInvariantTests(unittest.TestCase):
         pickup = re.search(r"case Step::WAIT_PICKUP:.*?break;", park, re.DOTALL)
         self.assertIsNotNone(pickup)
         self.assertIn("StopReason::PARK, true", pickup.group(0))
-        self.assertIn("timeout > 90", pickup.group(0))
+        self.assertIn("std::chrono::seconds(3)", pickup.group(0))
         self.assertIn("stopCounter > 90", station)
 
     def test_emergency_stop_freezes_all_fsm_progress(self):

@@ -36,6 +36,36 @@ class ArchitectureInvariantTests(unittest.TestCase):
         self.assertIn("target_compile_options", source)
         self.assertIn("ICAR_BUILD_LOGIC_TESTS \"Build hardware-independent control tests\" ON", source)
 
+    def test_planned_path_lifecycle_is_explicit(self):
+        path = (ROOT / "include/runtime/path_override.hpp").read_text(encoding="utf-8")
+        park = (ROOT / "src/fsm/park.cpp").read_text(encoding="utf-8")
+        center = (ROOT / "src/ctrl/center.cpp").read_text(encoding="utf-8")
+        self.assertIn("void setCenterLine", path)
+        self.assertIn("int ttlFrames{0}", path)
+        self.assertIn("uint64_t generatedFrameId{0}", path)
+        self.assertIn("void tick(uint64_t currentFrameId)", path)
+        self.assertNotRegex(park, r"params->ctrl\.centerEdge\s*=")
+        self.assertNotIn("params->ctrl.fitting = true", park)
+        set_step = park[park.index("void FsmPark::setStep"):]
+        self.assertLess(set_step.index("clearPathOverride(PathSource::PARK)"),
+                        set_step.index("step = st"))
+        self.assertIn("controlValid = candidateValid", center)
+        self.assertNotIn("controlValid = !params->ctrl.centerEdge.empty()", center)
+
+    def test_cpp_tests_do_not_use_assert(self):
+        cpp_tests = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (ROOT / "tests").glob("*.cpp"))
+        self.assertNotIn("assert(", cpp_tests)
+        self.assertIn("logic_check_failure_test", (ROOT / "CMakeLists.txt").read_text(encoding="utf-8"))
+
+    def test_busy_and_yfork_use_physical_time(self):
+        busy = (ROOT / "include/fsm/busy_exit_state.hpp").read_text(encoding="utf-8")
+        yfork = (ROOT / "include/fsm/yfork_guide_hold.hpp").read_text(encoding="utf-8")
+        for duration in ("seconds(10)", "seconds(8)", "seconds(2)", "seconds(15)"):
+            self.assertIn(duration, busy)
+        self.assertIn("milliseconds(600)", yfork)
+
 
 if __name__ == "__main__":
     unittest.main()
