@@ -82,7 +82,7 @@ int main(int argc, char const *argv[])
     if (!server.start())
         return -1;
 
-    constexpr int64_t WATCHDOG_TIMEOUT_MS = 2000;
+    constexpr int64_t WATCHDOG_TIMEOUT_MS = 500;
     constexpr int64_t STARTUP_GRACE_MS = 30000;
     pid_t appPid = -1;
     bool clientWasSeen = false;

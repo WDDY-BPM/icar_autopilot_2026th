@@ -331,6 +331,105 @@ private:
      * @brief 有限状态机任务执行
      *
      */
+    void updateAlerts()
+    {
+        // A lap transition resets alert state in runFsm. Suppress stale alerts
+        // until that transition has been processed.
+        if (lastLap != params->currentLap)
+        {
+            params->alertCountdown = 0;
+            params->alertDecelCount = 0;
+            params->busyAlertCountdown = 0;
+            return;
+        }
+        // Run the construction-zone alert independently of FSM early returns.
+        if (control_algorithms::advanceAlertCountdown(params->busyAlertCountdown))
+            client->buzzerSound(client->BUZZER_WARNNING);
+
+        // 蜂鸣器报警目标检测（图像下方4/5区域），遇目标持续鸣笛1s
+        if (params->config.alertTarget != "none")
+        {
+            int alertLabel = -1;
+            if (params->config.alertTarget == "cone")
+                alertLabel = LABEL_CONE;
+            else if (params->config.alertTarget == "person")
+                alertLabel = LABEL_PERSON;
+            else if (params->config.alertTarget == "busy")
+                alertLabel = LABEL_BUSY;
+            else if (params->config.alertTarget == "limit")
+                alertLabel = LABEL_LIMIT;
+            else if (params->config.alertTarget == "unlimit")
+                alertLabel = LABEL_UNLIMIT;
+            else if (params->config.alertTarget == "park")
+                alertLabel = LABEL_PARK;
+
+            // 施工区由FSM自身负责鸣笛，不重复触发
+            if (alertLabel == LABEL_BUSY && params->config.currentLapConfig &&
+                params->config.currentLapConfig->busy)
+                alertLabel = -1;
+
+            if (alertLabel >= 0)
+            {
+                bool targetFound = false;
+                {
+                    std::lock_guard<std::mutex> lock(mtxRes);
+                    for (auto &r : params->results)
+                    {
+                        bool posOk = (alertLabel == LABEL_LIMIT || alertLabel == LABEL_PARK)
+                                         ? (r.x > COLSIMAGE * 0.8 || r.x + r.width < COLSIMAGE * 0.2) // 左右两侧1/5
+                                         : (r.y + r.height) > ROWSIMAGE * 0.2;                        // 其他：底部4/5区域
+                        if (r.type == alertLabel && posOk)
+                        {
+                            targetFound = true;
+                            break;
+                        }
+                    }
+                }
+                if (targetFound && params->alertCountdown <= 0)
+                    params->alertCountdown = 30; // 启动最少1秒倒计时
+            }
+            if (control_algorithms::advanceAlertCountdown(params->alertCountdown))
+                client->buzzerSound(client->BUZZER_WARNNING);
+        }
+
+        {
+            bool decelFound = false;
+            {
+                std::lock_guard<std::mutex> lock(mtxRes);
+                for (auto &r : params->results)
+                {
+                    bool posOk = false;
+                    if (r.type == LABEL_LIMIT || r.type == LABEL_PARK)
+                        posOk = (r.x > COLSIMAGE * 0.8 || r.x + r.width < COLSIMAGE * 0.2); // 左右两侧1/5
+                    else if (r.type == LABEL_CONE || r.type == LABEL_PERSON || r.type == LABEL_UNLIMIT)
+                        posOk = (r.y + r.height) > ROWSIMAGE * 0.2; // 底部4/5区域
+                    else if (r.type == LABEL_BUSY)
+                    {
+                        if (params->config.currentLapConfig && params->config.currentLapConfig->busy)
+                            continue;
+                        posOk = (r.y + r.height) > ROWSIMAGE * 0.2;
+                    }
+                    else
+                        continue;
+
+                    if (posOk)
+                    {
+                        decelFound = true;
+                        break;
+                    }
+                }
+            }
+            params->alertDecelCount = control_algorithms::updateAlertDecelCountdown(
+                params->alertDecelCount, decelFound);
+        }
+
+        if (params->mode != params->modeLast && params->alertCountdown <= 0)
+        {
+            client->buzzerSound(client->BUZZER_DING); // 提示音效
+            params->modeLast = params->mode;
+        }
+    }
+
     void runFsm(Mat &img)
     {
         // 圈数变更时复位所有FSM状态
@@ -406,14 +505,6 @@ private:
         params->config.yfork = params->config.currentLapConfig->yfork;
         params->config.station = params->config.currentLapConfig->station;
         params->config.obstacle = params->config.currentLapConfig->obstacle;
-
-        // Run the construction-zone alert independently of FSM early returns.
-        if (params->busyAlertCountdown > 0)
-        {
-            if (params->busyAlertCountdown % 10 == 0)
-                client->buzzerSound(client->BUZZER_WARNNING);
-            params->busyAlertCountdown--;
-        }
 
         fsmFactory.stop->run(img); // 停车区识别与规划
         params->mode = fsmFactory.stop->getMode();
@@ -509,94 +600,7 @@ private:
             params->mode != FsmMode::YFORK)
             fsmFactory.obstacle->run(img);
 
-        // 蜂鸣器报警目标检测（图像下方4/5区域），遇目标持续鸣笛1s
-        if (params->config.alertTarget != "none")
-        {
-            int alertLabel = -1;
-            if (params->config.alertTarget == "cone")
-                alertLabel = LABEL_CONE;
-            else if (params->config.alertTarget == "person")
-                alertLabel = LABEL_PERSON;
-            else if (params->config.alertTarget == "busy")
-                alertLabel = LABEL_BUSY;
-            else if (params->config.alertTarget == "limit")
-                alertLabel = LABEL_LIMIT;
-            else if (params->config.alertTarget == "unlimit")
-                alertLabel = LABEL_UNLIMIT;
-            else if (params->config.alertTarget == "park")
-                alertLabel = LABEL_PARK;
 
-            // 施工区由FSM自身负责鸣笛，不重复触发
-            if (alertLabel == LABEL_BUSY && params->config.currentLapConfig &&
-                params->config.currentLapConfig->busy)
-                alertLabel = -1;
-
-            if (alertLabel >= 0)
-            {
-                bool targetFound = false;
-                {
-                    std::lock_guard<std::mutex> lock(mtxRes);
-                    for (auto &r : params->results)
-                    {
-                        bool posOk = (alertLabel == LABEL_LIMIT || alertLabel == LABEL_PARK)
-                                         ? (r.x > COLSIMAGE * 0.8 || r.x + r.width < COLSIMAGE * 0.2) // 左右两侧1/5
-                                         : (r.y + r.height) > ROWSIMAGE * 0.2;                        // 其他：底部4/5区域
-                        if (r.type == alertLabel && posOk)
-                        {
-                            targetFound = true;
-                            break;
-                        }
-                    }
-                }
-                if (targetFound && params->alertCountdown <= 0)
-                    params->alertCountdown = 30; // 启动最少1秒倒计时
-            }
-            if (params->alertCountdown > 0)
-            {
-                if (params->alertCountdown % 10 == 0) // 每~333ms鸣笛一次，最少3次
-                    client->buzzerSound(client->BUZZER_WARNNING);
-                params->alertCountdown--;
-            }
-        }
-
-        {
-            bool decelFound = false;
-            {
-                std::lock_guard<std::mutex> lock(mtxRes);
-                for (auto &r : params->results)
-                {
-                    bool posOk = false;
-                    if (r.type == LABEL_LIMIT || r.type == LABEL_PARK)
-                        posOk = (r.x > COLSIMAGE * 0.8 || r.x + r.width < COLSIMAGE * 0.2); // 左右两侧1/5
-                    else if (r.type == LABEL_CONE || r.type == LABEL_PERSON || r.type == LABEL_UNLIMIT)
-                        posOk = (r.y + r.height) > ROWSIMAGE * 0.2; // 底部4/5区域
-                    else if (r.type == LABEL_BUSY)
-                    {
-                        if (params->config.currentLapConfig && params->config.currentLapConfig->busy)
-                            continue;
-                        posOk = (r.y + r.height) > ROWSIMAGE * 0.2;
-                    }
-                    else
-                        continue;
-
-                    if (posOk)
-                    {
-                        decelFound = true;
-                        break;
-                    }
-                }
-            }
-            if (decelFound)
-                params->alertDecelCount = 5;
-            else if (params->alertDecelCount > 0)
-                params->alertDecelCount--;
-        }
-
-        if (params->mode != params->modeLast && params->alertCountdown <= 0)
-        {
-            client->buzzerSound(client->BUZZER_DING); // 提示音效
-            params->modeLast = params->mode;
-        }
     }
 
 public:
@@ -875,6 +879,9 @@ public:
                                       receivedAiResultPublishedAtMs);
 
         const bool startupGateReleased = updateStartupGate(receivedNewAiResult);
+
+        // Alert timers advance once per control frame, independently of FSM returns.
+        updateAlerts();
 
         //[05] 有限状态机任务执行。锁存急停时不得推进任何有状态 FSM。
         params->ctrl.fitting = false;

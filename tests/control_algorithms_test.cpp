@@ -23,6 +23,18 @@ int main()
     stopReasons.set(control_algorithms::StopReason::EMERGENCY, false);
     assert(!stopReasons.mustStop());
 
+    int alertCountdown = 21;
+    assert(!control_algorithms::advanceAlertCountdown(alertCountdown));
+    assert(alertCountdown == 20);
+    assert(control_algorithms::advanceAlertCountdown(alertCountdown));
+    assert(alertCountdown == 19);
+    for (int i = 0; i < 19; ++i)
+        control_algorithms::advanceAlertCountdown(alertCountdown);
+    assert(alertCountdown == 0);
+    assert(!control_algorithms::advanceAlertCountdown(alertCountdown));
+    assert(control_algorithms::updateAlertDecelCountdown(0, true) == 5);
+    assert(control_algorithms::updateAlertDecelCountdown(5, false) == 4);
+    assert(control_algorithms::updateAlertDecelCountdown(0, false) == 0);
     int count = 0;
     const float crossStart = control_algorithms::applyStartupSpeed(
         0.35f, count, 60, 0.10f);

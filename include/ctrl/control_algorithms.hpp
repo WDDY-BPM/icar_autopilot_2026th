@@ -51,6 +51,23 @@ private:
     std::uint32_t bits = 0;
 };
 
+inline bool advanceAlertCountdown(int &countdown, int beepEvery = 10)
+{
+    if (countdown <= 0)
+        return false;
+    const bool shouldBeep = beepEvery > 0 && countdown % beepEvery == 0;
+    countdown--;
+    return shouldBeep;
+}
+
+inline int updateAlertDecelCountdown(int countdown, bool targetDetected,
+                                     int holdFrames = 5)
+{
+    if (targetDetected)
+        return holdFrames;
+    return countdown > 0 ? countdown - 1 : 0;
+}
+
 constexpr int BUSY_CONFIRM_POSITIVE_FRAMES = 4;
 constexpr int BUSY_CLEAR_NEGATIVE_FRAMES = 5;
 constexpr std::int64_t AI_STALE_TIMEOUT_MS = 500;

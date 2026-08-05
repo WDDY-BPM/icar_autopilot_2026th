@@ -291,12 +291,24 @@ class RouteTaskInvariantTests(unittest.TestCase):
             exit_complete,
         )
         self.assertLess(reset, exit_complete)
-    def test_stop_mode_survives_inactive_cross_and_busy_alert_runs_first(self):
+    def test_stop_mode_survives_inactive_cross_and_alerts_run_outside_fsm(self):
         core = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
         self.assertIn("if (crossMode != FsmMode::NORMAL)", core)
-        alert = core.index("if (params->busyAlertCountdown > 0)")
-        busy_return = core.index("hasStopReason(control_algorithms::StopReason::BUSY)")
-        self.assertLess(alert, busy_return)
+        update_start = core.index("void updateAlerts()")
+        run_start = core.index("void runFsm(Mat &img)")
+        running_start = core.index("void running()")
+        call = core.index("updateAlerts();", running_start)
+        guarded_fsm = core.index("runFsm(imgBin);", call)
+        self.assertLess(update_start, run_start)
+        self.assertLess(call, guarded_fsm)
+        run_body = core[run_start:running_start]
+        self.assertNotIn("advanceAlertCountdown", run_body)
+        self.assertNotIn("updateAlertDecelCountdown", run_body)
+
+    def test_boot_watchdog_is_half_second(self):
+        boot = (ROOT / "src" / "tool" / "boot.cpp").read_text(encoding="utf-8")
+        self.assertIn("constexpr int64_t WATCHDOG_TIMEOUT_MS = 500;", boot)
+        self.assertIn("server.watchdogExpired(WATCHDOG_TIMEOUT_MS)", boot)
 
 if __name__ == "__main__":
     unittest.main()
