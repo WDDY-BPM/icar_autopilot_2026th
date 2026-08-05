@@ -2,12 +2,24 @@
 
 #include <chrono>
 
+enum class BusyTraversalPhase
+{
+    IDLE,
+    WAIT_STATION,
+    WAIT_EXIT_SIGN,
+    EXIT_GUIDANCE,
+    STOPPED,
+    COMPLETED
+};
+
 enum class BusyExitEvent
 {
     NONE,
     EXIT_STARTED,
+    STATION_WAIT_TIMEOUT,
     SIGN_WAIT_TIMEOUT,
     EXIT_GUIDE_TIMEOUT,
+    TRAVERSAL_TIMEOUT,
     COMPLETED
 };
 
@@ -16,58 +28,66 @@ class BusyExitState
 public:
     using Clock = std::chrono::steady_clock;
 
-    void startDriving(Clock::time_point now)
+    void startDriving(Clock::time_point now, bool waitForStation = false)
     {
         reset();
         driving = true;
         drivingStartedAt = now;
+        phaseStartedAt = now;
+        phase = waitForStation ? BusyTraversalPhase::WAIT_STATION
+                               : BusyTraversalPhase::WAIT_EXIT_SIGN;
     }
 
-    BusyExitEvent update(bool signSearchEnabled, bool freshAi,
-                         bool leftSignVisible, Clock::time_point now)
+    BusyExitEvent update(bool stationRequired, bool stationCompleted,
+                         bool freshAi, bool leftSignVisible,
+                         Clock::time_point now)
     {
         if (!driving || stopped)
             return BusyExitEvent::NONE;
-        if (!signSearchEnabled)
+        if (now - drivingStartedAt >= std::chrono::seconds(15))
+            return stop(BusyExitEvent::TRAVERSAL_TIMEOUT);
+
+        if (phase == BusyTraversalPhase::WAIT_STATION)
         {
-            signWaitStarted = false;
-            return BusyExitEvent::NONE;
-        }
-        if (!signWaitStarted)
-        {
-            signWaitStarted = true;
-            exitSignWaitStartedAt = now;
-        }
-        if (!exiting)
-        {
-            if (freshAi && leftSignVisible)
+            if (!stationRequired || stationCompleted)
             {
-                exiting = true;
-                exitStartedAt = now;
-                consecutiveMissing = 0;
-                return BusyExitEvent::EXIT_STARTED;
+                phase = BusyTraversalPhase::WAIT_EXIT_SIGN;
+                phaseStartedAt = now;
+                return BusyExitEvent::NONE;
             }
-            if (now - exitSignWaitStartedAt >= std::chrono::seconds(8))
-            {
-                stopped = true;
-                return BusyExitEvent::SIGN_WAIT_TIMEOUT;
-            }
+            if (now - phaseStartedAt >= std::chrono::seconds(10))
+                return stop(BusyExitEvent::STATION_WAIT_TIMEOUT);
             return BusyExitEvent::NONE;
         }
 
-        if (freshAi)
-            consecutiveMissing = leftSignVisible ? 0 : consecutiveMissing + 1;
-        if (consecutiveMissing >= 3)
+        if (phase == BusyTraversalPhase::WAIT_EXIT_SIGN)
         {
-            driving = false;
-            exiting = false;
-            return BusyExitEvent::COMPLETED;
+            if (freshAi && leftSignVisible)
+            {
+                phase = BusyTraversalPhase::EXIT_GUIDANCE;
+                phaseStartedAt = now;
+                exiting = true;
+                consecutiveMissing = 0;
+                return BusyExitEvent::EXIT_STARTED;
+            }
+            if (now - phaseStartedAt >= std::chrono::seconds(8))
+                return stop(BusyExitEvent::SIGN_WAIT_TIMEOUT);
+            return BusyExitEvent::NONE;
         }
-        if (now - exitStartedAt >= std::chrono::seconds(2))
+
+        if (phase == BusyTraversalPhase::EXIT_GUIDANCE)
         {
-            stopped = true;
-            exiting = false;
-            return BusyExitEvent::EXIT_GUIDE_TIMEOUT;
+            if (freshAi)
+                consecutiveMissing = leftSignVisible ? 0 : consecutiveMissing + 1;
+            if (consecutiveMissing >= 3)
+            {
+                driving = false;
+                exiting = false;
+                phase = BusyTraversalPhase::COMPLETED;
+                return BusyExitEvent::COMPLETED;
+            }
+            if (now - phaseStartedAt >= std::chrono::seconds(2))
+                return stop(BusyExitEvent::EXIT_GUIDE_TIMEOUT);
         }
         return BusyExitEvent::NONE;
     }
@@ -77,9 +97,17 @@ public:
     bool driving{false};
     bool exiting{false};
     bool stopped{false};
-    bool signWaitStarted{false};
     int consecutiveMissing{0};
+    BusyTraversalPhase phase{BusyTraversalPhase::IDLE};
     Clock::time_point drivingStartedAt{};
-    Clock::time_point exitSignWaitStartedAt{};
-    Clock::time_point exitStartedAt{};
+    Clock::time_point phaseStartedAt{};
+
+private:
+    BusyExitEvent stop(BusyExitEvent event)
+    {
+        stopped = true;
+        exiting = false;
+        phase = BusyTraversalPhase::STOPPED;
+        return event;
+    }
 };

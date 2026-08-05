@@ -30,20 +30,9 @@ void FsmBusy::run(Mat &img)
     enable = false;
     if (drivingThrough)
     {
-        bool waitStationStop = params->stationStarted && !params->stationStopCompleted;
-        if (params->config.currentLapConfig &&
+        const bool stationRequired = params->config.currentLapConfig &&
             params->config.currentLapConfig->busyStopEnable &&
-            params->config.currentLapConfig->busyStopPoint > 0)
-        {
-            if (!params->stationStopCompleted)
-                waitStationStop = true;
-            else if (params->config.currentLapConfig->busyStopPoint == 1 &&
-                     stationExitCooldown < 30)
-            {
-                ++stationExitCooldown;
-                waitStationStop = true;
-            }
-        }
+            params->config.currentLapConfig->busyStopPoint > 0;
 
         bool leftVisible = false;
         if (params->aiResultFresh)
@@ -56,7 +45,8 @@ void FsmBusy::run(Mat &img)
                 });
         }
         const auto event = exitState.update(
-            !waitStationStop, params->aiResultFresh, leftVisible,
+            stationRequired, params->stationStopCompleted,
+            params->aiResultFresh, leftVisible,
             std::chrono::steady_clock::now());
         if (event == BusyExitEvent::EXIT_STARTED)
             printf("[Busy] Left sign detected, starting exit turn\n");
@@ -72,19 +62,25 @@ void FsmBusy::run(Mat &img)
             params->pathOverride.setEdges(
                 PathSource::BUSY,
                 Bezier(0.008, {startL, midL, endL}),
-                Bezier(0.008, {startR, midR, endR}));
-            params->pathOverride.headingConfidence = 0.65f;
+                Bezier(0.008, {startR, midR, endR}),
+                0.65f, params->config.velBusy, 2);
         }
 
-        if (event == BusyExitEvent::SIGN_WAIT_TIMEOUT ||
-            event == BusyExitEvent::EXIT_GUIDE_TIMEOUT)
+        if (event == BusyExitEvent::STATION_WAIT_TIMEOUT ||
+            event == BusyExitEvent::SIGN_WAIT_TIMEOUT ||
+            event == BusyExitEvent::EXIT_GUIDE_TIMEOUT ||
+            event == BusyExitEvent::TRAVERSAL_TIMEOUT)
         {
             params->setStopReason(control_algorithms::StopReason::BUSY, true);
             params->ctrl.speed = 0.0f;
             params->ctrl.servo = PWMSERVOMID;
             params->clearPathOverride(PathSource::BUSY);
-            if (event == BusyExitEvent::SIGN_WAIT_TIMEOUT)
+            if (event == BusyExitEvent::STATION_WAIT_TIMEOUT)
+                printf("[Busy] Station wait timeout; vehicle stopped; lap task remains incomplete.\n");
+            else if (event == BusyExitEvent::SIGN_WAIT_TIMEOUT)
                 printf("[Busy] Exit sign timeout; vehicle stopped.\n");
+            else if (event == BusyExitEvent::TRAVERSAL_TIMEOUT)
+                printf("[Busy] Construction traversal timeout; vehicle stopped.\n");
             else
                 printf("[Busy] Exit guidance timeout; vehicle stopped; lap task remains incomplete.\n");
             enable = true;
@@ -103,6 +99,7 @@ void FsmBusy::run(Mat &img)
             return;
         }
         enable = true;
+        return;
     }
 
     bool busyDetected = false;
@@ -151,7 +148,12 @@ void FsmBusy::run(Mat &img)
             waitingForTakeover = false;
             params->setStopReason(control_algorithms::StopReason::BUSY, false);
             timeout = 0;
-            exitState.startDriving(std::chrono::steady_clock::now());
+            const bool stationRequired = params->config.currentLapConfig &&
+                params->config.currentLapConfig->busyStopEnable &&
+                params->config.currentLapConfig->busyStopPoint > 0 &&
+                !params->stationStopCompleted;
+            exitState.startDriving(
+                std::chrono::steady_clock::now(), stationRequired);
             cout << "[Busy] Automatic construction traversal active" << endl;
         }
     }
@@ -196,8 +198,12 @@ void FsmBusy::endManualTakeover()
     drivingThrough = true;
     slowing = false;
     timeout = 0;
-    stationExitCooldown = 0;
-    exitState.startDriving(std::chrono::steady_clock::now());
+    const bool stationRequired = params->config.currentLapConfig &&
+        params->config.currentLapConfig->busyStopEnable &&
+        params->config.currentLapConfig->busyStopPoint > 0 &&
+        !params->stationStopCompleted;
+    exitState.startDriving(
+        std::chrono::steady_clock::now(), stationRequired);
     printf("[Busy] Manual takeover ended; automatic construction traversal active\n");
 }
 
@@ -213,7 +219,6 @@ void FsmBusy::resetLap()
     timeout = 0;
     slowing = false;
     drivingThrough = false;
-    stationExitCooldown = 0;
     exitState.reset();
     params->busyZone = false;
     params->stationStopCompleted = false;

@@ -53,6 +53,5 @@ private:
     control_algorithms::BusyConfirmationState busyConfirmation;
     bool drivingThrough = false;    // 退出手动接管后继续在施工区模式行驶，等待左拐退出
     BusyExitState exitState;
-    int stationExitCooldown = 0;    // 第一个框停车后等待检测左转的冷却（30帧=1秒）
 
 };

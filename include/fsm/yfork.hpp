@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 /**
  ********************************************************************************************************
  *                                               示例代码
@@ -22,6 +23,7 @@
  */
 
 #include "fsm/fsm.hpp"
+#include "fsm/yfork_guide_hold.hpp"
 
 /**
  * @brief Y型岔路口图像识别与规划
@@ -64,7 +66,8 @@ private:
     bool completed = false;     // 已完成一轮Y型岔路（防止停车区fork箭头误触发）
     int holdRow = 0;            // 最后已知V尖行
     int holdCol = 0;            // 最后已知V尖列
-    int vlossTimer = 0;         // V尖消失后保持引导的帧计数
+    std::chrono::steady_clock::time_point guidanceStartedAt;
+    YforkGuideHold guideHold;
 
     void reset(void);
     bool handle(Mat &img);

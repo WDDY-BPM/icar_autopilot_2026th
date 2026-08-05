@@ -143,7 +143,7 @@ void FsmYfork::reset(void)
     vloss = false;
     tipRow = 0;
     tipCol = 0;
-    vlossTimer = 0;
+    guideHold.reset();
     holdRow = 0;
     holdCol = 0;
     params->stationStopCompleted = false;
@@ -202,6 +202,7 @@ bool FsmYfork::handle(Mat &img)
         step = Step::ENTER;
         counterYfork = 0;
         timeout = 0;
+        guidanceStartedAt = std::chrono::steady_clock::now();
         return true;
     }
 
@@ -228,7 +229,10 @@ bool FsmYfork::handle(Mat &img)
         replanTracking(selectLeft, img);
 
         // 引导期间屏蔽station检测，但V尖消失后放开让station能检测停车框
-        params->yforkGuiding = (holdRow > 0) && (!vloss || vlossTimer < 5);
+        const auto now = std::chrono::steady_clock::now();
+        const bool stationReleaseDelay = guideHold.recentlyLost(
+            now, std::chrono::milliseconds(170));
+        params->yforkGuiding = (holdRow > 0) && (!vloss || stationReleaseDelay);
 
         // 左岔路：V尖消失后左边线突变 → 已右拐驶出岔路
         //   - 当前圈启用了station时：阻止突变退出，等先停好车
@@ -264,9 +268,14 @@ bool FsmYfork::handle(Mat &img)
         }
 
         // 超时退出（启用了station等多等帧等停车+突变）
-        int exitTimeout = stationEnabled ? 200 : 120;
-        if (timeout > exitTimeout)
+        const auto guidanceTimeout = stationEnabled
+            ? std::chrono::seconds(7) : std::chrono::seconds(4);
+        if (now - guidanceStartedAt >= guidanceTimeout)
         {
+            params->clearPathOverride(PathSource::YFORK);
+            holdRow = 0;
+            holdCol = 0;
+            guideHold.reset();
             step = Step::EXIT;
             counterYfork = 0;
             timeout = 0;
@@ -389,35 +398,24 @@ bool FsmYfork::findVTip(const Mat &img)
  */
 void FsmYfork::replanTracking(bool left, const Mat &img)
 {
+    const auto now = std::chrono::steady_clock::now();
     findVTip(img); // 更新V尖位置
 
     int vRow = tipRow;
     int vCol = tipCol;
 
-    // V尖可见时保存最后位置
-    if (vRow > 0 && vCol > 0)
+    const auto guide = guideHold.update(vRow, vCol, now);
+    holdRow = guide.row;
+    holdCol = guide.column;
+    if (!guide.valid)
     {
-        holdRow = vRow;
-        holdCol = vCol;
-        vlossTimer = 0;
+        params->clearPathOverride(PathSource::YFORK);
+        if (guide.expired)
+            printf("[Yfork] Planned guide expired; returning to perception lane.\n");
+        return;
     }
-
-    // V尖消失后保持引导0.6秒（18帧）
-    if (vRow == 0 || vCol == 0)
-    {
-        if (holdRow > 0 && vlossTimer < 18)
-        {
-            vlossTimer++;
-            vRow = holdRow;
-            vCol = holdCol;
-        }
-        else
-        {
-            holdRow = 0;
-            holdCol = 0;
-            return;
-        }
-    }
+    vRow = guide.row;
+    vCol = guide.column;
 
     if (left)
     {
@@ -456,18 +454,17 @@ void FsmYfork::replanTracking(bool left, const Mat &img)
                 vRow + (ROWSIMAGE - 10 - vRow) * t,
                 vCol));
         }
-        params->pathOverride.setEdges(PathSource::YFORK, {}, island);
-        params->pathOverride.rightEdge.insert(params->pathOverride.rightEdge.end(),
-                                              barrier.begin(), barrier.end());
-        params->pathOverride.hasRightEdge = !params->pathOverride.rightEdge.empty();
+        island.insert(island.end(), barrier.begin(), barrier.end());
 
         // 左边缘：贝塞尔曲线左转引导线（替代图像边缘直线）
         PointX leftStart = PointX(ROWSIMAGE - 10, 60);
         PointX leftEnd = PointX(ROWSIMAGE / 3, 1);
         PointX leftMid = PointX((leftStart.x + leftEnd.x) * 0.3f, (leftStart.y + leftEnd.y) * 0.5f);
         vector<PointX> leftPoints = {leftStart, leftMid, leftEnd};
-        params->pathOverride.leftEdge = Bezier(0.02f, leftPoints);
-        params->pathOverride.hasLeftEdge = !params->pathOverride.leftEdge.empty();
+        vector<PointX> leftEdge = Bezier(0.02f, leftPoints);
+        params->pathOverride.setEdges(
+            PathSource::YFORK, std::move(leftEdge), std::move(island),
+            0.65f, params->config.velYfork, 2);
     }
     else
     {
@@ -510,14 +507,13 @@ void FsmYfork::replanTracking(bool left, const Mat &img)
                 vCol + (endCol - vCol) * t));
         }
 
-        params->pathOverride.setEdges(PathSource::YFORK, island,
-                                      params->track->pointsEdgeRight);
-        params->pathOverride.leftEdge.insert(params->pathOverride.leftEdge.end(),
-                                             barrier.begin(), barrier.end());
-        params->pathOverride.hasLeftEdge = !params->pathOverride.leftEdge.empty();
+        island.insert(island.end(), barrier.begin(), barrier.end());
+        params->pathOverride.setEdges(
+            PathSource::YFORK, std::move(island),
+            params->track->pointsEdgeRight, 0.65f,
+            params->config.velYfork, 2);
     }
     printf("[Yfork] replan dir=%s tip=(%d,%d)\n", left ? "L" : "R", tipRow, tipCol);
-    params->pathOverride.headingConfidence = 0.65f;
 }
 
 void FsmYfork::drawTip(Mat &img)
