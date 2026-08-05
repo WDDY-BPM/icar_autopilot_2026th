@@ -351,10 +351,9 @@ public:
         track->maxGapRows = config.maxGapRows; // 图像底部切行（盲区距离）
         track->singleLaneInteriorPointsMin = config.singleLaneInteriorPointsMin;
 
-        // 初始化圈数和斑马线通过状态
+        // 初始化圈数
         totalLaps = std::max(1, std::min(config.totalLaps, 3));
         currentLap = 1;
-        crossPassed = true; // 初始true，第一次检测到不算，需先消失再出现才计一次经过
 
         // 初始化第一圈配置
         updateLapConfig();
@@ -370,7 +369,6 @@ public:
     int totalLaps;                      // 总圈数
     int currentLap;                     // 当前圈数
     int crossStop;                      // 第几次检测到cross停车
-    bool crossPassed;                   // 是否已经通过斑马线（每圈计数）
     std::atomic<bool> manualTakeover{false}; // 手动接管模式（跨 AI/主线程共享）
     bool stationStopCompleted = false;  // station已完成一次停车
     bool stationStarted = false;        // station已触发检测（pressTimer启动）

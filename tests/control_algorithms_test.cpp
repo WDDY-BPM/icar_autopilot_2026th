@@ -312,5 +312,99 @@ int main()
     assert(left.size() == 5 && right.size() == 5 && width.size() == 5);
     for (std::size_t i = 0; i < left.size(); ++i)
         assert(width[i].y == right[i].y - left[i].y);
+    control_algorithms::BusyConfirmationState busy;
+    assert(control_algorithms::updateBusyConfirmation(busy, true, true) ==
+           control_algorithms::BusyConfirmationEvent::NONE);
+    assert(control_algorithms::updateBusyConfirmation(busy, true, true) ==
+           control_algorithms::BusyConfirmationEvent::NONE);
+    assert(control_algorithms::updateBusyConfirmation(busy, true, true) ==
+           control_algorithms::BusyConfirmationEvent::WAITING);
+    for (int i = 0; i < 100; ++i)
+        assert(control_algorithms::updateBusyConfirmation(busy, false, false) ==
+               control_algorithms::BusyConfirmationEvent::NONE);
+    for (int i = 0; i < control_algorithms::BUSY_CLEAR_NEGATIVE_FRAMES - 1; ++i)
+        assert(control_algorithms::updateBusyConfirmation(busy, true, false) ==
+               control_algorithms::BusyConfirmationEvent::NONE);
+    assert(control_algorithms::updateBusyConfirmation(busy, true, false) ==
+           control_algorithms::BusyConfirmationEvent::CLEARED);
+    for (int i = 0; i < 3; ++i)
+        control_algorithms::updateBusyConfirmation(busy, true, true);
+    assert(control_algorithms::updateBusyConfirmation(busy, true, true) ==
+           control_algorithms::BusyConfirmationEvent::CONFIRMED);
+
+    control_algorithms::AiFreshnessState ai;
+    assert(!control_algorithms::updateAiFreshness(ai, true, false, 0));
+    assert(control_algorithms::updateAiFreshness(ai, true, false, 501));
+    assert(control_algorithms::updateAiFreshness(ai, true, true, 510));
+    assert(control_algorithms::updateAiFreshness(ai, true, true, 520));
+    assert(!control_algorithms::updateAiFreshness(ai, true, true, 530));
+    assert(!control_algorithms::updateAiFreshness(ai, false, false, 1000));
+    assert(control_algorithms::updateAiFreshness(ai, true, false, 1001));
+    assert(control_algorithms::updateAiFreshness(ai, true, true, 1010));
+    assert(control_algorithms::updateAiFreshness(ai, true, true, 1020));
+    assert(!control_algorithms::updateAiFreshness(ai, true, true, 1030));
+    control_algorithms::AiFreshnessState delayedAi;
+    assert(control_algorithms::updateAiFreshness(
+        delayedAi, true, true, 600,
+        control_algorithms::AI_STALE_TIMEOUT_MS,
+        control_algorithms::AI_RECOVERY_FRESH_RESULTS, 0));
+    stopReasons.set(control_algorithms::StopReason::AI_STALE, true);
+    assert(stopReasons.string() == "AI_STALE");
+    stopReasons.set(control_algorithms::StopReason::AI_STALE, false);
+
+    control_algorithms::CrossConfirmationState cross;
+    for (int i = 0; i < control_algorithms::CROSS_DISAPPEAR_FRAMES; ++i)
+        assert(control_algorithms::updateCrossConfirmation(
+            cross, true, false, false, false, true) ==
+            control_algorithms::CrossConfirmationEvent::NONE);
+    assert(cross.armed);
+    for (int i = 0; i < 2; ++i)
+        assert(control_algorithms::updateCrossConfirmation(
+            cross, true, true, true, false, true) ==
+            control_algorithms::CrossConfirmationEvent::NONE);
+    for (int i = 0; i < 100; ++i)
+        assert(control_algorithms::updateCrossConfirmation(
+            cross, false, false, false, false, true) ==
+            control_algorithms::CrossConfirmationEvent::NONE);
+    for (int i = 0; i < control_algorithms::CROSS_DISAPPEAR_FRAMES - 1; ++i)
+        assert(control_algorithms::updateCrossConfirmation(
+            cross, true, false, false, false, true) ==
+            control_algorithms::CrossConfirmationEvent::NONE);
+    assert(control_algorithms::updateCrossConfirmation(
+        cross, true, false, false, false, true) ==
+        control_algorithms::CrossConfirmationEvent::LAP_PASSED);
+
+    control_algorithms::CrossConfirmationState finalCross;
+    for (int i = 0; i < control_algorithms::CROSS_DISAPPEAR_FRAMES; ++i)
+        control_algorithms::updateCrossConfirmation(
+            finalCross, true, false, false, true, true);
+    for (int i = 0; i < 2; ++i)
+        control_algorithms::updateCrossConfirmation(
+            finalCross, true, true, true, true, true);
+    for (int i = 0; i < 3; ++i)
+        assert(control_algorithms::updateCrossConfirmation(
+            finalCross, true, false, false, true, true) ==
+            control_algorithms::CrossConfirmationEvent::NONE);
+    for (int i = 3; i < control_algorithms::CROSS_DISAPPEAR_FRAMES - 1; ++i)
+        control_algorithms::updateCrossConfirmation(
+            finalCross, true, false, false, true, true);
+    assert(control_algorithms::updateCrossConfirmation(
+        finalCross, true, false, false, true, true) ==
+        control_algorithms::CrossConfirmationEvent::FINAL_STOP);
+
+    control_algorithms::CrossConfirmationState taskBlockedCross;
+    for (int i = 0; i < control_algorithms::CROSS_DISAPPEAR_FRAMES; ++i)
+        control_algorithms::updateCrossConfirmation(
+            taskBlockedCross, true, false, false, false, false);
+    for (int i = 0; i < 2; ++i)
+        control_algorithms::updateCrossConfirmation(
+            taskBlockedCross, true, true, true, false, false);
+    for (int i = 0; i < control_algorithms::CROSS_DISAPPEAR_FRAMES; ++i)
+        assert(control_algorithms::updateCrossConfirmation(
+            taskBlockedCross, true, false, false, false, false) ==
+            control_algorithms::CrossConfirmationEvent::NONE);
+    assert(control_algorithms::updateCrossConfirmation(
+        taskBlockedCross, true, false, false, false, true) ==
+        control_algorithms::CrossConfirmationEvent::LAP_PASSED);
     return 0;
 }

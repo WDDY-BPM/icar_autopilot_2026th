@@ -48,14 +48,11 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIn("MORPH_CLOSE", predeal)
     def test_cross_requires_current_lap_task(self):
         source = (ROOT / "src" / "fsm" / "cross.cpp").read_text(encoding="utf-8")
-        gate = source.index("params->lapTaskRequired && !params->lapTaskCompleted")
-        count = source.index("crossCount++", gate)
-        next_lap = source.index("params->nextLap()", count)
-        self.assertLess(gate, count)
-        self.assertLess(count, next_lap)
-        self.assertIn("if (!params->aiResultFresh)", source)
-        self.assertIn("++crossPassConfirmCount >= 2", source)
-
+        self.assertIn("!params->lapTaskRequired || params->lapTaskCompleted", source)
+        self.assertIn("updateCrossConfirmation", source)
+        event = source.index("CrossConfirmationEvent::LAP_PASSED")
+        next_lap = source.index("params->nextLap()", event)
+        self.assertLess(event, next_lap)
     def test_construction_boxes_are_edge_counted(self):
         source = (ROOT / "src" / "fsm" / "station.cpp").read_text(encoding="utf-8")
         self.assertNotIn("busyEntryDelay", source)
@@ -171,7 +168,7 @@ class RouteTaskInvariantTests(unittest.TestCase):
     def test_emergency_stop_freezes_all_fsm_progress(self):
         source = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
         self.assertIn(
-            "params->autoRecoveryFrames <= 0 && !params->laneSafetyStop)\n            runFsm(imgBin);",
+            "params->autoRecoveryFrames <= 0 && !params->laneSafetyStop &&\n            (manualBeforeFsm || !aiStale))\n            runFsm(imgBin);",
             source,
         )
 
@@ -238,14 +235,10 @@ class RouteTaskInvariantTests(unittest.TestCase):
     def test_scene_entry_counts_only_fresh_ai_results(self):
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
-        self.assertRegex(
-            busy,
-            r"if \(params->aiResultFresh\)[\s\S]*?LABEL_BUSY[\s\S]*?countRec\+\+;",
-        )
+        self.assertIn("busyConfirmation, params->aiResultFresh, busyDetected", busy)
         park_none = re.search(r"case Step::NONE:.*?break;", park, re.DOTALL)
         self.assertIsNotNone(park_none)
         self.assertIn("if (!params->aiResultFresh)", park_none.group(0))
-
     def test_park_internal_ai_evidence_and_exit_timeouts(self):
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
@@ -271,25 +264,21 @@ class RouteTaskInvariantTests(unittest.TestCase):
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
         self.assertIn("bool parkDetectedThisFrame = false;", park)
         self.assertIn("if (parkDetectedThisFrame)\n            countRes++;", park)
-        self.assertIn("bool countedBusyThisFrame = false;", busy)
-        self.assertIn("!countedBusyThisFrame", busy)
+        self.assertIn("std::any_of(params->results.begin(), params->results.end()", busy)
+        self.assertIn("updateBusyConfirmation", busy)
 
 
-    def test_busy_confirmation_timeout_is_independent_of_lane_and_ai(self):
+    def test_hardware_independent_safety_states_are_wired(self):
+        algorithms = (ROOT / "include" / "ctrl" / "control_algorithms.hpp").read_text(
+            encoding="utf-8")
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
-        lane_guard = busy.index("pointsEdgeLeft.size() < ROWSIMAGE / 2")
-        timeout = busy.index("awaitingBusyConfirmation &&")
-        self.assertLess(timeout, lane_guard)
-        self.assertIn("busyConfirmationStartedAt", busy)
-        self.assertIn("Fourth confirmation timed out; BUSY stop released", busy)
-        self.assertIn("setStopReason(control_algorithms::StopReason::BUSY, false)", busy)
-
-    def test_cross_only_stops_on_last_lap(self):
         cross = (ROOT / "src" / "fsm" / "cross.cpp").read_text(encoding="utf-8")
-        self.assertEqual(
-            cross.count("crossCount < params->totalLaps ? Step::NONE : Step::STOP"), 2)
-        self.assertIn("st == Step::STOP", cross)
-
+        core = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
+        self.assertIn("BUSY_CLEAR_NEGATIVE_FRAMES", algorithms)
+        self.assertIn("updateBusyConfirmation", busy)
+        self.assertNotIn("Fourth confirmation timed out", busy)
+        self.assertIn("updateCrossConfirmation", cross)
+        self.assertIn("StopReason::AI_STALE", core)
     def test_stop_mode_survives_inactive_cross_and_busy_alert_runs_first(self):
         core = (ROOT / "include" / "icar.hpp").read_text(encoding="utf-8")
         self.assertIn("if (crossMode != FsmMode::NORMAL)", core)

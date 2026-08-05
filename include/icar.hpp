@@ -1,6 +1,7 @@
 #pragma once
 #include <atomic>
 #include <condition_variable>
+#include <exception>
 #include <mutex>
 #include <thread>
 /**
@@ -91,6 +92,7 @@ private:
     control_algorithms::SingleLaneSpeedLimitState singleLaneSpeedLimit;
     control_algorithms::LaneUnconfirmedState laneUnconfirmedState;
     std::chrono::steady_clock::time_point lastOverlayBuilt{};
+    control_algorithms::AiFreshnessState aiFreshness;
 
     // 全局共享数据链
     enum class StartupGateState
@@ -108,6 +110,23 @@ private:
     bool startupConeDetected = false;
     int cameraFreshFrames = 0;
 
+    bool updateAiSafety(bool automaticMode, bool successfulFreshResult,
+                        std::int64_t successfulResultMs = -1)
+    {
+        const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        const bool wasStale = aiFreshness.stale;
+        const bool stale = control_algorithms::updateAiFreshness(
+            aiFreshness, automaticMode, successfulFreshResult, nowMs,
+            control_algorithms::AI_STALE_TIMEOUT_MS,
+            control_algorithms::AI_RECOVERY_FRESH_RESULTS, successfulResultMs);
+        params->setStopReason(control_algorithms::StopReason::AI_STALE, stale);
+        if (automaticMode && stale != wasStale)
+            std::cout << (stale ? "[AI] Results stale; AI_STALE stop active."
+                                : "[AI] Fresh results recovered; AI_STALE stop cleared.")
+                      << std::endl;
+        return stale;
+    }
     bool updateStartupGate(bool receivedNewAiResult)
     {
         if (!startupEnvironmentChecked)
@@ -230,6 +249,7 @@ private:
     std::atomic<bool> readyRes{false};
     std::vector<PredictResult> latestResults; // AI线程单独写，主线程按帧复制
     uint64_t latestResultsFrameId{0};
+    std::int64_t latestResultsPublishedAtMs{0};
     uint64_t activeResultsFrameId{0};
 
     /**
@@ -286,12 +306,24 @@ private:
         // 手动接管期间跳过AI推理
         if (!params->manualTakeover)
         {
-            // 启动AI推理
-            detection->inference(img);
-            std::lock_guard<std::mutex> lock_result(mtxRes);
-            latestResults = detection->results;
-            latestResultsFrameId = inferenceFrameId;
-            readyRes = true;
+            try
+            {
+                detection->inference(img);
+                std::lock_guard<std::mutex> lock_result(mtxRes);
+                latestResults = detection->results;
+                latestResultsFrameId = inferenceFrameId;
+                latestResultsPublishedAtMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                readyRes = true;
+            }
+            catch (const std::exception &error)
+            {
+                std::cerr << "[AI] Inference failed: " << error.what() << std::endl;
+            }
+            catch (...)
+            {
+                std::cerr << "[AI] Inference failed with unknown error" << std::endl;
+            }
         }
     }
 
@@ -331,8 +363,6 @@ private:
         params->manualTakeover = fsmFactory.busy->isInManualTakeover();
         if (params->manualTakeover)
         {
-            cout << "[Icar] Manual takeover active." << endl;
-
             // 检查是否返回自动模式
             if (fsmFactory.manual->checkForReturnKey())
             {
@@ -455,7 +485,8 @@ private:
             fsmFactory.busy->run(img);
             if (params->mode == FsmMode::NORMAL)
                 params->mode = fsmFactory.busy->getMode();
-            if (params->hasStopReason(control_algorithms::StopReason::BUSY))
+            if (params->hasStopReason(control_algorithms::StopReason::BUSY) ||
+                fsmFactory.busy->isInManualTakeover())
                 return;
 
         }
@@ -824,18 +855,24 @@ public:
 
         // 在主线程按帧获取AI结果快照；FSM不再与推理线程共享可变vector
         bool receivedNewAiResult = false;
+        std::int64_t receivedAiResultPublishedAtMs = -1;
         {
             std::lock_guard<std::mutex> resultLock(mtxRes);
             if (readyRes)
             {
                 params->results = latestResults;
                 activeResultsFrameId = latestResultsFrameId;
+                receivedAiResultPublishedAtMs = latestResultsPublishedAtMs;
                 readyRes = false;
                 receivedNewAiResult = true;
             }
         }
 
         params->aiResultFresh = receivedNewAiResult;
+        const bool manualBeforeFsm = fsmFactory.busy->isInManualTakeover();
+        params->manualTakeover = manualBeforeFsm;
+        bool aiStale = updateAiSafety(!manualBeforeFsm, receivedNewAiResult,
+                                      receivedAiResultPublishedAtMs);
 
         const bool startupGateReleased = updateStartupGate(receivedNewAiResult);
 
@@ -857,11 +894,14 @@ public:
         }
 
         if (startupGateReleased && !emergencyStopRequested &&
-            params->autoRecoveryFrames <= 0 && !params->laneSafetyStop)
+            params->autoRecoveryFrames <= 0 && !params->laneSafetyStop &&
+            (manualBeforeFsm || !aiStale))
             runFsm(imgBin);
 
         // 同步手动接管状态（runFsm中endManualTakeover可能改变了状态，但params->manualTakeover未更新）
         params->manualTakeover = fsmFactory.busy->isInManualTakeover();
+        if (params->manualTakeover != manualBeforeFsm)
+            aiStale = updateAiSafety(!params->manualTakeover, false);
 
         // A remote STOP is latched and has priority in AUTO and MANUAL modes.
         if (emergencyStopRequested)
@@ -875,7 +915,7 @@ public:
         //[06] Calculate the lane control center in autonomous mode.
         bool centerUpdatedThisFrame = false;
         if (startupGateReleased && !emergencyStopRequested &&
-            !params->manualTakeover && params->autoRecoveryFrames <= 0)
+            !params->manualTakeover && params->autoRecoveryFrames <= 0 && !aiStale)
         {
             center->fitting(params);
             centerUpdatedThisFrame = true;
@@ -909,7 +949,7 @@ public:
 
         const bool automaticControlActive =
             startupGateReleased && !emergencyStopRequested &&
-            !params->manualTakeover && params->autoRecoveryFrames <= 0;
+            !params->manualTakeover && params->autoRecoveryFrames <= 0 && !aiStale;
         const bool laneHold = params->laneSafetyStop;
         static bool laneHoldWasActive = false;
         if (automaticControlActive && !laneHold)
@@ -1053,6 +1093,8 @@ public:
             overlay["ctrl_stop"] = params->ctrl.stop;
             overlay["must_stop"] = params->mustStop();
             overlay["stop_reasons"] = params->stopReasonString();
+            overlay["ai_stale"] = params->hasStopReason(
+                control_algorithms::StopReason::AI_STALE);
             overlay["camera_stop"] = params->hasStopReason(
                 control_algorithms::StopReason::CAMERA);
             overlay["lane_safety_stop"] = params->laneSafetyStop;

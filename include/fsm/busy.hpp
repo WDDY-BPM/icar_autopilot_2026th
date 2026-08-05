@@ -48,48 +48,12 @@ private:
     bool enable = false;            // 场景检测使能标志
     bool manualTakeover = false;    // 手动接管标志
     bool waitingForTakeover = true; // 等待手动接管标志
-    int countRec = 0;               // AI场景识别计数器
-    int countSes = 0;               // 场次计数器
-    int timeout = 0;                // 超时计数器
-    bool awaitingBusyConfirmation = false;
-    std::chrono::steady_clock::time_point busyConfirmationStartedAt;
-    int busyStopCount = 0;          // 停靠点计数器
-    int busyStopMaskTime = 0;       // 停靠点时间屏蔽
-    int recoveryFrames = 0;         // 手动接管后的恢复帧计数（防止重新触发接管）
+    int timeout = 0;
+    control_algorithms::BusyConfirmationState busyConfirmation;
     bool drivingThrough = false;    // 退出手动接管后继续在施工区模式行驶，等待左拐退出
     bool exiting = false;           // 退出转向中（看到左转标志后重绘车道线引导转向）
-    int exitTimeout = 0;            // 退出转向超时计数器
     std::chrono::steady_clock::time_point exitStartedAt; // 退出转向真实时间起点
     int countRes = 0;               // 场景识别计数器（退出转向标志丢失计数）
     int stationExitCooldown = 0;    // 第一个框停车后等待检测左转的冷却（30帧=1秒）
 
-    // 停靠区停车状态管理
-    enum ParkingState {
-        PARKING_IDLE,
-        PARKING_DELAY_WAIT,     // 等待延迟
-        PARKING_ACTIVE,        // 正在停车
-        PARKING_COMPLETE       // 停车完成
-    } parkingState = PARKING_IDLE;
-
-    // 停靠区停车相关变量
-    bool immediateParking = false;      // 立即停车
-    bool delayedParking = false;        // 延迟停车
-    bool parkingInProgress = false;     // 停车进行中
-    int parkingDelayStart = 0;         // 延迟开始时间（帧数）
-    int parkingStartTime = 0;          // 停车开始时间（帧数）
-    int parkingTargetSpot = 0;         // 停靠目标（1或2）
-    int parkingStationCount = 0;       // 停靠区检测计数
-    int parkingStationMaskTime = 0;    // 停靠区屏蔽时间
-
-    // 停车控制变量（参考station.cpp）
-    bool stationStarted = false;  // 停靠区检测开始标志
-    int pressTimer = 0;          // 按下计时器
-    int stopCounter = 0;         // 停车计数器
-
-    void handleParkingSpot();
-    bool isStationDetected();
-    void endParkingSequence();
-
-private:
-    int frameCount = 0;  // 帧计数器
 };

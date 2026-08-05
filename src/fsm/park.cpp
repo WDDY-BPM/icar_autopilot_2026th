@@ -130,7 +130,7 @@ void FsmPark::run(Mat &img)
         if (countRes >= 3)
         {
             setStep(Step::ENABLE); // 设置停车场新步骤
-            std::cout << "[DEBUG] Entered PARK Step::ENABLE at countRes=" << countRes << std::endl;
+            std::cout << "[Park] Parking area confirmed" << std::endl;
         }
 
         if (countRes > 0) // 识别AI标志后开始场次计数
@@ -324,7 +324,6 @@ void FsmPark::run(Mat &img)
         //[03] 空闲车位检测
         if (spots.forks.size() == 2) // 当AI图像同时检测到两个岔路箭头时判断车位是否空闲
         {
-            std::cout << "[Park] Found 2 forks, checking spots..." << std::endl;
             // 已通过setParkSpotOverride指定目标车位，非目标车位由FORKIN init标记，
             // 不进行车辆检测（避免假车/他车误分类到目标车位；PredictResult默认未初始化，
             // carPark.score为随机值会导致所有车位被误判为已占用）
@@ -338,17 +337,10 @@ void FsmPark::run(Mat &img)
             float fork0_center = spots.forks[0].y + spots.forks[0].height / 2;
             float fork1_center = spots.forks[1].y + spots.forks[1].height / 2;
             float threshold = ROWSIMAGE * spotDown;
-
-            std::cout << "[Park] Fork center check - fork0_center=" << fork0_center
-                      << ", fork1_center=" << fork1_center
-                      << ", threshold=" << threshold << std::endl;
-
             if (params->aiResultFresh &&
                 (fork0_center > threshold || fork1_center > threshold))
             {
                 spots.countRes++;
-                std::cout << "[Park] Fork positions: fork0_y=" << fork0_center
-                          << ", fork1_y=" << fork1_center << std::endl;
             }
             else if (params->aiResultFresh)
                 spots.countRes = 0;
@@ -363,12 +355,6 @@ void FsmPark::run(Mat &img)
         //[04] 入库检测
         if (params->aiResultFresh && spots.checked && params->config.spot)
         {
-            std::cout << "[Park] spotEnable[0]=" << spots.spotEnable[0]
-                      << ", spotEnable[1]=" << spots.spotEnable[1]
-                      << ", spotEnable[2]=" << spots.spotEnable[2]
-                      << ", spotEnable[3]=" << spots.spotEnable[3] << std::endl;
-            std::cout << "[Park] forks.size()=" << spots.forks.size() << std::endl;
-
             // 远处车位 1/4号（左前/右前）→ 第一个叉
             if (spots.spotEnable[0] || spots.spotEnable[3])
             {
@@ -940,33 +926,19 @@ bool FsmPark::findSymbols(vector<PredictResult> results, int label, PredictResul
 vector<PredictResult> FsmPark::findParkStation(vector<PredictResult> results)
 {
     vector<PredictResult> resFork;
-    std::cout << "[Park] findParkStation: Searching in " << results.size() << " results" << std::endl;
-
     for (int i = 0; i < results.size(); i++)
     {
         if (results[i].type == LABEL_FORK)
         {
-            std::cout << "[Park] Found fork[" << i << "]: x=" << results[i].x
-                      << ", y=" << results[i].y
-                      << ", w=" << results[i].width
-                      << ", h=" << results[i].height
-                      << ", score=" << results[i].score << std::endl;
-
             if (results[i].width < 100 && results[i].height < 120 && results[i].y > 15)
             {
                 resFork.push_back(results[i]);
-                std::cout << "[Park] Fork[" << i << "] added to resFork" << std::endl;
             }
             else
             {
-                std::cout << "[Park] Fork[" << i << "] filtered out (size=" << results[i].width << "x" << results[i].height
-                          << ", y=" << results[i].y << ")" << std::endl;
             }
         }
     }
-
-    std::cout << "[Park] Total forks after initial filter: " << resFork.size() << std::endl;
-
     vector<PredictResult> resSpot;   // size=0:无停车位，size=1:停车位1/2，size=2:停车位1/2/3/4
     vector<PredictResult> resFilter; // 滤波后的坐标
 
@@ -976,8 +948,6 @@ vector<PredictResult> FsmPark::findParkStation(vector<PredictResult> results)
     if (resFork.size() > 0)
     {
         resFilter.push_back(resFork[0]);
-        std::cout << "[Park] Added first fork to filter" << std::endl;
-
         for (int i = 1; i < resFork.size(); i++) // Start from 1 since index 0 is already added
         {
             bool added = false;
@@ -1003,62 +973,45 @@ vector<PredictResult> FsmPark::findParkStation(vector<PredictResult> results)
                         if (newFork)
                         {
                             resFilter.push_back(resFork[i]);
-                            std::cout << "[Park] Added fork[" << i << "] to filter (new fork)" << std::endl;
                             added = true;
                         }
                         else if (resFork[i].score > resFilter[n].score) // 更新数据
                         {
                             resFilter[n] = resFork[i];
-                            std::cout << "[Park] Updated fork[" << n << "] in filter (higher score)" << std::endl;
                             added = true;
                         }
                     }
                     else if (resFork[i].score > resFilter[n].score) // 更新数据
                     {
                         resFilter[n] = resFork[i];
-                        std::cout << "[Park] Updated fork[" << n << "] in filter (closer but higher score)" << std::endl;
                         added = true;
                     }
                 }
             }
             if (!added)
             {
-                std::cout << "[Park] Fork[" << i << "] not added to filter (duplicate or invalid)" << std::endl;
             }
         }
     }
-
-    std::cout << "[Park] Final resFilter size: " << resFilter.size() << std::endl;
-
     if (resFilter.size() == 1) // 一个车位
     {
         resSpot = resFilter;
-        std::cout << "[Park] Returning 1 spot" << std::endl;
     }
     else if (resFilter.size() == 2) // 两个车位标识
     {
-        std::cout << "[Park] Found 2 spots!" << std::endl;
-        std::cout << "[Park] Spot 0: y=" << resFilter[0].y << ", center_y=" << (resFilter[0].y + resFilter[0].height / 2) << std::endl;
-        std::cout << "[Park] Spot 1: y=" << resFilter[1].y << ", center_y=" << (resFilter[1].y + resFilter[1].height / 2) << std::endl;
-
         if ((resFilter[0].y + resFilter[0].height / 2) < (resFilter[1].y + resFilter[1].height / 2))
         {
             resSpot = resFilter;
-            std::cout << "[Park] Spots in original order" << std::endl;
         }
         else // 车位号重新排序
         {
             resSpot.push_back(resFilter[1]);
             resSpot.push_back(resFilter[0]);
-            std::cout << "[Park] Spots reordered" << std::endl;
         }
     }
     else
     {
-        std::cout << "[Park] Unexpected resFilter size: " << resFilter.size() << std::endl;
     }
-
-    std::cout << "[Park] Returning " << resSpot.size() << " spots" << std::endl;
     return resSpot;
 }
 

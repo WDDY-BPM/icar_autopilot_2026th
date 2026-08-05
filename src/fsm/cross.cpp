@@ -55,216 +55,60 @@ FsmMode FsmCross::getMode()
 }
 
 /**
- * @brief 检查是否通过斑马线（起点/终点检测）
- */
-bool FsmCross::checkCrossPass()
-{
-    if (!params->aiResultFresh)
-        return false;
-
-    bool crossDetected = false;
-    bool passCandidate = false;
-    for (int i = 0; i < params->results.size(); i++)
-    {
-        if (params->results[i].type == LABEL_CROSS)
-        {
-            crossDetected = true;
-            if (!params->crossPassed)
-            {
-                // 斑马线底部进入图像下方1/3时才进行过线计数（避免过早识别）
-                if (params->results[i].y + params->results[i].height <= ROWSIMAGE * 2 / 3)
-                    continue;
-                passCandidate = true;
-            }
-        }
-    }
-
-    if (!params->crossPassed && passCandidate)
-    {
-        if (++crossPassConfirmCount >= 2)
-        {
-            params->crossPassed = true;
-            crossPassConfirmCount = 0;
-            return true;
-        }
-    }
-    else if (!passCandidate)
-    {
-        crossPassConfirmCount = 0;
-    }
-
-    // cross离开画面一段时间后才复位，防止AI闪烁导致重复触发
-    if (!crossDetected)
-    {
-        crossLostCount++;
-        if (crossLostCount > 15) // 约0.5秒未检测到cross才复位
-        {
-            params->crossPassed = false;
-            crossLostCount = 0;
-        }
-    }
-    else
-    {
-        crossLostCount = 0;
-    }
-
-    return false;
-}
-
-/**
- * @brief 运行FSM状态（循环主程序）
- *
+ * @brief Run the lap crossing state machine. Only fresh AI publications can
+ * advance appearance, pass, or disappearance confirmation.
  */
 void FsmCross::run(Mat &img)
 {
-    if (!params->config.currentLapConfig->cross) // 当前圈未启用斑马线功能
+    if (!params->config.currentLapConfig->cross)
         return;
 
-    countInit++; // 起点屏蔽计数器（同时保护换圈和停车，避免发车时误触）
-    if (countInit > 999)
-        countInit = 999;
-    else if (countInit < 60)
+    countInit = std::min(countInit + 1, 999);
+    if (countInit < 60)
         return;
 
-    // 检查是否通过斑马线（起点/终点）- 仅用于计数和圈数切换
-    if (checkCrossPass())
+    bool crossDetected = false;
+    bool passCandidate = false;
+    if (params->aiResultFresh)
     {
-        if (params->lapTaskRequired && !params->lapTaskCompleted)
+        for (const auto &result : params->results)
         {
-            printf("[Cross] Current lap task incomplete, staying in lap %d\n", params->currentLap);
-            return;
+            if (result.type != LABEL_CROSS)
+                continue;
+            crossDetected = true;
+            if (result.y + result.height > ROWSIMAGE * 2 / 3)
+                passCandidate = true;
         }
-
-        crossCount++;
-        printf("[Cross] Cross #%d detected (currentLap=%d)\n", crossCount, params->currentLap);
-
-        // 增加圈数，准备进入下一圈
-        if (params->currentLap < params->totalLaps)
-        {
-            params->nextLap();
-            printf("[Cross] Lap incremented to %d\n", params->currentLap);
-        }
-
-        return;
     }
 
-    // 最后一圈：等待斑马线完全离开视野后再停车（越过斑马线）
-    if (crossCount >= params->totalLaps && !params->crossPassed && step != Step::STOP)
+    const bool finalLap = params->currentLap >= params->totalLaps;
+    const bool lapTaskComplete = !params->lapTaskRequired || params->lapTaskCompleted;
+    const auto event = control_algorithms::updateCrossConfirmation(
+        confirmation, params->aiResultFresh, crossDetected, passCandidate,
+        finalLap, lapTaskComplete);
+
+    if (event == control_algorithms::CrossConfirmationEvent::LAP_PASSED)
     {
-        printf("[Cross] Cross fully passed, stopping vehicle...\n");
+        printf("[Cross] Lap %d fully passed\n", params->currentLap);
+        params->nextLap();
+        setStep(Step::NONE);
+        return;
+    }
+    if (event == control_algorithms::CrossConfirmationEvent::FINAL_STOP)
+    {
+        printf("[Cross] Final cross fully passed; stopping vehicle\n");
         setStep(Step::STOP);
         return;
     }
 
-    switch (step)
-    {
-    case Step::NONE: // AI未识别
-    {
-        countCross++; // 斑马线屏蔽计数器
-        if (countCross > 999)
-            countCross = 999;
-
-        if (!params->aiResultFresh)
-            break;
-
-        for (int i = 0; i < params->results.size(); i++)
-        {
-            // 只有斑马线出现在图像下方1/3时才进行场景识别
-            if (params->results[i].type == LABEL_CROSS && countCross > 60 && params->results[i].y + params->results[i].height > ROWSIMAGE * 2 / 3)
-            {
-                countRec++;
-                break;
-            }
-        }
-
-        if (countRec >= 2)
-            setStep(Step::ENABLE); // 设置新状态
-
-        if (countRec > 0) // 识别AI标志后开始场次计数
-        {
-            countSes++;
-            if (countSes > 4)
-            {
-                countRec = 0; // AI场景识别计数器
-                countSes = 0; // 场次计数器
-            }
-        }
-        break;
-    }
-
-    case Step::ENABLE: // 场景使能
-    {
-        timeout++;
-        if (!params->aiResultFresh)
-            break;
-        bool crossDetected = false;
-        for (int i = 0; i < params->results.size(); i++)
-        {
-            if (params->results[i].type == LABEL_CROSS) // 禁行标志：斑马线
-            {
-                crossDetected = true;
-                // 当斑马线已经越过车辆（检测框的上边缘低于车辆位置）
-                if (params->results[i].y < ROWSIMAGE * 0.4)
-                {
-                    countRec++;
-                    timeout = 0;
-                    break;
-                }
-            }
-        }
-
-        // 如果斑马线离开画面，连续3帧未检测到才触发停车（防抖动）
-        if (!crossDetected)
-        {
-            crossLostStepCount++;
-            if (crossLostStepCount >= 3) // 连续3帧未检测到斑马线
-            {
-                // 非最后一圈直接结束；只有最后一圈进入STOP
-                setStep(crossCount < params->totalLaps ? Step::NONE : Step::STOP);
-                return;
-            }
-        }
-        else
-        {
-            crossLostStepCount = 0;
-        }
-
-        if (countRec >= 2)
-            // 非最后一圈直接结束；只有最后一圈进入STOP
-            setStep(crossCount < params->totalLaps ? Step::NONE : Step::STOP);
-        if (timeout > 30)
-        {
-            setStep(Step::NONE); // 设置新状态
-        }
-        break;
-    }
-
-    case Step::STOP: // 停车
-    {
-        // 非最后一圈：不执行停车，恢复行驶（仅用于圈数计数）
-        if (crossCount < params->totalLaps)
-        {
-            setStep(Step::NONE);
-            break;
-        }
-
-        // 最后一圈：停车并退出程序
+    if (step != Step::STOP)
+        step = confirmation.linePassed || confirmation.passFrames > 0
+            ? Step::ENABLE : Step::NONE;
+    if (step == Step::STOP)
         params->setStopReason(control_algorithms::StopReason::CROSS, true);
-        timeout++;
-        if (timeout >= 50)
-        {
-            printf("[Cross] Last lap completed, vehicle remains stopped.\n");
-            timeout = 50;
-        }
-        break;
-    }
-    }
 }
-
 /**
- * @brief 图形化显示FSM数据
- *
- * @param img
+ * @brief Draw cross state diagnostics.
  */
 void FsmCross::show(Mat &img)
 {
@@ -273,31 +117,16 @@ void FsmCross::show(Mat &img)
 
     putText(img, "[8] Cross", Point(COLSIMAGE / 2 - 50, 20),
             cv::FONT_HERSHEY_TRIPLEX, 0.5, cv::Scalar(0, 255, 0), 0.5);
-
-    switch (step)
-    {
-    case Step::ENABLE: // 场景使能
-        putText(img, "[8] Cross - ENABLE", Point(100, 50), cv::FONT_HERSHEY_TRIPLEX, 0.5, cv::Scalar(0, 0, 255), 0.5);
-        break;
-
-    case Step::STOP: // 停车
-        putText(img, "[8] Cross - STOPING", Point(100, 50), cv::FONT_HERSHEY_TRIPLEX, 0.5, cv::Scalar(0, 0, 255), 0.5);
-        break;
-    }
+    if (step == Step::ENABLE)
+        putText(img, "[8] Cross - ENABLE", Point(100, 50),
+                cv::FONT_HERSHEY_TRIPLEX, 0.5, cv::Scalar(0, 0, 255), 0.5);
+    else if (step == Step::STOP)
+        putText(img, "[8] Cross - STOPPING", Point(100, 50),
+                cv::FONT_HERSHEY_TRIPLEX, 0.5, cv::Scalar(0, 0, 255), 0.5);
 }
-
-/**
- * @brief 设置新状态
- *
- * @param step
- */
 void FsmCross::setStep(Step st)
 {
     step = st;
-    countRec = 0;          // AI场景识别计数器
-    countSes = 0;          // 场次计数器
-    timeout = 0;           // 超时计数器
     params->setStopReason(control_algorithms::StopReason::CROSS,
                           st == Step::STOP);
-    countCross = 0;
 }
