@@ -142,4 +142,6 @@ private:
   void replanTracking();
   void replanTracking(bool left);
   vector<PredictResult> findParkStation(const vector<PredictResult> &results) const;
+
+  friend struct ParkFsmTestFixture;
 };

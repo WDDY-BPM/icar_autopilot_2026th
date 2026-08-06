@@ -38,6 +38,7 @@
 #include "runtime/path_override.hpp"
 #include "runtime/planner_safety.hpp"
 #include "runtime/yfork_phase.hpp"
+#include "ctrl/control_geometry.hpp"
 #include "utils/config_validation.hpp"
 
 using namespace std;
@@ -103,10 +104,9 @@ public:
      * @brief Construct a new Params object
      *
      */
-    Params()
+    Params(const std::string &configPath = "../res/config.json")
     {
-        string path = "../res/config.json";
-        config = loadConfig(path);
+        config = loadConfig(configPath);
 
         validateConfig();
 

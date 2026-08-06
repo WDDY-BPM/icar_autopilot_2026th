@@ -47,12 +47,12 @@ FsmPark::~FsmPark()
  */
 FsmMode FsmPark::getMode()
 {
-    // std::cout << "[Park::getMode] step=" << (int)step
+    // std::cout << "[Park::getMode] step=" << (int)state.stage
     //           << " currentLapConfig->park=" << params->config.currentLapConfig->park
     //           << " parkSpot=" << params->config.currentLapConfig->parkSpot
     //           << " currentLap=" << params->currentLap << std::endl;
 
-    if (step == Step::NONE || !params->featureEnabled(Feature::PARK))
+    if (state.stage == Step::NONE || !params->featureEnabled(Feature::PARK))
     {
         params->ctrl.parking = false;
         return FsmMode::NORMAL;

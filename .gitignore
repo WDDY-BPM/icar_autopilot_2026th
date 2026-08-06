@@ -1,4 +1,5 @@
 build/
+build*/
 res/samples/train
 res/samples/imgs
 __pycache__/

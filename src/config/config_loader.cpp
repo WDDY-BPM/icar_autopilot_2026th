@@ -1,5 +1,6 @@
 #include "config/config_loader.hpp"
 
+#include <filesystem>
 #include <fstream>
 #include <stdexcept>
 
@@ -25,7 +26,9 @@ Config::LapConfig parseLapConfig(const nlohmann::json &json)
 
 Config loadConfig(const std::string &path)
 {
-    std::ifstream file(path);
+    // u8path keeps UTF-8 config paths working on Windows logic-test builds
+    // and is a no-op change for the Linux production target.
+    std::ifstream file(std::filesystem::u8path(path));
     if (!file.good())
         throw std::runtime_error("[Config] file not found: " + path);
     nlohmann::json configs;

@@ -32,6 +32,43 @@ if(ICAR_BUILD_LOGIC_TESTS OR ICAR_LOGIC_TESTS_ONLY)
   target_include_directories(control_algorithms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   icar_target_defaults(control_algorithms_test)
   add_test(NAME control_algorithms_test COMMAND control_algorithms_test)
+
+  # Production FSM/control sources, compiled hardware-free so that logic
+  # tests catch real compile errors in park.cpp / obstacle.cpp / center.cpp /
+  # yfork.cpp instead of only testing the small helpers.
+  add_library(icar_logic_core STATIC
+    src/config/config_loader.cpp
+    src/ctrl/center.cpp
+    src/ctrl/control_geometry.cpp
+    src/ctrl/control_geometry_validator.cpp
+    src/ctrl/perception_geometry_builder.cpp
+    src/ctrl/planned_geometry_builder.cpp
+    src/fsm/obstacle.cpp
+    src/fsm/park.cpp
+    src/fsm/yfork.cpp
+    src/fsm/park/park_observation.cpp
+    src/fsm/park/park_path_planner.cpp
+    src/fsm/park/park_debug_renderer.cpp)
+  target_include_directories(icar_logic_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  if(ICAR_LOGIC_TESTS_ONLY)
+    # OpenCV stub headers replace the real library for hardware-free builds.
+    target_include_directories(icar_logic_core PUBLIC
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/stubs)
+  endif()
+  icar_target_defaults(icar_logic_core)
+
+  add_executable(production_logic_compile_test
+    tests/production_logic_compile_test.cpp)
+  target_include_directories(production_logic_compile_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  target_compile_definitions(production_logic_compile_test PRIVATE
+    ICAR_TEST_RES_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/res/config.json")
+  target_link_libraries(production_logic_compile_test PRIVATE icar_logic_core)
+  icar_target_defaults(production_logic_compile_test)
+  add_test(NAME production_logic_compile_test
+    COMMAND production_logic_compile_test)
+
   add_executable(runtime_behavior_test tests/runtime_behavior_test.cpp
     src/config/config_loader.cpp src/fsm/park/park_observation.cpp
     src/fsm/park/park_path_planner.cpp src/ctrl/planned_geometry_builder.cpp)
