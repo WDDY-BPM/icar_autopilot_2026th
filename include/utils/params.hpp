@@ -32,125 +32,38 @@
 #include <stdexcept>
 #include "utils/json.hpp"
 #include "ctrl/track.hpp"
+#include "config/config.hpp"
+#include "config/config_loader.hpp"
 #include "runtime/fsm_mode.hpp"
 #include "runtime/path_override.hpp"
+#include "runtime/planner_safety.hpp"
 #include "utils/config_validation.hpp"
 
 using namespace std;
+
+struct Control
+{
+    bool stop = false;
+    bool back = false;
+    bool slow = false;
+    bool obstacleSlow = false;
+    uint16_t servo = PWMSERVOMID;
+    float speed = 0.0f;
+    int center = COLSIMAGE / 2;
+    float laneHeadingCorrection = 0.0f;
+    vector<PointX> centerEdge;
+    int lineArea = 0;
+    bool fitting = false;
+    bool parking = false;
+    int countAcc = 500;
+    int startupSteeringCount = 500;
+    bool yforkReset = false;
+};
 
 /**
  * @brief FSM状态场景
  *
  */
-/**
- * @brief 车辆控制指令
- *
- */
-struct Control
-{
-    bool stop = false;            // 车辆停止运动
-    bool back = false;            // 倒车
-    bool slow = false;            // 车辆减速
-    bool obstacleSlow = false;    // 当前帧障碍物避障减速
-    uint16_t servo = PWMSERVOMID; // 发送给舵机的PWM
-    float speed = 0.0;            // 发送给电机的速度
-    int center = COLSIMAGE / 2;   // 控制中心
-    float laneHeadingCorrection = 0.0f; // Independent lane-heading steering term (PWM)
-    vector<PointX> centerEdge;    // 赛道中心点集
-    int lineArea = 0;             // 面积规划行序号
-    bool fitting = false;         // 控制中心拟合标志(停车场专用)
-    bool parking = false;         // 停车场特殊模式
-    int countAcc = 500;           // Speed launch-envelope counter
-    int startupSteeringCount = 500; // Independent startup steering limiter
-    bool yforkReset = false;      // Y型岔路复位标志（park退出时设置）
-};
-/**
- * @brief 控制器核心参数
- *
- */
-struct Config
-{
-    // 通用配置参数
-    float velLow = 1.3;                                 // 智能车最低速:m/s
-    float velHigh = 1.3;                                // 智能车最高速:m/s
-    float velSlow = 0.5;                                // 慢性区速度:m/s
-    float velPark = 0.6;                                // 充电站车速
-    float velCurve = 1.0;                               // 连续弯道速度:m/s
-    float velBusy = 0.8;                                // 施工区速度:m/s
-    float velStop = 0.7;                                // 停车区速度: m/s
-    float velCross = 0.7;                               // 斑马线速度: m/s
-    float velYfork = 0.7;                               // Y型岔路口速度: m/s
-    float runP1 = 2.2;                                  // 比例系数：直线控制量
-    float runP2 = 0.007;                                // 动态P变化系数
-    float turnD = 0.027;
-    float laneHeadingGain = 300.0f;             // PWM per radian
-    float laneHeadingMaxCorrection = 60.0f;     // Maximum heading steering term (PWM)
-    float laneHeadingFadeError = 40.0f;
-    float singleLaneHeadingConfidence = 0.45f;
-    float borderClippedHeadingConfidence = 0.35f;
-    float parkingHeadingConfidence = 0.65f;
-    int singleLaneInteriorPointsMin = 12;
-    int singleLaneMaxCenterJump = 45;
-    int singleLaneCenterStep = 8;
-    float steeringFilterTau = 0.065f;
-    float maxErrorRate = 360.0f;
-    float servoRate = 600.0f;
-    float startupServoRate = 550.0f;
-    int startupServoLimit = 180;
-    int startupStableFrames = 12;
-    int startupRampFrames = 60;
-    float startupSpeed = 0.10f;
-    int maxGapRows = 8;                                  // 微分系数：转弯控制量
-    bool debug = false;                                 // 调试模式使能
-    bool saveImg = false;                               // 存图使能
-    bool saveIpm = false;                               // 存储IPM图像
-    uint16_t rowCutUp = 40;                             // 图像顶部切行
-    uint16_t rowCutBottom = 20;                         // 图像底部切行
-    float overlap = 0.3;                                // 智能车与车道线重合度(%)
-    float score = 0.2;                                  // AI检测置信度
-    int binary = -1;                                    // 图像二值化阈值
-    string model = "../res/models/yolov3_mobilenet_v1"; // 模型路径
-    string video = "../res/samples/sample.mp4";         // 视频路径
-    string alertTarget = "none";                        // 蜂鸣器报警目标: "none"/"cone"/"person"
-    bool requireStartCone = true;                        // 启动前是否必须识别并移除锥桶
-
-    // 圈数配置
-    int totalLaps = 3; // 总圈数
-
-    // 每圈功能使能配置
-    struct LapConfig
-    {
-        bool fork = false;
-        bool park = false;
-        bool busy = false;
-        bool slow = false;
-        bool stop = false;
-        bool cross = true;
-        bool yfork = false;
-        bool yforkLeft = false; // Y型岔路口走左分支(true)或右分支(false)
-        bool station = true;   // 停靠站停车
-        bool obstacle = true;   // 障碍物避障使能（锥桶/行人）
-        int parkSpot = 0;
-        // parkSpot指定的车位为目标车位，其余三个车位自动视为已占用
-
-        // 施工区手动接管相关配置
-        bool manualTakeover = false; // 是否启用手动接管
-        bool busyStopEnable = false; // 是否在施工区停车
-        int busyStopPoint = 0;       // 施工区停靠点选择 (0-不停车, 1-第一个停靠点, 2-第二个停靠点)
-    };
-
-    LapConfig lap1; // 第一圈配置
-    LapConfig lap2; // 第二圈配置
-    LapConfig lap3; // 第三圈配置
-
-    // 当前圈配置指针
-    LapConfig *currentLapConfig = nullptr;
-
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(Config, velLow, velHigh, velSlow, velPark, velCurve, velBusy, velStop, velCross, velYfork,
-                                   runP1, runP2, turnD, laneHeadingGain, laneHeadingMaxCorrection, laneHeadingFadeError, singleLaneHeadingConfidence, borderClippedHeadingConfidence, parkingHeadingConfidence, singleLaneInteriorPointsMin, singleLaneMaxCenterJump, singleLaneCenterStep, steeringFilterTau, maxErrorRate, servoRate, startupServoRate, startupServoLimit, startupStableFrames, startupRampFrames, startupSpeed, maxGapRows, debug, saveImg, saveIpm, rowCutUp, rowCutBottom,
-                                   overlap, score, binary, model, video, alertTarget, totalLaps);
-};
-
 enum class Feature
 {
     FORK,
@@ -181,6 +94,10 @@ public:
         return stopReasons.has(reason);
     }
     bool mustStop() const { return stopReasons.mustStop(); }
+    bool mustStopExcept(control_algorithms::StopReason reason) const
+    {
+        return stopReasons.mustStopExcept(reason);
+    }
     string stopReasonString() const { return stopReasons.string(); }
     /**
      * @brief Construct a new Params object
@@ -188,118 +105,8 @@ public:
      */
     Params()
     {
-        // 加载本地json配置文件
         string path = "../res/config.json";
-        std::ifstream fileStr(path);
-        if (!fileStr.good())
-        {
-            throw std::runtime_error("[Config] file not found: " + path);
-        }
-        nlohmann::json configs;
-        fileStr >> configs;
-        try
-        {
-            // 加载基础配置
-            config.velLow = configs["通用配置参数"]["velLow"];
-            config.velHigh = configs["通用配置参数"]["velHigh"];
-            config.velSlow = configs["通用配置参数"]["velSlow"];
-            config.velPark = configs["通用配置参数"]["velPark"];
-            config.velCurve = configs["通用配置参数"]["velCurve"];
-            config.velBusy = configs["通用配置参数"]["velBusy"];
-            config.velStop = configs["通用配置参数"]["velStop"];
-            config.velCross = configs["通用配置参数"]["velCross"];
-            config.velYfork = configs["通用配置参数"].value("velYfork", 0.7);
-            config.runP1 = configs["通用配置参数"]["runP1"];
-            config.runP2 = configs["通用配置参数"]["runP2"];
-            config.turnD = configs["通用配置参数"]["turnD"];
-            config.laneHeadingGain = configs["通用配置参数"].value("laneHeadingGain", 300.0f);
-            config.laneHeadingMaxCorrection = configs["通用配置参数"].value("laneHeadingMaxCorrection", 60.0f);
-            config.laneHeadingFadeError = configs["通用配置参数"].value("laneHeadingFadeError", 40.0f);
-            config.singleLaneHeadingConfidence = configs["通用配置参数"].value("singleLaneHeadingConfidence", 0.45f);
-            config.borderClippedHeadingConfidence = configs["通用配置参数"].value("borderClippedHeadingConfidence", 0.35f);
-            config.parkingHeadingConfidence = configs["通用配置参数"].value("parkingHeadingConfidence", 0.65f);
-            config.singleLaneInteriorPointsMin = configs["通用配置参数"].value("singleLaneInteriorPointsMin", 12);
-            config.singleLaneMaxCenterJump = configs["通用配置参数"].value("singleLaneMaxCenterJump", 45);
-            config.singleLaneCenterStep = configs["通用配置参数"].value("singleLaneCenterStep", 8);
-            config.steeringFilterTau = configs["通用配置参数"].value("steeringFilterTau", 0.065f);
-            config.maxErrorRate = configs["通用配置参数"].value("maxErrorRate", 360.0f);
-            config.servoRate = configs["通用配置参数"].value("servoRate", 600.0f);
-            config.startupServoRate = configs["通用配置参数"].value("startupServoRate", 550.0f);
-            config.startupServoLimit = configs["通用配置参数"].value("startupServoLimit", 180);
-            config.startupStableFrames = configs["通用配置参数"].value("startupStableFrames", 12);
-            config.startupRampFrames = configs["通用配置参数"].value("startupRampFrames", 60);
-            config.startupSpeed = configs["通用配置参数"].value("startupSpeed", 0.10f);
-            config.maxGapRows = configs["通用配置参数"].value("maxGapRows", 8);
-            config.debug = configs["通用配置参数"]["debug"];
-            config.saveImg = configs["通用配置参数"]["saveImg"];
-            config.saveIpm = configs["通用配置参数"]["saveIpm"];
-            config.rowCutUp = configs["通用配置参数"]["rowCutUp"];
-            config.rowCutBottom = configs["通用配置参数"]["rowCutBottom"];
-            config.overlap = configs["通用配置参数"]["overlap"];
-            config.score = configs["通用配置参数"]["score"];
-            config.binary = configs["通用配置参数"]["binary"];
-            config.model = configs["通用配置参数"]["model"];
-            config.video = configs["通用配置参数"]["video"];
-            config.alertTarget = configs["通用配置参数"].value("alertTarget", "none");
-            config.requireStartCone = configs["通用配置参数"].value("requireStartCone", true);
-            config.totalLaps = configs["圈数配置"]["totalLaps"];
-
-            // 加载每圈配置
-            auto lap1Config = configs["每圈功能使能配置"]["lap1"];
-            config.lap1.fork = lap1Config["fork"];
-            config.lap1.park = lap1Config["park"];
-            config.lap1.parkSpot = lap1Config["parkSpot"];
-            config.lap1.busy = lap1Config["busy"];
-            config.lap1.slow = lap1Config["slow"];
-            config.lap1.stop = lap1Config["stop"];
-            config.lap1.cross = lap1Config["cross"];
-            config.lap1.yfork = lap1Config["yfork"];
-            config.lap1.yforkLeft = config.lap1.yfork
-                ? lap1Config.value("yforkLeft", false) : false;
-            config.lap1.station = lap1Config["station"];
-            config.lap1.obstacle = lap1Config.value("obstacle", true);
-            config.lap1.manualTakeover = lap1Config.value("manualTakeover", false);
-            config.lap1.busyStopEnable = lap1Config.value("busyStopEnable", false);
-            config.lap1.busyStopPoint = lap1Config.value("busyStopPoint", 0);
-
-            auto lap2Config = configs["每圈功能使能配置"]["lap2"];
-            config.lap2.fork = lap2Config["fork"];
-            config.lap2.park = lap2Config["park"];
-            config.lap2.parkSpot = lap2Config["parkSpot"];
-            config.lap2.busy = lap2Config["busy"];
-            config.lap2.slow = lap2Config["slow"];
-            config.lap2.stop = lap2Config["stop"];
-            config.lap2.cross = lap2Config["cross"];
-            config.lap2.yfork = lap2Config["yfork"];
-            config.lap2.yforkLeft = config.lap2.yfork
-                ? lap2Config.value("yforkLeft", false) : false;
-            config.lap2.station = lap2Config["station"];
-            config.lap2.obstacle = lap2Config.value("obstacle", true);
-            config.lap2.manualTakeover = lap2Config.value("manualTakeover", false);
-            config.lap2.busyStopEnable = lap2Config.value("busyStopEnable", false);
-            config.lap2.busyStopPoint = lap2Config.value("busyStopPoint", 0);
-
-            auto lap3Config = configs["每圈功能使能配置"]["lap3"];
-            config.lap3.fork = lap3Config["fork"];
-            config.lap3.park = lap3Config["park"];
-            config.lap3.parkSpot = lap3Config["parkSpot"];
-            config.lap3.busy = lap3Config["busy"];
-            config.lap3.slow = lap3Config["slow"];
-            config.lap3.stop = lap3Config["stop"];
-            config.lap3.cross = lap3Config["cross"];
-            config.lap3.yfork = lap3Config["yfork"];
-            config.lap3.yforkLeft = config.lap3.yfork
-                ? lap3Config.value("yforkLeft", false) : false;
-            config.lap3.station = lap3Config["station"];
-            config.lap3.obstacle = lap3Config.value("obstacle", true);
-            config.lap3.manualTakeover = lap3Config.value("manualTakeover", false);
-            config.lap3.busyStopEnable = lap3Config.value("busyStopEnable", false);
-            config.lap3.busyStopPoint = lap3Config.value("busyStopPoint", 0);
-        }
-        catch (const nlohmann::detail::exception &e)
-        {
-            throw std::runtime_error(std::string("[Config] JSON parse failed: ") + e.what());
-        }
+        config = loadConfig(path);
 
         validateConfig();
 
@@ -325,6 +132,7 @@ public:
     FsmMode mode, modeLast;             // FSM状态场景
     shared_ptr<Track> track;            // 赛道识别类
     PathOverride pathOverride;
+    PlannerSafetyState plannerSafety;
     uint64_t pathFrameId{0};
     std::vector<PredictResult> results; // AI推理结果
     bool aiResultFresh = false;         // 本控制帧是否收到了一组新的AI结果
@@ -339,6 +147,7 @@ public:
     bool takeoverJustEnded = false;     // 手动接管刚结束
     int autoRecoveryFrames = 0;         // Automatic-control recovery hold
     bool laneSafetyStop = false;        // Latch FSM while lane recovery is incomplete
+    bool yforkPerceptionRecovery = false;
     int alertCountdown = 0;             // 蜂鸣器报警倒计时（帧数）
     int alertDecelCount = 0;            // 报警目标减速倒计时（帧数）
     int busyAlertCountdown = 0;         // 施工区蜂鸣器倒计时（帧数）
@@ -363,6 +172,13 @@ public:
         pathOverride.clear(source);
     }
 
+    void releasePlannerSafety(PathSource source)
+    {
+        plannerSafety.clear(source);
+        setStopReason(control_algorithms::StopReason::PLANNER,
+                      plannerSafety.latched);
+    }
+
     void advancePathFrame()
     {
         pathOverride.tick(++pathFrameId);
@@ -370,7 +186,7 @@ public:
 
     bool dropPathOverrideIfDisallowed(FsmMode currentMode)
     {
-        if (!pathOverride.active ||
+        if (!pathOverride.active() ||
             pathSourceAllowed(pathOverride.source, currentMode))
             return false;
         const PathSource staleSource = pathOverride.source;

@@ -62,6 +62,8 @@ void FsmYfork::run(Mat &img)
     if (!params->featureEnabled(Feature::YFORK)) // 该模式未启用
     {
         params->clearPathOverride(PathSource::YFORK);
+        params->releasePlannerSafety(PathSource::YFORK);
+        params->yforkPerceptionRecovery = false;
         completed = false; // 失能时复位，确保下次使能时能重新检测
         return;
     }
@@ -135,9 +137,7 @@ void FsmYfork::reset(void)
     params->clearPathOverride(PathSource::YFORK);
     step = Step::NONE;
     enable = false;
-    counterYfork = 0;
-    timeout = 0;
-    countRes = 0;
+    previousExitEdgeColumn = 0;
     selectLeft = false;
     forkSeen = false;
     vloss = false;
@@ -150,6 +150,8 @@ void FsmYfork::reset(void)
     params->stationStarted = false;
     params->yforkGuiding = false;
     params->yforkBranch = 0;
+    params->yforkPerceptionRecovery = false;
+    params->releasePlannerSafety(PathSource::YFORK);
 }
 
 void FsmYfork::resetLap()
@@ -185,8 +187,6 @@ bool FsmYfork::handle(Mat &img)
             if (findVTip(img))
             {
                 step = Step::DECIDE;
-                counterYfork = 0;
-                timeout = 0;
                 printf("[Yfork] V尖: row=%d col=%d\n", tipRow, tipCol);
             }
         }
@@ -200,17 +200,12 @@ bool FsmYfork::handle(Mat &img)
         params->yforkGuiding = true; // 进入引导前阻止station
 
         step = Step::ENTER;
-        counterYfork = 0;
-        timeout = 0;
         guidanceStartedAt = std::chrono::steady_clock::now();
         return true;
     }
 
     case Step::ENTER:
     {
-        counterYfork++;
-        timeout++;
-
         // Preserve the camera-derived exit edge before replanTracking replaces
         // the selected branch with a Bezier guide.
         bool exitEdgeAvailable = false;
@@ -226,7 +221,13 @@ bool FsmYfork::handle(Mat &img)
             exitEdgeAvailable = true;
         }
 
-        replanTracking(selectLeft, img);
+        if (!replanTracking(selectLeft, img))
+        {
+            step = Step::PERCEPTION_RECOVERY;
+            params->yforkPerceptionRecovery = true;
+            params->releasePlannerSafety(PathSource::YFORK);
+            return true;
+        }
 
         // 引导期间屏蔽station检测，但V尖消失后放开让station能检测停车框
         const auto now = std::chrono::steady_clock::now();
@@ -241,7 +242,8 @@ bool FsmYfork::handle(Mat &img)
         if (!stationBusy && selectLeft && tipRow == 0 && exitEdgeAvailable)
         {
             int cur = exitEdgeColumn;
-            if (countRes > 0 && abs(cur - countRes) > 25)
+            if (previousExitEdgeColumn > 0 &&
+                abs(cur - previousExitEdgeColumn) > 25)
             {
                 params->completeLapTask("yfork-left-exit");
                 reset();
@@ -249,14 +251,15 @@ bool FsmYfork::handle(Mat &img)
                 printf("[Yfork] 驶出岔路 (left edge)\n");
                 return true;
             }
-            countRes = cur;
+            previousExitEdgeColumn = cur;
         }
 
         // 右岔路：右边缘突变 → 已左拐驶出岔路
         if (!stationBusy && !selectLeft && tipRow == 0 && exitEdgeAvailable)
         {
             int cur = exitEdgeColumn;
-            if (countRes > 0 && abs(cur - countRes) > 25)
+            if (previousExitEdgeColumn > 0 &&
+                abs(cur - previousExitEdgeColumn) > 25)
             {
                 params->completeLapTask("yfork-right-exit");
                 reset();
@@ -264,7 +267,7 @@ bool FsmYfork::handle(Mat &img)
                 printf("[Yfork] 驶出岔路 (right edge)\n");
                 return true;
             }
-            countRes = cur;
+            previousExitEdgeColumn = cur;
         }
 
         // 超时退出（启用了station等多等帧等停车+突变）
@@ -277,14 +280,30 @@ bool FsmYfork::handle(Mat &img)
             holdCol = 0;
             guideHold.reset();
             step = Step::EXIT;
-            counterYfork = 0;
-            timeout = 0;
+        }
+        return true;
+    }
+
+    case Step::PERCEPTION_RECOVERY:
+    {
+        params->clearPathOverride(PathSource::YFORK);
+        params->yforkPerceptionRecovery = true;
+        const auto now = std::chrono::steady_clock::now();
+        const bool stationEnabled = params->config.currentLapConfig->station;
+        const auto guidanceTimeout = stationEnabled
+            ? std::chrono::seconds(7) : std::chrono::seconds(4);
+        if (now - guidanceStartedAt >= guidanceTimeout)
+        {
+            params->yforkPerceptionRecovery = false;
+            step = Step::EXIT;
         }
         return true;
     }
 
     case Step::EXIT:
     {
+        params->yforkPerceptionRecovery = false;
+        params->releasePlannerSafety(PathSource::YFORK);
         step = Step::END;
         return true;
     }
@@ -396,7 +415,7 @@ bool FsmYfork::findVTip(const Mat &img)
  *
  * @param left true=左分支, false=右分支
  */
-void FsmYfork::replanTracking(bool left, const Mat &img)
+bool FsmYfork::replanTracking(bool left, const Mat &img)
 {
     const auto now = std::chrono::steady_clock::now();
     findVTip(img); // 更新V尖位置
@@ -412,7 +431,7 @@ void FsmYfork::replanTracking(bool left, const Mat &img)
         params->clearPathOverride(PathSource::YFORK);
         if (guide.expired)
             printf("[Yfork] Planned guide expired; returning to perception lane.\n");
-        return;
+        return false;
     }
     vRow = guide.row;
     vCol = guide.column;
@@ -514,6 +533,7 @@ void FsmYfork::replanTracking(bool left, const Mat &img)
             params->config.velYfork, 2);
     }
     printf("[Yfork] replan dir=%s tip=(%d,%d)\n", left ? "L" : "R", tipRow, tipCol);
+    return true;
 }
 
 void FsmYfork::drawTip(Mat &img)

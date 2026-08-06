@@ -101,25 +101,7 @@ bool Center::laneWidthConsistent(const vector<PointX> &left,
 void Center::fitting(shared_ptr<Params> &params)
 {
 
-    sigmaCenter = 0;
-    params->ctrl.center = COLSIMAGE / 2; // 控制中心
-    nearCenter = COLSIMAGE / 2;
-    farCenter = COLSIMAGE / 2;
-    headingError = 0.0f;
-    headingCorrection = 0.0f;
-    headingConfidence = 0.0f;
-    params->ctrl.laneHeadingCorrection = 0.0f;
-    nearCenterSamples = 0;
-    farCenterSamples = 0;
-    nearCenterValid = false;
-    farCenterValid = false;
-    singleSide = 0;
-    rawCenterJump = 0;
-    appliedCenterStep = 0;
-    usableCenterRows = 0;
-    recoveryMode = LaneRecoveryMode::INVALID;
-    plannedPathRejected = false;
-    plannedValidation = PlannedPathValidation{};
+    resetControlGeometry(*params);
     const LaneInput laneInput = selectLaneInput(
         params->track->pointsEdgeLeft, params->track->pointsEdgeRight,
         params->pathOverride);
@@ -129,7 +111,8 @@ void Center::fitting(shared_ptr<Params> &params)
     const bool visionLaneMode = !plannedPath && !params->ctrl.fitting &&
         (params->mode == FsmMode::NORMAL ||
          params->mode == FsmMode::CROSS || params->mode == FsmMode::STOP ||
-         params->mode == FsmMode::SLOW || params->mode == FsmMode::STATION);
+         params->mode == FsmMode::SLOW || params->mode == FsmMode::STATION ||
+         params->yforkPerceptionRecovery);
     const auto &laneQuality = params->track->quality;
     const vector<PointX> detectedLeft = params->track->pointsEdgeLeft;
     const vector<PointX> detectedRight = params->track->pointsEdgeRight;
@@ -425,11 +408,7 @@ void Center::fitting(shared_ptr<Params> &params)
     else
         sigmaCenter = 1000;
 
-    const bool strictLaneMode = params->mode == FsmMode::NORMAL ||
-                                params->mode == FsmMode::CROSS ||
-                                params->mode == FsmMode::STOP ||
-                                params->mode == FsmMode::SLOW ||
-                                params->mode == FsmMode::STATION;
+    const bool strictLaneMode = visionLaneMode;
     // Two independently reliable, bottom-covering edges provide a usable
     // centerline even on a tight curve. Aggregate quality.valid also contains
     // straight-road temporal/width thresholds and must not reject that path.
@@ -496,11 +475,12 @@ void Center::fitting(shared_ptr<Params> &params)
             lastValidCenter = params->ctrl.center;
         else if (plannedPath)
         {
-            plannedPathRejected = true;
+            rejectedPathSource = laneInput.source;
             params->clearPathOverride(laneInput.source);
             params->ctrl.centerEdge.clear();
         }
     }
+    applyControlGeometry(*params, plannedPath, visionLaneMode, laneInput.source);
     const bool dualStrict = laneQuality.leftReliable && laneQuality.rightReliable;
     const int laneDiagnosticState = dualStrict ? 0 :
         (singleSide != 0 ? singleSide : 2);

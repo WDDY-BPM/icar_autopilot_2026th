@@ -50,6 +50,7 @@ private:
         NONE = 0,        // 未知类型
         DECIDE,          // 决定左右
         ENTER,           // 进入岔路口
+        PERCEPTION_RECOVERY, // 规划引导到期后恢复视觉巡线
         EXIT,            // 出岔路口
         END              // 任务结束
     };
@@ -57,9 +58,7 @@ private:
     Step step = Step::NONE;      // Y型岔路口处理阶段
     bool selectLeft = false;     // 选择左侧路径
     bool forkSeen = false;       // 已看到fork标志（消失后开始找V尖）
-    int counterYfork = 0;       // 记录一个状态的图像场数
-    int timeout = 0;            // 超时计数器
-    int countRes = 0;           // 退出帧计数器
+    int previousExitEdgeColumn = 0;
     int tipRow = 0;             // V尖行位置
     int tipCol = 0;             // V尖列位置
     bool vloss = false;         // V尖已确认消失（不再接受新红点）
@@ -73,5 +72,5 @@ private:
     bool handle(Mat &img);
     bool detectYfork(Mat &img);
     bool findVTip(const Mat &img);  // 在二值图中扫描V尖
-    void replanTracking(bool left, const Mat &img);  // 车道线重绘（V尖屏障引导）
+    bool replanTracking(bool left, const Mat &img);  // 车道线重绘（V尖屏障引导）
 };

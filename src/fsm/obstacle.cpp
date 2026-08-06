@@ -8,7 +8,7 @@ void FsmObstacle::run(Mat &img)
 {
     (void)img;
     resultObs = PredictResult();
-    if (params->pathOverride.active &&
+    if (params->pathOverride.active() &&
         params->pathOverride.source != PathSource::OBSTACLE)
         return;
     params->clearPathOverride(PathSource::OBSTACLE);
@@ -31,7 +31,10 @@ void FsmObstacle::run(Mat &img)
             obstacles.push_back(result);
     }
     if (obstacles.empty())
+    {
+        params->releasePlannerSafety(PathSource::OBSTACLE);
         return;
+    }
 
     const auto nearest = std::max_element(obstacles.begin(), obstacles.end(),
         [](const PredictResult &left, const PredictResult &right) {
@@ -114,6 +117,7 @@ void FsmObstacle::resetLap()
 {
     resultObs = PredictResult();
     params->clearPathOverride(PathSource::OBSTACLE);
+    params->releasePlannerSafety(PathSource::OBSTACLE);
 }
 
 void FsmObstacle::show(Mat &img)

@@ -30,6 +30,7 @@
 #include "ctrl/mapping.hpp"
 #include "utils/json.hpp"
 #include "utils/point.hpp"
+#include "vision/predict_result.hpp"
 
 using namespace std;
 using namespace cv;
@@ -44,18 +45,6 @@ using namespace cv;
 #define PWMSERVOMID 1500 // 舵机PWM中值 1520
 #define PWMSERVOMIN 1100 // 舵机PWM最小值（右）1200
 
-#define LABEL_CONE 0     // AI标签: 锥桶
-#define LABEL_PERSON 1   // AI标签: 行人
-#define LABEL_BUSY 2     // AI标签: 施工区标志
-#define LABEL_LIMIT 3    // AI标签: 限速标志
-#define LABEL_UNLIMIT 4  // AI标签: 解除限速标志
-#define LABEL_PARK 5     // AI标签: 停车场
-#define LABEL_GATE 6     // AI标签: ETC阻拦杆
-#define LABEL_CROSS 7    // AI标签: 斑马线
-#define LABEL_FORK 8     // AI标签: 岔路标志
-#define LABEL_LEFT 9     // AI标签: 左转标志
-#define LABEL_CHOICE 10  // AI标签: 卜型箭头标志
-#define LABEL_STATION 11 // AI标签: 停靠点标志
 
 inline Mapping ipm = Mapping(Size(COLSIMAGE, ROWSIMAGE),
                              Size(COLSIMAGEIPM, ROWSIMAGEIPM)); // 逆透视变换类
@@ -64,17 +53,6 @@ inline Mapping ipm = Mapping(Size(COLSIMAGE, ROWSIMAGE),
  * @brief 目标检测结果
  *
  */
-struct PredictResult
-{
-    int type;          // ID
-    std::string label; // 标签
-    float score;       // 置信度
-    int x;             // 坐标(左下角点)
-    int y;             // 坐标
-    int width;         // 尺寸
-    int height;        // 尺寸
-};
-
 /**
  * @brief 构建二维坐标
  *

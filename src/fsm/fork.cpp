@@ -89,6 +89,7 @@ void FsmFork::show(Mat &img)
 void FsmFork::reset(void)
 {
     params->clearPathOverride(PathSource::FORK);
+    params->releasePlannerSafety(PathSource::FORK);
     step = Step::NONE; // 岔路处理阶段
     counterFork = 0;   // 图像状态计数
     lastForkL = PointX(0, 0, 0);
@@ -109,9 +110,14 @@ bool FsmFork::handle(Mat &img, int type)
     if (params->track->pointsEdgeLeft.size() != params->track->widthBlock.size()                                                          // 只有在左右边界点数量都和白块数相同时才找T形岔路
         || params->track->pointsEdgeRight.size() != params->track->widthBlock.size() || params->track->widthBlock.size() < ROWSIMAGE / 6) // 点太少了，不找特征了
         return false;
-    params->beginPathOverride(PathSource::FORK);
-    auto &plannedLeft = params->pathOverride.leftEdge;
-    auto &plannedRight = params->pathOverride.rightEdge;
+    vector<PointX> plannedLeft = params->track->pointsEdgeLeft;
+    vector<PointX> plannedRight = params->track->pointsEdgeRight;
+    const auto publishDraft = [&]() {
+        params->pathOverride.setEdges(
+            PathSource::FORK, std::move(plannedLeft), std::move(plannedRight),
+            0.65f, -1.0f, 2);
+        return true;
+    };
     const auto researchPlannedPath = [&](int rowStart) {
         Track planningTrack = *params->track;
         planningTrack.pointsEdgeLeft = plannedLeft;
@@ -283,7 +289,7 @@ bool FsmFork::handle(Mat &img, int type)
                         {
                             plannedLeft[i].y = (int)(k * plannedLeft[i].x + b);
                         }
-                        return true;
+                        return publishDraft();
                     }
                 }
                 else if (type && (repairing || (FirstLS < 40 && countSL > 30)))
@@ -304,7 +310,7 @@ bool FsmFork::handle(Mat &img, int type)
                         static_cast<size_t>(x_end) >= params->track->pointsEdgeLeft.size())
                     {
                         step = Step::END;
-                        return true;
+                        return publishDraft();
                     }
                     PointX startPoint = params->track->pointsEdgeRight[0]; // 补线：起点
                     PointX midPoint1;
@@ -329,7 +335,7 @@ bool FsmFork::handle(Mat &img, int type)
                         plannedRight.push_back(repair0[i]);
                     }
                     repairing = true;
-                    return true;
+                    return publishDraft();
                 }
             }
         }
@@ -377,7 +383,7 @@ bool FsmFork::handle(Mat &img, int type)
             { // 俩点都找不到了
                 step = Step::EXIT;
                 counterFork = 0;
-                return true;
+                return publishDraft();
             }
             if (!lastLFlag && !lastRFlag && leftFilletDown.slope > 10 &&
                 Right_Fillet_DOWN.slope > 10 && !repairing &&
@@ -425,7 +431,7 @@ bool FsmFork::handle(Mat &img, int type)
                     static_cast<size_t>(Right_Fillet_DOWN.slope) > params->track->pointsEdgeRight.size())
                 {
                     step = Step::END;
-                    return true;
+                    return publishDraft();
                 }
                 plannedRight.resize(static_cast<size_t>(Right_Fillet_DOWN.slope));
                 if (lastRFlag && Right_Fillet_DOWN.slope < 15)
@@ -469,7 +475,7 @@ bool FsmFork::handle(Mat &img, int type)
                         if (i <= 0)
                         {
                             step = Step::END;
-                            return true;
+                            return publishDraft();
                         }
                         plannedLeft.resize(static_cast<size_t>(i));
                         break;
@@ -487,7 +493,7 @@ bool FsmFork::handle(Mat &img, int type)
             }
 
             if (repairing)
-                return true;
+                return publishDraft();
         }
     }
     else if (step == Step::EXIT)
@@ -513,7 +519,7 @@ bool FsmFork::handle(Mat &img, int type)
             if (countSL < 10 || lastForkR.slope == 0)
             {
                 step = Step::END;
-                return true;
+                return publishDraft();
             }
             else
             {
@@ -523,7 +529,7 @@ bool FsmFork::handle(Mat &img, int type)
                     params->track->pointsEdgeRight[0].x == lastForkR.x)
                 {
                     step = Step::END;
-                    return true;
+                    return publishDraft();
                 }
                 const int edgeCount =
                     params->track->pointsEdgeRight[0].x - lastForkR.x + 1;
@@ -531,7 +537,7 @@ bool FsmFork::handle(Mat &img, int type)
                     static_cast<size_t>(edgeCount) > params->track->pointsEdgeRight.size())
                 {
                     step = Step::END;
-                    return true;
+                    return publishDraft();
                 }
                 double k = gradientCal(params->track->pointsEdgeRight[0], lastForkR);
                 double b = params->track->pointsEdgeRight[0].y -
@@ -553,7 +559,7 @@ bool FsmFork::handle(Mat &img, int type)
                 repair0 = smoothLine(repair0);
                 for (const auto &point : repair0)
                     plannedRight.push_back(point);
-                return true;
+                return publishDraft();
             }
         }
         else if (type == 2)
@@ -561,7 +567,7 @@ bool FsmFork::handle(Mat &img, int type)
             if (params->track->widthBlock.size() > 200)
             { // 白块数量较多，退出状态
                 step = Step::END;
-                return true;
+                return publishDraft();
             }
             int StickL = 0;
             int StickR = 0;
@@ -586,7 +592,7 @@ bool FsmFork::handle(Mat &img, int type)
             if (!StickR && !StickL)
             { // 左右均无前沿贴边，退出状态
                 step = Step::END;
-                return true;
+                return publishDraft();
             }
             PointX leftFilletDown = lastForkL;
             PointX Right_Fillet_DOWN = lastForkR;
@@ -614,7 +620,7 @@ bool FsmFork::handle(Mat &img, int type)
                     static_cast<size_t>(Right_Fillet_DOWN.slope) > params->track->pointsEdgeRight.size())
                 {
                     step = Step::END;
-                    return true;
+                    return publishDraft();
                 }
                 plannedRight.resize(static_cast<size_t>(Right_Fillet_DOWN.slope));
                 if (Right_Fillet_DOWN.slope < 15)
@@ -662,7 +668,7 @@ bool FsmFork::handle(Mat &img, int type)
                             if (i <= 0)
                             {
                                 step = Step::END;
-                                return true;
+                                return publishDraft();
                             }
                             plannedLeft.resize(static_cast<size_t>(i));
                             break;
@@ -692,7 +698,7 @@ bool FsmFork::handle(Mat &img, int type)
                     {
                         plannedLeft.push_back(repair0[i]);
                     } // 完成所有补线
-                    return true;
+                    return publishDraft();
                 }
                 else
                 { // 否则则需要使用重搜
@@ -708,18 +714,18 @@ bool FsmFork::handle(Mat &img, int type)
                             break;
                         }
                     }
-                    researchPlannedPath(targetEdgeCount);
-                    if (plannedLeft.empty() || plannedRight.empty())
-                    {
-                        step = Step::END;
-                        return true;
-                    }
                     const int targetEdgeCount =
                         params->track->pointsEdgeRight[0].x - TempPoint.x + 1;
                     if (targetEdgeCount <= 0 || targetEdgeCount > ROWSIMAGE)
                     {
                         step = Step::END;
-                        return true;
+                        return publishDraft();
+                    }
+                    researchPlannedPath(targetEdgeCount);
+                    if (plannedLeft.empty() || plannedRight.empty())
+                    {
+                        step = Step::END;
+                        return publishDraft();
                     }
 
                     const int sizeLNow =
@@ -761,7 +767,7 @@ bool FsmFork::handle(Mat &img, int type)
                         params->track->pointsEdgeRight.empty())
                     {
                         step = Step::END;
-                        return true;
+                        return publishDraft();
                     }
                     // 需要对之前补零点的地方进行修正
                     repair0.resize(0);
@@ -784,7 +790,7 @@ bool FsmFork::handle(Mat &img, int type)
                     {
                         plannedRight.push_back(repair0[i]);
                     }
-                    return true;
+                    return publishDraft();
                 }
             }
         }

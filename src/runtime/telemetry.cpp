@@ -58,20 +58,27 @@ void Icar::publishTelemetry(const FrameCycle &frame)
                 control_algorithms::StopReason::CAMERA);
             overlay["camera_ready"] = frame.cameraReady;
             overlay["camera_timed_out"] = frame.cameraTimedOut;
-            overlay["path_override_active"] = params->pathOverride.active;
+            overlay["path_override_active"] = params->pathOverride.active();
             overlay["path_source"] = pathSourceName(params->pathOverride.source);
             overlay["path_ttl_frames"] = params->pathOverride.ttlFrames;
             overlay["path_generated_frame_id"] = params->pathOverride.generatedFrameId;
             overlay["path_speed_limit"] = params->pathOverride.speedLimit;
             overlay["perception_left_count"] = params->track->pointsEdgeLeft.size();
             overlay["perception_right_count"] = params->track->pointsEdgeRight.size();
-            overlay["planned_left_count"] = params->pathOverride.active
+            overlay["planned_left_count"] = params->pathOverride.active()
                 ? params->pathOverride.leftEdge.size() : 0;
-            overlay["planned_right_count"] = params->pathOverride.active
+            overlay["planned_right_count"] = params->pathOverride.active()
                 ? params->pathOverride.rightEdge.size() : 0;
-            overlay["planned_center_count"] = params->pathOverride.active
+            overlay["planned_center_count"] = params->pathOverride.active()
                 ? params->pathOverride.centerLine.size() : 0;
             overlay["lane_safety_stop"] = params->laneSafetyStop;
+            overlay["planner_safety_stop"] = params->plannerSafety.latched;
+            overlay["planner_rejected_source"] =
+                pathSourceName(params->plannerSafety.rejectedSource);
+            overlay["planner_recovery_frames"] =
+                params->plannerSafety.validRecoveryFrames;
+            overlay["control_geometry_source"] =
+                controlGeometrySourceName(center->geometry.source);
             overlay["lanes_valid"] = lanesValid;
             overlay["lanes_frame_id"] = lanesValid ? frame.frameId : 0;
             overlay["center_valid"] = centerValid;

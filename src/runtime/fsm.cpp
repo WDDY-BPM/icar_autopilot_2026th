@@ -14,6 +14,8 @@ void Icar::runFsm(Mat &img)
             fsmFactory.busy->resetLap();
             fsmFactory.station->resetLap();
             fsmFactory.obstacle->resetLap();
+            params->plannerSafety.clear();
+            params->setStopReason(control_algorithms::StopReason::PLANNER, false);
             params->alertCountdown = 0;                // 复位蜂鸣器报警
             params->alertDecelCount = 0;               // 复位报警减速
             params->busyAlertCountdown = 0;            // 复位施工区蜂鸣

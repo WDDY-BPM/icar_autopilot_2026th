@@ -1,28 +1,41 @@
 #include "icar.hpp"
+#include "runtime/control_decision.hpp"
 
 void Icar::calculateControl(FrameCycle &frame)
 {
         //[06] Calculate the lane control center in autonomous mode.
         frame.centerUpdated = false;
+        center->geometry.reset();
         if (frame.cameraReady && frame.startupGateReleased && !frame.emergencyStopRequested &&
             !params->manualTakeover && params->autoRecoveryFrames <= 0 && !frame.aiStale)
         {
             center->fitting(params);
             frame.centerUpdated = true;
-            const int laneUnconfirmedFrames = control_algorithms::updateLaneUnconfirmed(
-                laneUnconfirmedState, center->controlValid, 5);
-            const bool safetyLaneMode = params->mode == FsmMode::NORMAL ||
-                                        params->mode == FsmMode::CROSS ||
-                                        params->mode == FsmMode::STOP ||
-                                        params->mode == FsmMode::SLOW ||
-                                        params->mode == FsmMode::STATION;
-            if (center->plannedPathRejected)
-                params->laneSafetyStop = true;
-            else
+            if (center->rejectedPathSource != PathSource::NONE)
+                params->plannerSafety.reject(center->rejectedPathSource);
+            else if (center->geometry.source == ControlGeometrySource::PLANNED)
+                params->plannerSafety.observe(center->geometry.pathSource,
+                                               center->geometry.valid);
+            params->setStopReason(control_algorithms::StopReason::PLANNER,
+                                  params->plannerSafety.latched);
+
+            const bool perceptionGeometry =
+                center->geometry.source == ControlGeometrySource::PERCEPTION;
+            if (perceptionGeometry)
+            {
+                const int laneUnconfirmedFrames =
+                    control_algorithms::updateLaneUnconfirmed(
+                        laneUnconfirmedState, center->controlValid, 5);
                 params->laneSafetyStop = control_algorithms::updateLaneSafetyStop(
-                    params->laneSafetyStop, safetyLaneMode, center->controlValid,
+                    params->laneSafetyStop, true, center->controlValid,
                     center->laneInvalidFrames, center->laneRecoveryFrames, 7, 5,
                     laneUnconfirmedFrames, 30);
+            }
+            else
+            {
+                laneUnconfirmedState = control_algorithms::LaneUnconfirmedState{};
+                params->laneSafetyStop = false;
+            }
             params->setStopReason(control_algorithms::StopReason::LANE,
                                   params->laneSafetyStop);
         }
@@ -42,18 +55,17 @@ void Icar::calculateControl(FrameCycle &frame)
         const bool automaticControlActive =
             frame.cameraReady && frame.startupGateReleased && !frame.emergencyStopRequested &&
             !params->manualTakeover && params->autoRecoveryFrames <= 0 && !frame.aiStale;
-        const bool laneHold = params->laneSafetyStop;
-        static bool laneHoldWasActive = false;
-        if (automaticControlActive && !laneHold)
+        center->geometry.updated = frame.centerUpdated;
+        const RuntimeControlDecision controlDecision = evaluateRuntimeControl(
+            center->geometry, params->stopReasons, automaticControlActive);
+        static bool automaticHoldWasActive = false;
+        if (controlDecision.allowMotion)
         {
             motion->poseControl(params, steeringDt);
             motion->speedControl(params);
 
-            const bool strictLaneMode = params->mode == FsmMode::NORMAL ||
-                                        params->mode == FsmMode::CROSS ||
-                                        params->mode == FsmMode::STOP ||
-                                        params->mode == FsmMode::SLOW ||
-                                        params->mode == FsmMode::STATION;
+            const bool strictLaneMode = center->geometry.source ==
+                ControlGeometrySource::PERCEPTION;
             const bool lowConfidenceLane =
                 center->recoveryMode == LaneRecoveryMode::WEAK_HYBRID ||
                 center->recoveryMode == LaneRecoveryMode::LEFT_SINGLE ||
@@ -69,6 +81,9 @@ void Icar::calculateControl(FrameCycle &frame)
             else if (center->recoveryMode == LaneRecoveryMode::RELAXED_DUAL)
                 params->ctrl.speed = std::min(params->ctrl.speed,
                     std::min(params->config.velCurve, 0.20f));
+            if (params->yforkPerceptionRecovery)
+                params->ctrl.speed = std::min(params->ctrl.speed,
+                                              params->config.velYfork);
 
             if (strictLaneMode && laneUnconfirmedState.frames > 0)
             {
@@ -77,9 +92,9 @@ void Icar::calculateControl(FrameCycle &frame)
                     params->ctrl.servo = motion->syncServoCommand(previousFinalServo);
             }
         }
-        else if (automaticControlActive && laneHold)
+        else if (controlDecision.centerSteering)
         {
-            if (!laneHoldWasActive)
+            if (!automaticHoldWasActive)
                 params->ctrl.countAcc = 0;
             params->ctrl.speed = 0.0f;
             params->ctrl.servo = motion->limitServoCommand(
@@ -91,6 +106,8 @@ void Icar::calculateControl(FrameCycle &frame)
         {
             params->laneSafetyStop = false;
             params->setStopReason(control_algorithms::StopReason::LANE, false);
+            params->plannerSafety.clear();
+            params->setStopReason(control_algorithms::StopReason::PLANNER, false);
             motion->resetControl();
             params->ctrl.servo = motion->limitServoCommand(
                 params->ctrl.servo, steeringDt, params->config.servoRate);
@@ -101,7 +118,7 @@ void Icar::calculateControl(FrameCycle &frame)
             // immediately instead of passing through the normal slew limiter.
             motion->reset();
         }
-        laneHoldWasActive = automaticControlActive && laneHold;
+        automaticHoldWasActive = controlDecision.centerSteering;
         if (!frame.emergencyStopRequested && params->autoRecoveryFrames > 0)
         {
             params->setStopReason(control_algorithms::StopReason::STARTUP, true);

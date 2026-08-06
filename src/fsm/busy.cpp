@@ -24,6 +24,7 @@ void FsmBusy::run(Mat &img)
     if (!params->featureEnabled(Feature::BUSY))
     {
         params->clearPathOverride(PathSource::BUSY);
+        params->releasePlannerSafety(PathSource::BUSY);
         return;
     }
 
@@ -75,6 +76,7 @@ void FsmBusy::run(Mat &img)
             params->ctrl.speed = 0.0f;
             params->ctrl.servo = PWMSERVOMID;
             params->clearPathOverride(PathSource::BUSY);
+            params->releasePlannerSafety(PathSource::BUSY);
             if (event == BusyExitEvent::STATION_WAIT_TIMEOUT)
                 printf("[Busy] Station wait timeout; vehicle stopped; lap task remains incomplete.\n");
             else if (event == BusyExitEvent::SIGN_WAIT_TIMEOUT)
@@ -94,6 +96,7 @@ void FsmBusy::run(Mat &img)
             params->busyZone = false;
             params->ctrl.countAcc = 0;
             params->clearPathOverride(PathSource::BUSY);
+            params->releasePlannerSafety(PathSource::BUSY);
             params->completeLapTask("construction-exit");
             printf("[Busy] Exit turn complete, returning to normal mode\n");
             return;
@@ -179,6 +182,7 @@ void FsmBusy::startManualTakeover()
     params->setStopReason(control_algorithms::StopReason::BUSY, false);
     params->setStopReason(control_algorithms::StopReason::MANUAL, true);
     params->clearPathOverride(PathSource::BUSY);
+    params->releasePlannerSafety(PathSource::BUSY);
     exitState.reset();
     manualTakeover = true;
     waitingForTakeover = false;
@@ -190,6 +194,7 @@ void FsmBusy::endManualTakeover()
     params->setStopReason(control_algorithms::StopReason::MANUAL, false);
     params->setStopReason(control_algorithms::StopReason::BUSY, false);
     params->clearPathOverride(PathSource::BUSY);
+    params->releasePlannerSafety(PathSource::BUSY);
     busyConfirmation = control_algorithms::BusyConfirmationState{};
     manualTakeover = false;
     waitingForTakeover = false;
@@ -212,6 +217,7 @@ void FsmBusy::resetLap()
     params->setStopReason(control_algorithms::StopReason::BUSY, false);
     params->setStopReason(control_algorithms::StopReason::MANUAL, false);
     params->clearPathOverride(PathSource::BUSY);
+    params->releasePlannerSafety(PathSource::BUSY);
     enable = false;
     busyConfirmation = control_algorithms::BusyConfirmationState{};
     manualTakeover = false;

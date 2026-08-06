@@ -45,14 +45,10 @@ inline bool pathSourceAllowed(PathSource source, FsmMode mode)
 
 struct PathOverride
 {
-    bool active{false};
     PathSource source{PathSource::NONE};
     std::vector<PointX> leftEdge;
     std::vector<PointX> rightEdge;
     std::vector<PointX> centerLine;
-    bool hasLeftEdge{false};
-    bool hasRightEdge{false};
-    bool hasCenterLine{false};
     float headingConfidence{0.0f};
     float speedLimit{-1.0f};
     int ttlFrames{0};
@@ -68,14 +64,10 @@ struct PathOverride
         source = owner;
         leftEdge = std::move(left);
         rightEdge = std::move(right);
-        hasLeftEdge = !leftEdge.empty();
-        hasRightEdge = !rightEdge.empty();
         headingConfidence = newHeadingConfidence;
         speedLimit = newSpeedLimit;
         ttlFrames = std::max(1, newTtlFrames);
         generatedFrameId = observedFrameId;
-        active = owner != PathSource::NONE &&
-                 (hasLeftEdge || hasRightEdge);
     }
 
     void setCenterLine(PathSource owner, std::vector<PointX> center,
@@ -86,19 +78,17 @@ struct PathOverride
         resetPayload();
         source = owner;
         centerLine = std::move(center);
-        hasCenterLine = !centerLine.empty();
         headingConfidence = newHeadingConfidence;
         speedLimit = newSpeedLimit;
         ttlFrames = std::max(1, newTtlFrames);
         generatedFrameId = observedFrameId;
-        active = owner != PathSource::NONE && hasCenterLine;
     }
 
     void clear() { resetPayload(); }
 
     bool clear(PathSource owner)
     {
-        if (!active || source != owner)
+        if (!active() || source != owner)
             return false;
         clear();
         return true;
@@ -107,7 +97,7 @@ struct PathOverride
     void tick(uint64_t currentFrameId)
     {
         observedFrameId = currentFrameId;
-        if (!active)
+        if (!active())
             return;
         if (generatedFrameId == 0)
         {
@@ -120,10 +110,19 @@ struct PathOverride
             clear();
     }
 
+    bool hasLeft() const { return !leftEdge.empty(); }
+    bool hasRight() const { return !rightEdge.empty(); }
+    bool hasCenter() const { return !centerLine.empty(); }
+    bool hasGeometry() const { return hasLeft() || hasRight() || hasCenter(); }
+    bool hasValidGeometry() const
+    {
+        return source != PathSource::NONE && ttlFrames > 0 && hasGeometry();
+    }
+    bool active() const { return hasValidGeometry(); }
+
     bool validFor(PathSource expectedSource) const
     {
-        return active && source == expectedSource && ttlFrames > 0 &&
-               (hasLeftEdge || hasRightEdge || hasCenterLine);
+        return hasValidGeometry() && source == expectedSource;
     }
 
 private:
@@ -131,14 +130,10 @@ private:
 
     void resetPayload()
     {
-        active = false;
         source = PathSource::NONE;
         leftEdge.clear();
         rightEdge.clear();
         centerLine.clear();
-        hasLeftEdge = false;
-        hasRightEdge = false;
-        hasCenterLine = false;
         headingConfidence = 0.0f;
         speedLimit = -1.0f;
         ttlFrames = 0;
@@ -148,7 +143,7 @@ private:
 
 inline float applyPathSpeedLimit(float speed, const PathOverride &overridePath)
 {
-    if (!overridePath.active || overridePath.speedLimit < 0.0f)
+    if (!overridePath.active() || overridePath.speedLimit < 0.0f)
         return speed;
     return std::min(speed, overridePath.speedLimit);
 }
@@ -166,12 +161,10 @@ inline LaneInput selectLaneInput(const std::vector<PointX> &trackLeft,
                                  const std::vector<PointX> &trackRight,
                                  const PathOverride &overridePath)
 {
-    if (overridePath.validFor(overridePath.source) && overridePath.hasCenterLine &&
-        !overridePath.centerLine.empty())
+    if (overridePath.hasValidGeometry() && overridePath.hasCenter())
         return {nullptr, nullptr, &overridePath.centerLine, overridePath.source};
-    if (overridePath.validFor(overridePath.source) &&
-        ((overridePath.hasLeftEdge && !overridePath.leftEdge.empty()) ||
-         (overridePath.hasRightEdge && !overridePath.rightEdge.empty())))
+    if (overridePath.hasValidGeometry() &&
+        (overridePath.hasLeft() || overridePath.hasRight()))
         return {&overridePath.leftEdge, &overridePath.rightEdge, nullptr,
                 overridePath.source};
     return {&trackLeft, &trackRight, nullptr, PathSource::NONE};
