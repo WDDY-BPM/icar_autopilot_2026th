@@ -126,6 +126,17 @@ private:
   void setStep(Step st);
   void dispatchStage(const ParkObservation &observation,
                      std::chrono::steady_clock::time_point now);
+  void handleNone(const ParkObservation &, std::chrono::steady_clock::time_point);
+  void handleEnable(const ParkObservation &, std::chrono::steady_clock::time_point);
+  void handleForkIn(const ParkObservation &, std::chrono::steady_clock::time_point);
+  void handleTrackIn(const ParkObservation &, std::chrono::steady_clock::time_point);
+  void handleEnter(const ParkObservation &, std::chrono::steady_clock::time_point);
+  void handleParking(const ParkObservation &, std::chrono::steady_clock::time_point);
+  void handleWaitPickup(const ParkObservation &, std::chrono::steady_clock::time_point);
+  void handleExit(const ParkObservation &, std::chrono::steady_clock::time_point);
+  void handleTrackOut(const ParkObservation &, std::chrono::steady_clock::time_point);
+  void handleForkOut(const ParkObservation &, std::chrono::steady_clock::time_point);
+  void dispatchStageLegacy(const ParkObservation &, std::chrono::steady_clock::time_point);
   void updateGeometryPolicy();
   void reset();
   void replanTracking();

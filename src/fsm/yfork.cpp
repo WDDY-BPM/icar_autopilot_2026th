@@ -138,7 +138,8 @@ void FsmYfork::reset(void)
     params->clearPathOverride(PathSource::YFORK);
     step = Step::NONE;
     enable = false;
-    previousExitEdgeColumn = 0;
+    exitBaselineColumn = 0;
+    exitCandidateColumn = 0;
     exitJumpConfirmations = 0;
     selectLeft = false;
     forkSeen = false;
@@ -324,24 +325,47 @@ bool FsmYfork::detectConfirmedExit(
 {
     if (!observation.edgeAvailable)
     {
+        exitBaselineColumn = 0;
+        exitCandidateColumn = 0;
         exitJumpConfirmations = 0;
         return false;
     }
     const bool stationBusy = params->config.currentLapConfig->station &&
         !params->stationStopCompleted;
-    if (previousExitEdgeColumn <= 0 || stationBusy)
+    if (stationBusy)
     {
-        previousExitEdgeColumn = observation.edgeColumn;
+        exitBaselineColumn = observation.edgeColumn;
+        exitCandidateColumn = 0;
         exitJumpConfirmations = 0;
         return false;
     }
-    if (std::abs(observation.edgeColumn - previousExitEdgeColumn) <= 25)
+    if (exitBaselineColumn <= 0)
     {
-        previousExitEdgeColumn = observation.edgeColumn;
+        exitBaselineColumn = observation.edgeColumn;
+        exitCandidateColumn = 0;
         exitJumpConfirmations = 0;
         return false;
     }
-    return ++exitJumpConfirmations >= 2;
+    if (std::abs(observation.edgeColumn - exitBaselineColumn) <= 25)
+    {
+        exitBaselineColumn = observation.edgeColumn;
+        exitCandidateColumn = 0;
+        exitJumpConfirmations = 0;
+        return false;
+    }
+    if (exitJumpConfirmations == 0 ||
+        std::abs(observation.edgeColumn - exitCandidateColumn) > 10)
+    {
+        exitCandidateColumn = observation.edgeColumn;
+        exitJumpConfirmations = 1;
+        return false;
+    }
+    if (++exitJumpConfirmations < 2)
+        return false;
+    exitBaselineColumn = 0;
+    exitCandidateColumn = 0;
+    exitJumpConfirmations = 0;
+    return true;
 }
 
 /**

@@ -53,11 +53,13 @@ PathOverride ParkPathPlanner::buildForkIn(const Config &config)
 
 PathOverride ParkPathPlanner::buildTrackGuide(const PointX &start,
                                               const PredictResult &direction,
-                                              bool rightSide,
+                                              int lateralBiasPixels,
                                               const Config &config)
 {
-    const int sideBias = rightSide ? 40 : -40;
-    const PointX end(direction.y, direction.x + direction.width / 2 + sideBias);
+    const int endRow = std::clamp(direction.y, 0, 239);
+    const int endColumn = std::clamp(
+        direction.x + direction.width / 2 + lateralBiasPixels, 1, 318);
+    const PointX end(endRow, endColumn);
     const PointX mid((start.x + end.x) / 2, (start.y + end.y) / 2);
     PathOverride path;
     path.setCenterLineForTime(PathSource::PARK, bezier({start, mid, end}),
@@ -96,25 +98,4 @@ PathOverride ParkPathPlanner::buildForkOut(const Config &config)
     return edgePath(
         bezier({{230, 1}, {93, 1}, {80, 1}}),
         bezier({{230, 256}, {155, 100}, {80, 30}}), config);
-}
-
-PathOverride ParkPathPlanner::fromEdges(PathSource source,
-                                         const std::vector<PointX> &left,
-                                         const std::vector<PointX> &right,
-                                         float headingConfidence,
-                                         float speedLimit, int ttlFrames)
-{
-    PathOverride path;
-    path.setEdges(source, left, right, headingConfidence, speedLimit, ttlFrames);
-    return path;
-}
-
-PathOverride ParkPathPlanner::fromCenterLine(PathSource source,
-                                              const std::vector<PointX> &center,
-                                              float headingConfidence,
-                                              float speedLimit, int ttlFrames)
-{
-    PathOverride path;
-    path.setCenterLine(source, center, headingConfidence, speedLimit, ttlFrames);
-    return path;
 }

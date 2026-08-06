@@ -36,42 +36,43 @@ std::vector<PointX> singleCenter(const std::vector<PointX> &edge, int side,
                                 : -static_cast<int>(width / 2.0f);
     center.reserve(edge.size());
     for (const auto &point : edge)
-        center.emplace_back(point.x, point.y + offset);
+        center.emplace_back(point.x, std::clamp(point.y + offset, 0, 319));
     return center;
 }
 }
 
 PerceptionGeometryResult buildPerceptionGeometry(
     const Track &track,
-    const LaneWidthModel &laneWidthModel,
+    const PlannedLaneWidthModel &laneWidthModel,
     const Config &config)
 {
     PerceptionGeometryResult result;
     const auto &quality = track.quality;
-    const float width = laneWidthModel.ready ? laneWidthModel.nominalWidth : 96.0f;
+    const float width = laneWidthModel.ready ? laneWidthModel.fallbackWidth : 96.0f;
     if (quality.leftReliable && quality.rightReliable)
     {
         result.centerLine = dualCenter(track.pointsEdgeLeft, track.pointsEdgeRight);
         result.recoveryMode = quality.valid
-            ? PerceptionRecoveryKind::STRICT_DUAL
-            : PerceptionRecoveryKind::RELAXED_DUAL;
+            ? LaneRecoveryMode::STRICT_DUAL
+            : LaneRecoveryMode::RELAXED_DUAL;
+        result.widthConsistent = quality.widthVariation <= 0.30f;
     }
     else if (quality.leftSingleUsable)
     {
         result.centerLine = singleCenter(track.pointsEdgeLeft, -1, width);
         result.singleSide = -1;
-        result.recoveryMode = PerceptionRecoveryKind::LEFT_SINGLE;
+        result.recoveryMode = LaneRecoveryMode::LEFT_SINGLE;
     }
     else if (quality.rightSingleUsable)
     {
         result.centerLine = singleCenter(track.pointsEdgeRight, 1, width);
         result.singleSide = 1;
-        result.recoveryMode = PerceptionRecoveryKind::RIGHT_SINGLE;
+        result.recoveryMode = LaneRecoveryMode::RIGHT_SINGLE;
     }
     else if (!track.pointsEdgeLeft.empty() && !track.pointsEdgeRight.empty())
     {
         result.centerLine = dualCenter(track.pointsEdgeLeft, track.pointsEdgeRight);
-        result.recoveryMode = PerceptionRecoveryKind::WEAK_HYBRID;
+        result.recoveryMode = LaneRecoveryMode::WEAK_HYBRID;
     }
     result.nearSamples = static_cast<int>(std::count_if(
         result.centerLine.begin(), result.centerLine.end(),
@@ -79,8 +80,15 @@ PerceptionGeometryResult buildPerceptionGeometry(
     result.farSamples = static_cast<int>(std::count_if(
         result.centerLine.begin(), result.centerLine.end(),
         [](const PointX &point) { return point.x < 176; }));
+    const bool continuous = std::adjacent_find(
+        result.centerLine.begin(), result.centerLine.end(),
+        [](const PointX &left, const PointX &right) {
+            return std::abs(left.y - right.y) > 45;
+        }) == result.centerLine.end();
     result.candidateValid = result.centerLine.size() >=
         static_cast<std::size_t>(std::max(8, config.singleLaneInteriorPointsMin)) &&
-        result.nearSamples >= 4;
+        result.nearSamples >= 4 && continuous &&
+        (result.recoveryMode != LaneRecoveryMode::STRICT_DUAL ||
+         result.widthConsistent);
     return result;
 }

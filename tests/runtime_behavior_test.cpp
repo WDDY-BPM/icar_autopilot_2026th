@@ -17,6 +17,7 @@
 #include "test_check.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -93,8 +94,9 @@ int main()
         auto stations = selectParkStations(detections);
         CHECK(stations.size() == 2);
         CHECK(stations[0].score == 0.9f && stations[1].score == 0.7f);
-        const auto planned = ParkPathPlanner::fromEdges(
-            PathSource::PARK, {{220, 100}}, {{220, 220}}, 0.7f, 0.18f, 2);
+        PathOverride planned;
+        planned.setEdges(PathSource::PARK, {{220, 100}}, {{220, 220}},
+                         0.7f, 0.18f, 2);
         CHECK(planned.hasValidGeometry() && planned.source == PathSource::PARK);
         const Config config;
         const auto leftTurn = ParkPathPlanner::buildParkingTurn(true, config);
@@ -106,7 +108,7 @@ int main()
               rightTurn.leftEdge.back().y == 319);
         const auto guide = ParkPathPlanner::buildTrackGuide(
             {220, 160}, PredictResult{LABEL_FORK, "", 0.9f, 120, 90, 20, 20},
-            true, config);
+            40, config);
         CHECK(guide.freshnessMode == PathFreshnessMode::TIME_TTL);
         CHECK(guide.validForTime == std::chrono::milliseconds(150));
         const auto inSpot = ParkPathPlanner::buildInSpotStraight(config);
@@ -114,6 +116,32 @@ int main()
         CHECK(plannedGeometry.source == PathSource::PARK);
         CHECK(plannedGeometry.valid && !plannedGeometry.centerLine.empty());
         CHECK(!buildPlannedGeometry(inSpot, FsmMode::NORMAL).valid);
+
+        PathOverride rowAligned;
+        std::vector<PointX> leftEdge;
+        std::vector<PointX> rightEdge;
+        for (int index = 0; index < 24; ++index)
+        {
+            const int row = 230 - index * 2;
+            leftEdge.emplace_back(row, 70 + index);
+            rightEdge.emplace_back(row, 250 + index);
+        }
+        rightEdge.erase(rightEdge.begin() + 2);
+        std::reverse(rightEdge.begin(), rightEdge.end());
+        rowAligned.setEdges(PathSource::PARK, leftEdge, rightEdge,
+                            0.8f, 0.15f, 2);
+        const auto aligned = buildPlannedGeometry(rowAligned, FsmMode::PARK);
+        CHECK(aligned.valid);
+        CHECK(aligned.centerLine.front().x == 230);
+        CHECK(aligned.centerLine.front().y == 160);
+        CHECK(std::any_of(aligned.centerLine.begin(), aligned.centerLine.end(),
+                          [](const PointX &point) { return point.x == 220; }));
+
+        PathOverride invalidGap;
+        leftEdge.erase(leftEdge.begin() + 1, leftEdge.begin() + 4);
+        invalidGap.setEdges(PathSource::PARK, leftEdge, rightEdge,
+                            0.8f, 0.15f, 2);
+        CHECK(!buildPlannedGeometry(invalidGap, FsmMode::PARK).valid);
     }
     {
         control_algorithms::StopReasonState reasons;
@@ -237,10 +265,16 @@ int main()
         CHECK(!overridePath.active());
         overridePath.setCenterLineForTime(
             PathSource::PARK, {{230, 160}, {220, 161}},
-            std::chrono::milliseconds(20));
+            std::chrono::milliseconds(50));
         CHECK(overridePath.freshnessMode == PathFreshnessMode::TIME_TTL);
         CHECK(overridePath.hasValidGeometry());
-        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        for (uint64_t frame = 103; frame < 110; ++frame)
+        {
+            overridePath.tick(frame);
+            CHECK(overridePath.hasValidGeometry());
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(55));
+        overridePath.tick(110);
         CHECK(!overridePath.hasValidGeometry());
 
         overridePath.setEdges(PathSource::FORK, {{1, 20}}, {{1, 80}});

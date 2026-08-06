@@ -72,34 +72,6 @@ bool Center::laneWidthProfileReady() const
     return laneWidthObservationFrames >= 10 && readyRows >= 40;
 }
 
-vector<PointX> Center::buildDegradedLaneCenter(const vector<PointX> &left,
-                                               const vector<PointX> &right)
-{
-    return control_algorithms::buildDegradedLaneCenter(
-        left, right, laneWidthProfile, ROWSIMAGE, COLSIMAGE);
-}
-
-bool Center::laneWidthConsistent(const vector<PointX> &left,
-                                 const vector<PointX> &right) const
-{
-    if (!laneWidthProfileReady()) return true;
-    std::array<int, ROWSIMAGE> leftByRow, rightByRow;
-    leftByRow.fill(-1); rightByRow.fill(-1);
-    for (const auto &point : left)
-        if (point.x >= 0 && point.x < ROWSIMAGE) leftByRow[point.x] = point.y;
-    for (const auto &point : right)
-        if (point.x >= 0 && point.x < ROWSIMAGE) rightByRow[point.x] = point.y;
-    vector<float> errors;
-    for (int row = 0; row < ROWSIMAGE; ++row)
-        if (leftByRow[row] >= 0 && rightByRow[row] > leftByRow[row] &&
-            laneWidthProfile[row] > 1.0f)
-            errors.push_back(std::abs((rightByRow[row] - leftByRow[row]) -
-                laneWidthProfile[row]) / laneWidthProfile[row]);
-    if (errors.size() < 12) return false;
-    std::nth_element(errors.begin(), errors.begin() + errors.size() / 2, errors.end());
-    return errors[errors.size() / 2] <= 0.35f;
-}
-
 void Center::fitting(shared_ptr<Params> &params)
 {
 
@@ -113,9 +85,7 @@ void Center::fitting(shared_ptr<Params> &params)
     const bool visionLaneMode = selectedSource ==
         ControlGeometrySource::PERCEPTION;
     const auto &laneQuality = params->track->quality;
-    const vector<PointX> detectedLeft = params->track->pointsEdgeLeft;
-    const vector<PointX> detectedRight = params->track->pointsEdgeRight;
-    LaneWidthModel laneWidthModel;
+    PlannedLaneWidthModel laneWidthModel;
     laneWidthModel.ready = laneWidthProfileReady();
     if (laneWidthModel.ready)
     {
@@ -124,140 +94,32 @@ void Center::fitting(shared_ptr<Params> &params)
         for (int row = 0; row < ROWSIMAGE; ++row)
             if (laneWidthSamples[row] >= 3 && laneWidthProfile[row] > 1.0f)
             {
+                laneWidthModel.widthByRow[row] = laneWidthProfile[row];
                 widthSum += laneWidthProfile[row];
                 ++widthCount;
             }
         if (widthCount > 0)
-            laneWidthModel.nominalWidth = widthSum / widthCount;
+            laneWidthModel.fallbackWidth = widthSum / widthCount;
     }
     const PerceptionGeometryResult perceptionGeometry =
         buildPerceptionGeometry(*params->track, laneWidthModel, params->config);
     if (visionLaneMode)
     {
-        if (laneQuality.leftReliable && laneQuality.rightReliable)
-        {
-            singleSide = 0;
-            selectedRecoverySide = 0;
-            const bool relaxedGeometry = laneQuality.commonRows >= 20 &&
-                laneQuality.coversBottom && laneQuality.edgeJump <= 30.0f &&
-                laneQuality.widthVariation <= 0.30f && laneQuality.centerJump <= 45.0f &&
-                laneWidthConsistent(detectedLeft, detectedRight);
-            recoveryMode = laneQuality.valid ? LaneRecoveryMode::STRICT_DUAL :
-                (relaxedGeometry ? LaneRecoveryMode::RELAXED_DUAL : LaneRecoveryMode::INVALID);
-        }
-        else if (laneQuality.leftReliable)
-        {
-            singleSide = -1;
-            selectedRecoverySide = -1;
-            recoveryMode = LaneRecoveryMode::LEFT_SINGLE;
-        }
-        else if (laneQuality.rightReliable)
-        {
-            singleSide = 1;
-            selectedRecoverySide = 1;
-            recoveryMode = LaneRecoveryMode::RIGHT_SINGLE;
-        }
-        else if (laneQuality.leftSingleUsable && laneQuality.rightSingleUsable)
-            recoveryMode = LaneRecoveryMode::WEAK_HYBRID;
-        else if (laneQuality.leftSingleUsable != laneQuality.rightSingleUsable)
-        {
-            singleSide = laneQuality.leftSingleUsable ? -1 : 1;
-            selectedRecoverySide = singleSide;
-            recoveryMode = singleSide < 0 ? LaneRecoveryMode::LEFT_SINGLE :
-                                            LaneRecoveryMode::RIGHT_SINGLE;
-        }
-        if (recoveryMode == LaneRecoveryMode::INVALID)
-            selectedRecoverySide = 0;
-    }
-    if (visionLaneMode)
-    {
-        params->ctrl.centerEdge.clear();
-        const auto interiorOnly = [](const vector<PointX> &edge) {
-            vector<PointX> interior;
-            std::copy_if(edge.begin(), edge.end(), std::back_inserter(interior),
-                [](const PointX &point) {
-                    return point.y > 2 && point.y < COLSIMAGE - 3;
-                });
-            return interior;
-        };
-        const auto nearSampleCount = [](const vector<PointX> &centerline) {
-            return static_cast<int>(std::count_if(centerline.begin(), centerline.end(),
-                [](const PointX &point) { return point.x >= 176 && point.x <= 220; }));
-        };
-        const auto singleCandidateScore = [](const vector<PointX> &centerline) {
-            const auto windows = control_algorithms::calculateLaneControlCenters(
-                centerline, COLSIMAGE / 2.0f, 0.65f, 8, false);
-            const bool continuous = std::adjacent_find(
-                centerline.begin(), centerline.end(),
-                [](const PointX &a, const PointX &b) {
-                    return std::abs(a.y - b.y) > 45;
-                }) == centerline.end();
-            if (!windows.nearValid || !continuous)
-                return -1;
-            return windows.nearSamples * 100 + windows.farSamples * 10 +
-                std::min(static_cast<int>(centerline.size()), 99);
-        };
-        if (recoveryMode == LaneRecoveryMode::STRICT_DUAL ||
-            recoveryMode == LaneRecoveryMode::RELAXED_DUAL)
-            params->ctrl.centerEdge = buildRowAlignedCenter(
-                detectedLeft, detectedRight, false);
-        else if (recoveryMode == LaneRecoveryMode::LEFT_SINGLE)
-            params->ctrl.centerEdge = centerCompute(interiorOnly(detectedLeft), 0);
-        else if (recoveryMode == LaneRecoveryMode::RIGHT_SINGLE)
-            params->ctrl.centerEdge = centerCompute(interiorOnly(detectedRight), 1);
-        else if (recoveryMode == LaneRecoveryMode::WEAK_HYBRID)
-        {
-            params->ctrl.centerEdge = buildDegradedLaneCenter(detectedLeft, detectedRight);
-            if (params->ctrl.centerEdge.size() < 12 ||
-                nearSampleCount(params->ctrl.centerEdge) < 8)
-            {
-                const vector<PointX> leftCandidate = centerCompute(interiorOnly(detectedLeft), 0);
-                const vector<PointX> rightCandidate = centerCompute(interiorOnly(detectedRight), 1);
-                const int leftScore = singleCandidateScore(leftCandidate);
-                const int rightScore = singleCandidateScore(rightCandidate);
-                const bool heldCandidateValid = selectedRecoverySide < 0
-                    ? leftScore >= 0 : selectedRecoverySide > 0 && rightScore >= 0;
-                if (recoverySideHoldFrames <= 0 || selectedRecoverySide == 0 ||
-                    !heldCandidateValid)
-                {
-                    if (leftScore != rightScore)
-                        selectedRecoverySide = leftScore > rightScore ? -1 : 1;
-                    else if (laneQuality.leftInteriorPoints != laneQuality.rightInteriorPoints)
-                        selectedRecoverySide = laneQuality.leftInteriorPoints >
-                            laneQuality.rightInteriorPoints ? -1 : 1;
-                    else
-                        selectedRecoverySide = laneQuality.leftBorderRatio <=
-                            laneQuality.rightBorderRatio ? -1 : 1;
-                    recoverySideHoldFrames = 3;
-                }
-                else
-                    recoverySideHoldFrames--;
-                params->ctrl.centerEdge = selectedRecoverySide < 0
-                    ? leftCandidate : rightCandidate;
-                singleSide = selectedRecoverySide;
-            }
-            else
-            {
-                selectedRecoverySide = 0;
-                recoverySideHoldFrames = 0;
-            }
-        }
+        params->ctrl.centerEdge = perceptionGeometry.centerLine;
+        recoveryMode = perceptionGeometry.recoveryMode;
+        singleSide = perceptionGeometry.singleSide;
+        selectedRecoverySide = perceptionGeometry.singleSide;
+        style = "PERCEPTION";
     }
     else if (plannedPath)
     {
         const PlannedGeometryResult planned = buildPlannedGeometry(
-            params->pathOverride, params->mode);
+            params->pathOverride, params->mode, laneWidthModel);
         params->ctrl.centerEdge = planned.centerLine;
         plannedValidation = planned.validation;
         recoveryMode = planned.valid ? LaneRecoveryMode::STRICT_DUAL
                                      : LaneRecoveryMode::INVALID;
         style = pathSourceName(planned.source);
-    }
-    if (visionLaneMode && params->ctrl.centerEdge.empty() &&
-        perceptionGeometry.candidateValid)
-    {
-        params->ctrl.centerEdge = perceptionGeometry.centerLine;
-        singleSide = perceptionGeometry.singleSide;
     }
     usableCenterRows = static_cast<int>(params->ctrl.centerEdge.size());
 
@@ -343,7 +205,6 @@ void Center::fitting(shared_ptr<Params> &params)
     else
         sigmaCenter = 1000;
 
-    const bool strictLaneMode = visionLaneMode;
     // Two independently reliable, bottom-covering edges provide a usable
     // centerline even on a tight curve. Aggregate quality.valid also contains
     // straight-road temporal/width thresholds and must not reject that path.
@@ -384,8 +245,9 @@ void Center::fitting(shared_ptr<Params> &params)
             (strictValid || relaxedValid || weakHybridValid || singleValid) &&
             validateControlGeometry(params->ctrl.centerEdge, selectedSource,
                 params->geometryPolicy, PathSource::NONE, params->mode);
-    if (strictLaneMode && !plannedPath && !params->ctrl.parking &&
-        !params->manualTakeover)
+    const bool perceptionControlled = selectedSource ==
+        ControlGeometrySource::PERCEPTION;
+    if (perceptionControlled && !params->manualTakeover)
     {
         controlValid = control_algorithms::updateLaneRecovery(
             laneRecoveryState, candidateValid, 5);

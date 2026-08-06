@@ -23,6 +23,14 @@
 
 #include "utils/params.hpp"
 
+enum class ObstaclePlanningResult
+{
+  NO_FRESH_RESULT,
+  NOT_APPLICABLE,
+  VALID_PLAN,
+  BLOCKED_WITHOUT_SAFE_PLAN
+};
+
 /**
  * @brief 全局障碍物检测（锥桶/行人）
  *
@@ -37,6 +45,8 @@ public:
   void resetLap();
 
   PredictResult resultObs;  // 当前避障目标（用于显示）
+  ObstaclePlanningResult planningResult{
+      ObstaclePlanningResult::NO_FRESH_RESULT};
 
 private:
   std::shared_ptr<Params> params;

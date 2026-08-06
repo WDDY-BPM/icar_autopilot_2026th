@@ -63,7 +63,8 @@ private:
     Step step = Step::NONE;      // Y型岔路口处理阶段
     bool selectLeft = false;     // 选择左侧路径
     bool forkSeen = false;       // 已看到fork标志（消失后开始找V尖）
-    int previousExitEdgeColumn = 0;
+    int exitBaselineColumn = 0;
+    int exitCandidateColumn = 0;
     int exitJumpConfirmations = 0;
     int tipRow = 0;             // V尖行位置
     int tipCol = 0;             // V尖列位置

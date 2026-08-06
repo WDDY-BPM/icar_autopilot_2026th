@@ -3,8 +3,9 @@
 #include <vector>
 #include "config/config.hpp"
 #include "ctrl/track.hpp"
+#include "ctrl/planned_geometry_builder.hpp"
 
-enum class PerceptionRecoveryKind
+enum class LaneRecoveryMode
 {
     INVALID,
     STRICT_DUAL,
@@ -14,23 +15,18 @@ enum class PerceptionRecoveryKind
     RIGHT_SINGLE
 };
 
-struct LaneWidthModel
-{
-    bool ready{false};
-    float nominalWidth{96.0f};
-};
-
 struct PerceptionGeometryResult
 {
     std::vector<PointX> centerLine;
-    PerceptionRecoveryKind recoveryMode{PerceptionRecoveryKind::INVALID};
+    LaneRecoveryMode recoveryMode{LaneRecoveryMode::INVALID};
     bool candidateValid{false};
     int singleSide{0};
     int nearSamples{0};
     int farSamples{0};
+    bool widthConsistent{false};
 };
 
 PerceptionGeometryResult buildPerceptionGeometry(
     const Track &track,
-    const LaneWidthModel &laneWidthModel,
+    const PlannedLaneWidthModel &laneWidthModel,
     const Config &config);

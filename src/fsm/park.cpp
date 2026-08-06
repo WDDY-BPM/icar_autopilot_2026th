@@ -119,6 +119,55 @@ void FsmPark::dispatchStage(const ParkObservation &observation,
 {
     switch (state.stage)
     {
+    case Step::NONE: handleNone(observation, now); break;
+    case Step::ENABLE: handleEnable(observation, now); break;
+    case Step::FORKIN: handleForkIn(observation, now); break;
+    case Step::TRACKIN: handleTrackIn(observation, now); break;
+    case Step::ENTER: handleEnter(observation, now); break;
+    case Step::PARKING: handleParking(observation, now); break;
+    case Step::WAIT_PICKUP: handleWaitPickup(observation, now); break;
+    case Step::EXIT: handleExit(observation, now); break;
+    case Step::TRACKOUT: handleTrackOut(observation, now); break;
+    case Step::FORKOUT: handleForkOut(observation, now); break;
+    }
+}
+
+void FsmPark::handleNone(const ParkObservation &observation,
+                         std::chrono::steady_clock::time_point now)
+{ dispatchStageLegacy(observation, now); }
+void FsmPark::handleEnable(const ParkObservation &observation,
+                           std::chrono::steady_clock::time_point now)
+{ dispatchStageLegacy(observation, now); }
+void FsmPark::handleForkIn(const ParkObservation &observation,
+                           std::chrono::steady_clock::time_point now)
+{ dispatchStageLegacy(observation, now); }
+void FsmPark::handleTrackIn(const ParkObservation &observation,
+                            std::chrono::steady_clock::time_point now)
+{ dispatchStageLegacy(observation, now); }
+void FsmPark::handleEnter(const ParkObservation &observation,
+                          std::chrono::steady_clock::time_point now)
+{ dispatchStageLegacy(observation, now); }
+void FsmPark::handleParking(const ParkObservation &observation,
+                            std::chrono::steady_clock::time_point now)
+{ dispatchStageLegacy(observation, now); }
+void FsmPark::handleWaitPickup(const ParkObservation &observation,
+                               std::chrono::steady_clock::time_point now)
+{ dispatchStageLegacy(observation, now); }
+void FsmPark::handleExit(const ParkObservation &observation,
+                         std::chrono::steady_clock::time_point now)
+{ dispatchStageLegacy(observation, now); }
+void FsmPark::handleTrackOut(const ParkObservation &observation,
+                             std::chrono::steady_clock::time_point now)
+{ dispatchStageLegacy(observation, now); }
+void FsmPark::handleForkOut(const ParkObservation &observation,
+                            std::chrono::steady_clock::time_point now)
+{ dispatchStageLegacy(observation, now); }
+
+void FsmPark::dispatchStageLegacy(const ParkObservation &observation,
+                                  std::chrono::steady_clock::time_point now)
+{
+    switch (state.stage)
+    {
     case Step::NONE: // AI未识别
     {
         if (!params->aiResultFresh)
@@ -162,6 +211,8 @@ void FsmPark::dispatchStage(const ParkObservation &observation,
         if (state.stageControlFrames > 80) // 超时退出停车状态
             reset();      // 停车场数据复位
 
+        if (state.stage == Step::NONE)
+            return;
         if (params->aiResultFresh)
         {
             state.aiMissingFrames++;
@@ -294,7 +345,7 @@ void FsmPark::dispatchStage(const ParkObservation &observation,
                 countIn++;
             }
             params->pathOverride = ParkPathPlanner::buildTrackGuide(
-                start, direction, rightSide, params->config);
+                start, direction, rightSide ? 40 : -40, params->config);
             state.stageControlFrames = 0;                                          // 超时计数
             state.aiEvidenceFrames = 0;
 
@@ -512,10 +563,8 @@ void FsmPark::dispatchStage(const ParkObservation &observation,
             else
                 direction = spots.forks[0];
             PointX start = PointX(ROWSIMAGE - 20, COLSIMAGE / 2);                // 补线起点：车头
-            const int targetSpot = params->config.currentLapConfig->parkSpot;
-            const bool rightSide = targetSpot == 3 || targetSpot == 4;
             params->pathOverride = ParkPathPlanner::buildTrackGuide(
-                start, direction, rightSide, params->config);
+                start, direction, 0, params->config);
             if (params->aiResultFresh && spots.forks.size() > 0)
                 state.stageControlFrames = 0; // 定时入库关闭 | 仅依靠AI标志转向
 
@@ -673,6 +722,13 @@ void FsmPark::reset()
 {
     params->clearPathOverride(PathSource::PARK);
     params->releasePlannerSafety(PathSource::PARK);
+    state = ParkStateData{};
+    spots.reset();
+    pointsEdgeLeftPast.clear();
+    pointsEdgeRightPast.clear();
+    stopping = false;
+    params->setStopReason(control_algorithms::StopReason::PARK, false);
+    params->geometryPolicy = GeometryPolicy::PERCEPTION_ALLOWED;
     state.aiMissingFrames = 0;      // AI场景识别计数器
     state.stageControlFrames = 0;       // 超时计数器
     state.stage = Step::NONE; // 停车步骤

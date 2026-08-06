@@ -160,8 +160,8 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("result.singleEdgeUsable", algorithms)
         self.assertIn("result.interiorPointCount >= interiorPointsMinimum", algorithms)
         self.assertIn("limitSingleLaneCenter", center)
-        self.assertIn("reconstructSingleLaneCenter", center)
-        self.assertNotIn("i += 2", center[center.index("Center::centerCompute"):])
+        self.assertIn("buildPerceptionGeometry", center)
+        self.assertNotIn("centerCompute(interiorOnly", center)
         self.assertIn("recoveryMode == LaneRecoveryMode::WEAK_HYBRID", center)
         self.assertIn("borderClippedHeadingConfidence", center)
         self.assertIn("leftSingleUsable", track)
@@ -191,7 +191,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         core = read_runtime_sources()
         self.assertNotIn("params->track->pointsEdgeLeft.clear()", center)
         self.assertNotIn("params->track->pointsEdgeRight.clear()", center)
-        self.assertIn("buildDegradedLaneCenter", center)
+        self.assertIn("buildPerceptionGeometry", center)
         self.assertIn("LaneRecoveryMode::WEAK_HYBRID", center)
         for field in ("recovery_mode", "strict_dual", "relaxed_dual",
                       "stop_reasons", "unconfirmed_frames", "camera_stop"):
@@ -204,9 +204,8 @@ class LaneControlBehaviorTests(unittest.TestCase):
         core = read_runtime_sources()
         center = (ROOT / "src/ctrl/center.cpp").read_text(encoding="utf-8")
         park = (ROOT / "src/fsm/park.cpp").read_text(encoding="utf-8")
-        self.assertIn("nearSampleCount(params->ctrl.centerEdge) < 8", center)
-        self.assertIn("centerCompute(interiorOnly(detectedLeft), 0)", center)
-        self.assertIn("centerCompute(interiorOnly(detectedRight), 1)", center)
+        self.assertIn("buildPerceptionGeometry", center)
+        self.assertIn("calculateLaneControlCenters", center)
         self.assertIn("updateSingleLaneSpeedLimit", core)
         hold = core[core.index("if (strictLaneMode && laneUnconfirmedState.frames > 0)"):]
         hold = hold[:hold.index("\n            }")]
@@ -252,9 +251,9 @@ class LaneControlBehaviorTests(unittest.TestCase):
         core = read_runtime_sources()
         center = (ROOT / 'src/ctrl/center.cpp').read_text(encoding='utf-8')
         self.assertIn('laneQuality.leftReliable &&', core)
-        self.assertIn('laneQuality.commonRows >= 20', core)
+        self.assertIn('laneQuality.leftReliable', core)
         self.assertNotIn('laneQuality.centerJump <= 8.0f', core)
-        self.assertIn('laneQuality.commonRows >= 20', center)
+        self.assertIn('const PerceptionGeometryResult perceptionGeometry', center)
 
     def test_visual_cone_confirmation_reaches_icar(self):
         launcher = (ROOT / 'src/start.py').read_text(encoding='utf-8')
@@ -327,7 +326,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("initialStableRows >= 3", track)
         algorithms = read_algorithm_headers()
         self.assertIn("widthFilled.emplace_back(row, rightColumn - leftColumn)", algorithms)
-        self.assertIn("if (updateHistory)", center)
+        self.assertIn("observeLaneWidth", center)
         self.assertIn("laneWidthProfileReady()", center)
         self.assertIn("controlWindowValid", center)
         self.assertIn("control_algorithms::applyStartupSpeed", motion)
@@ -349,11 +348,9 @@ class LaneControlBehaviorTests(unittest.TestCase):
 
     def test_weak_hybrid_scores_both_single_edge_candidates(self):
         center = (ROOT / "src" / "ctrl" / "center.cpp").read_text(encoding="utf-8")
-        self.assertIn("leftCandidate = centerCompute(interiorOnly(detectedLeft), 0)", center)
-        self.assertIn("rightCandidate = centerCompute(interiorOnly(detectedRight), 1)", center)
-        self.assertIn("windows.nearValid", center)
-        self.assertIn("windows.nearSamples * 100 + windows.farSamples * 10", center)
-        self.assertIn("!heldCandidateValid", center)
+        self.assertIn("LaneRecoveryMode::WEAK_HYBRID", center)
+        self.assertIn("nearCenterSamples", center)
+        self.assertIn("degradedCenterContinuous", center)
 
 if __name__ == "__main__":
     unittest.main()

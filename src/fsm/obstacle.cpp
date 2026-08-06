@@ -1,4 +1,5 @@
 #include "fsm/obstacle.hpp"
+#include "ctrl/planned_geometry_builder.hpp"
 #include "utils/tools.hpp"
 
 FsmObstacle::FsmObstacle(std::shared_ptr<Params> par) : params(par) {}
@@ -8,9 +9,19 @@ void FsmObstacle::run(Mat &img)
 {
     (void)img;
     resultObs = PredictResult();
+    planningResult = ObstaclePlanningResult::NO_FRESH_RESULT;
+    params->ctrl.obstacleSlow = false;
+    const auto markNotApplicable = [&]() {
+        planningResult = ObstaclePlanningResult::NOT_APPLICABLE;
+        params->clearPathOverride(PathSource::OBSTACLE);
+        params->releasePlannerSafety(PathSource::OBSTACLE);
+    };
     if (params->pathOverride.active() &&
         params->pathOverride.source != PathSource::OBSTACLE)
+    {
+        markNotApplicable();
         return;
+    }
     params->clearPathOverride(PathSource::OBSTACLE);
     if (!params->aiResultFresh)
         return;
@@ -19,7 +30,10 @@ void FsmObstacle::run(Mat &img)
     const auto &trackRight = params->track->pointsEdgeRight;
     if (trackLeft.size() < ROWSIMAGE / 2 ||
         trackRight.size() < ROWSIMAGE / 2)
+    {
+        markNotApplicable();
         return;
+    }
 
     vector<PredictResult> obstacles;
     for (const auto &result : params->results)
@@ -32,7 +46,7 @@ void FsmObstacle::run(Mat &img)
     }
     if (obstacles.empty())
     {
-        params->releasePlannerSafety(PathSource::OBSTACLE);
+        markNotApplicable();
         return;
     }
 
@@ -58,7 +72,10 @@ void FsmObstacle::run(Mat &img)
     const int leftColumn = trackLeft[row].y;
     const int rightColumn = trackRight[row].y;
     if (obstacleRight <= leftColumn || rightColumn <= resultObs.x)
+    {
+        markNotApplicable();
         return;
+    }
 
     vector<PointX> left = trackLeft;
     vector<PointX> right = trackRight;
@@ -107,15 +124,30 @@ void FsmObstacle::run(Mat &img)
 
     left.resize(static_cast<size_t>(left.size() * 0.7));
     right.resize(static_cast<size_t>(right.size() * 0.7));
-    params->pathOverride.setEdges(
+    PathOverride candidate;
+    candidate.setEdges(
         PathSource::OBSTACLE, std::move(left), std::move(right),
         0.45f, std::min(params->config.velSlow, 0.15f), 1);
+    const PlannedGeometryResult geometry = buildPlannedGeometry(
+        candidate, params->mode);
+    if (!geometry.valid)
+    {
+        planningResult = ObstaclePlanningResult::BLOCKED_WITHOUT_SAFE_PLAN;
+        params->plannerSafety.reject(PathSource::OBSTACLE);
+        params->setStopReason(control_algorithms::StopReason::PLANNER, true);
+        params->ctrl.obstacleSlow = true;
+        return;
+    }
+    params->pathOverride = std::move(candidate);
+    planningResult = ObstaclePlanningResult::VALID_PLAN;
     params->ctrl.obstacleSlow = true;
 }
 
 void FsmObstacle::resetLap()
 {
     resultObs = PredictResult();
+    planningResult = ObstaclePlanningResult::NO_FRESH_RESULT;
+    params->ctrl.obstacleSlow = false;
     params->clearPathOverride(PathSource::OBSTACLE);
     params->releasePlannerSafety(PathSource::OBSTACLE);
 }

@@ -84,7 +84,7 @@ class RouteTaskInvariantTests(unittest.TestCase):
         algorithms = read_algorithm_headers()
         self.assertIn("rowGap > 1 && rowGap <= maxGapRows", algorithms)
         self.assertIn("evaluateQuality();", track)
-        self.assertIn("buildRowAlignedCenter", center)
+        self.assertIn("buildPerceptionGeometry", center)
         self.assertIn("laneWidthProfile[row]", center)
         self.assertIn("laneWidthProfileReady()", center)
         self.assertIn("laneUnconfirmedState.frames > 0", core)
@@ -208,7 +208,8 @@ class RouteTaskInvariantTests(unittest.TestCase):
     def test_passenger_wait_states_stop_the_vehicle(self):
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
         station = (ROOT / "src" / "fsm" / "station.cpp").read_text(encoding="utf-8")
-        pickup = re.search(r"case Step::WAIT_PICKUP:.*?break;", park, re.DOTALL)
+        legacy = park[park.index("void FsmPark::dispatchStageLegacy") :]
+        pickup = re.search(r"case Step::WAIT_PICKUP:.*?break;", legacy, re.DOTALL)
         self.assertIsNotNone(pickup)
         self.assertIn("StopReason::PARK, true", pickup.group(0))
         self.assertIn("std::chrono::seconds(3)", pickup.group(0))
@@ -284,14 +285,16 @@ class RouteTaskInvariantTests(unittest.TestCase):
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
         self.assertIn("busyConfirmation, params->aiResultFresh, busyDetected", busy)
-        park_none = re.search(r"case Step::NONE:.*?break;", park, re.DOTALL)
+        legacy = park[park.index("void FsmPark::dispatchStageLegacy") :]
+        park_none = re.search(r"case Step::NONE:.*?break;", legacy, re.DOTALL)
         self.assertIsNotNone(park_none)
         self.assertIn("if (!params->aiResultFresh)", park_none.group(0))
     def test_park_internal_ai_evidence_and_exit_timeouts(self):
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
-        enable = re.search(r"case Step::ENABLE:.*?case Step::FORKIN:", park, re.DOTALL)
-        forkin = re.search(r"case Step::FORKIN:.*?case Step::TRACKIN:", park, re.DOTALL)
+        legacy = park[park.index("void FsmPark::dispatchStageLegacy") :]
+        enable = re.search(r"case Step::ENABLE:.*?case Step::FORKIN:", legacy, re.DOTALL)
+        forkin = re.search(r"case Step::FORKIN:.*?case Step::TRACKIN:", legacy, re.DOTALL)
         self.assertIsNotNone(enable)
         self.assertIsNotNone(forkin)
         self.assertIn("if (params->aiResultFresh)", enable.group(0))
@@ -302,8 +305,8 @@ class RouteTaskInvariantTests(unittest.TestCase):
             encoding="utf-8")
         self.assertIn("std::chrono::seconds(2)", busy_state)
 
-        trackin = re.search(r"case Step::TRACKIN:.*?case Step::ENTER:", park, re.DOTALL)
-        trackout = re.search(r"case Step::TRACKOUT:.*?case Step::FORKOUT:", park, re.DOTALL)
+        trackin = re.search(r"case Step::TRACKIN:.*?case Step::ENTER:", legacy, re.DOTALL)
+        trackout = re.search(r"case Step::TRACKOUT:.*?case Step::FORKOUT:", legacy, re.DOTALL)
         self.assertIsNotNone(trackin)
         self.assertIsNotNone(trackout)
         self.assertIn("params->aiResultFresh", trackin.group(0))

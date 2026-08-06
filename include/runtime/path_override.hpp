@@ -155,14 +155,16 @@ struct PathOverride
     void tick(uint64_t currentFrameId)
     {
         observedFrameId = currentFrameId;
-        if (freshnessMode == PathFreshnessMode::TIME_TTL &&
-            std::chrono::steady_clock::now() - generatedAt >= validForTime)
+        if (!hasGeometry())
+            return;
+        if (freshnessMode == PathFreshnessMode::TIME_TTL)
         {
-            clear();
+            if (generatedAt.time_since_epoch().count() == 0 ||
+                validForTime <= std::chrono::milliseconds(0) ||
+                std::chrono::steady_clock::now() - generatedAt >= validForTime)
+                clear();
             return;
         }
-        if (!active())
-            return;
         if (generatedFrameId == 0)
         {
             generatedFrameId = currentFrameId;
@@ -180,10 +182,13 @@ struct PathOverride
     bool hasGeometry() const { return hasLeft() || hasRight() || hasCenter(); }
     bool hasValidGeometry() const
     {
-        const bool timeValid = freshnessMode != PathFreshnessMode::TIME_TTL ||
-            (std::chrono::steady_clock::now() - generatedAt < validForTime);
-        return source != PathSource::NONE && ttlFrames > 0 && hasGeometry() &&
-               timeValid;
+        if (source == PathSource::NONE || !hasGeometry())
+            return false;
+        if (freshnessMode == PathFreshnessMode::TIME_TTL)
+            return generatedAt.time_since_epoch().count() != 0 &&
+                validForTime > std::chrono::milliseconds(0) &&
+                std::chrono::steady_clock::now() - generatedAt < validForTime;
+        return ttlFrames > 0;
     }
     bool active() const { return hasValidGeometry(); }
 
