@@ -80,13 +80,21 @@ void FsmPark::run(Mat &img)
         params->setStopReason(control_algorithms::StopReason::PARK_GATE, false);
         params->setStopReason(
             control_algorithms::StopReason::PARK_TARGET_LOST, false);
+        params->setStopReason(
+            control_algorithms::StopReason::PARK_ENTER_UNCONFIRMED, false);
+        params->setStopReason(
+            control_algorithms::StopReason::PARK_EXIT_UNCONFIRMED, false);
         return;
     }
     if (params->mustStopExcept(control_algorithms::StopReason::PLANNER) &&
         !params->hasStopReason(control_algorithms::StopReason::PARK) &&
         !params->hasStopReason(control_algorithms::StopReason::PARK_GATE) &&
         !params->hasStopReason(
-            control_algorithms::StopReason::PARK_TARGET_LOST))
+            control_algorithms::StopReason::PARK_TARGET_LOST) &&
+        !params->hasStopReason(
+            control_algorithms::StopReason::PARK_ENTER_UNCONFIRMED) &&
+        !params->hasStopReason(
+            control_algorithms::StopReason::PARK_EXIT_UNCONFIRMED))
         return;
 
     stopping = false; // 停车等待标志
@@ -138,6 +146,9 @@ void FsmPark::dispatchStage(const ParkObservation &observation,
     case Step::TARGET_LOST_STOP:
         handleTargetLostStop(observation, now);
         break;
+    case Step::ENTER_UNCONFIRMED_STOP:
+        handleEnterUnconfirmedStop(observation, now);
+        break;
     case Step::EXIT_UNCONFIRMED_STOP:
         handleExitUnconfirmedStop(observation, now);
         break;
@@ -148,6 +159,13 @@ void FsmPark::handleNone(const ParkObservation &observation,
                          std::chrono::steady_clock::time_point now)
 {
     (void)now;
+    // 本圈停车任务已完成（或圈任务已由其他场景完成）后，禁止同圈再次触发。
+    if (completedThisLap || params->lapTaskCompleted)
+    {
+        state.parkMarkerConfirmations = 0;
+        state.markerMissingFreshFrames = 0;
+        return;
+    }
     // 只有新AI帧才允许累计停车场标志证据；任何缺失的fresh帧立即清零，
     // 入口标志必须是严格连续的确认，避免非连续证据无限累计。
     if (!params->aiResultFresh)
@@ -248,7 +266,6 @@ void FsmPark::handleForkIn(const ParkObservation &observation,
                 spots.counter[i - 1] = 5; // counter > 4 即标记为已占用
         }
 
-        countOut = 0;
         setStep(Step::TRACKIN); // 设置停车场新步骤
         return;
     }
@@ -274,26 +291,36 @@ void FsmPark::handleTrackIn(const ParkObservation &observation,
         stopping = true; // 停车等待标志（仅显示）
         return;
     }
+
+    const int parkSpot = params->config.currentLapConfig->parkSpot;
+    const bool passThrough = parkSpot == 0;
+
+    // 道闸信息：目标车位任务只用于超时复位（禁止跳TRACKOUT，只能经
+    // ENTER→PARKING→WAIT_PICKUP→EXIT 后由handleExit进入TRACKOUT）。
+    // 穿过模式（parkSpot==0）额外累计专用通行证据。
     if (observation.hasGate)
     {
         const auto &gate = observation.gate;
         if (gate.width > 100 && gate.height < 130)
         {
-            // 出停车场检测
-            if (params->aiResultFresh &&
-                (gate.y + gate.height) > ROWSIMAGE * 0.25 &&
-                spots.checked) // 道闸距离估算
-            {
-                countOut++;
-                if (countOut > 4)
-                    setStep(Step::TRACKOUT); // 设置停车场新步骤
-
-                return;
-            }
             if (params->aiResultFresh)
             {
                 state.stageControlFrames = 0;
                 state.gateConfirmations = 0;
+            }
+            if (passThrough && params->aiResultFresh &&
+                (gate.y + gate.height) > ROWSIMAGE * 0.25)
+            {
+                state.gateApproachConfirmations++;
+                if (state.gateApproachConfirmations > 4)
+                {
+                    setStep(Step::TRACKOUT); // 设置停车场新步骤
+                    return;
+                }
+            }
+            else if (passThrough && params->aiResultFresh)
+            {
+                state.gateApproachConfirmations = 0;
             }
         }
     }
@@ -346,13 +373,6 @@ void FsmPark::handleTrackIn(const ParkObservation &observation,
             start, direction, rightSide ? 40 : -40, params->config);
         state.stageControlFrames = 0; // 超时计数
         state.gateConfirmations = 0;
-
-        // 出停车场检测
-        if (params->aiResultFresh && resLeft.score > 0 &&
-            (resLeft.y + resLeft.height / 2) > ROWSIMAGE * 0.2)
-            countOut++;
-        if (countOut > 3)
-            setStep(Step::TRACKOUT); // 设置停车场新步骤
     }
 
     //[03] 空闲车位检测
@@ -451,7 +471,9 @@ void FsmPark::handleEnter(const ParkObservation &observation,
                           std::chrono::steady_clock::time_point now)
 {
     (void)now;
+    (void)observation;
     state.stageControlFrames++;
+    int height = 0;
     if (state.stageControlFrames < 18) // 入库转向
     {
         if (spots.spotEnable[0] || spots.spotEnable[1])      // 1/2号车位（左侧）
@@ -462,7 +484,6 @@ void FsmPark::handleEnter(const ParkObservation &observation,
     else
     {
         // Track重新捕获正常车道线
-        int height = 0;
         if (params->track->pointsEdgeLeft.size() > COLSIMAGE / 2 && params->track->pointsEdgeRight.size() > COLSIMAGE / 2)
         {
             for (int i = 1; i <= 10; i++)
@@ -471,16 +492,6 @@ void FsmPark::handleEnter(const ParkObservation &observation,
                 height += params->track->pointsEdgeRight[params->track->pointsEdgeRight.size() - i].x;
             }
             height = height / 20;
-        }
-
-        if (height > ROWSIMAGE * 0.3) // 入库结束
-        {
-            spots.countRes++;
-            if (spots.countRes > 2)
-            {
-                setStep(Step::PARKING); // 停车完成
-                return;
-            }
         }
 
         // 入库直行
@@ -498,8 +509,30 @@ void FsmPark::handleEnter(const ParkObservation &observation,
         pointsEdgeRightPast.push_back(params->pathOverride.rightEdge);
     }
 
+    // 只有连续确认真实完成入库（车道捕获 + 合法PARK路径 + 无PLANNER锁存）
+    // 才能进入PARKING；超时不能被视为停车成功。
+    const bool pathValid = params->pathOverride.validFor(PathSource::PARK);
+    const bool noPlannerReject = !params->plannerSafety.latched ||
+        params->plannerSafety.rejectedSource != PathSource::PARK;
+    const bool laneCaptured = height > ROWSIMAGE * 0.3f;
+    const bool enteredConfirmed = laneCaptured && pathValid && noPlannerReject;
+    if (params->aiResultFresh || laneCaptured)
+    {
+        state.enterConfirmations =
+            enteredConfirmed ? state.enterConfirmations + 1 : 0;
+    }
+    if (state.enterConfirmations >= 3)
+    {
+        printf("[Park] Entry confirmed, entering PARKING\n");
+        setStep(Step::PARKING);
+        return;
+    }
     if (state.stageControlFrames > 30) // 转向超时
-        setStep(Step::PARKING); // 停车完成
+    {
+        printf("[Park] Entry not confirmed in time; safe stop, "
+               "mission stays ENTERING\n");
+        setStep(Step::ENTER_UNCONFIRMED_STOP);
+    }
 }
 
 void FsmPark::handleParking(const ParkObservation &observation,
@@ -650,7 +683,10 @@ void FsmPark::handleForkOut(const ParkObservation &observation,
         params->ctrl.countAcc = params->config.startupRampFrames; // 跳过缓加速，直接恢复速度
         params->ctrl.yforkReset = true; // 通知yfork复位，防止残留forkSeen误触发
         if (missionReady)
+        {
+            completedThisLap = true; // 本圈完成锁存：禁止同圈再次触发停车任务
             params->completeLapTask("park-exit");
+        }
         else
             printf("[Park] Exit confirmed without completed parking mission; "
                    "lap task remains incomplete\n");
@@ -682,13 +718,37 @@ void FsmPark::handleTargetLostStop(
         setStep(Step::TRACKIN);
 }
 
+void FsmPark::handleEnterUnconfirmedStop(
+    const ParkObservation &observation,
+    std::chrono::steady_clock::time_point now)
+{
+    (void)observation;
+    (void)now;
+    params->setStopReason(
+        control_algorithms::StopReason::PARK_ENTER_UNCONFIRMED, true);
+    // 恢复条件：连续确认车道信息后回到ENTER重新完成入库，不得直接进入PARKING。
+    if (params->aiResultFresh)
+    {
+        const bool laneUsable =
+            params->track->pointsEdgeLeft.size() > ROWSIMAGE / 2 &&
+            params->track->pointsEdgeRight.size() > ROWSIMAGE / 2;
+        state.enterRecoveryConfirmations =
+            laneUsable ? state.enterRecoveryConfirmations + 1 : 0;
+        if (state.enterRecoveryConfirmations >= 2)
+        {
+            printf("[Park] Entry lane recovered; resuming ENTER\n");
+            setStep(Step::ENTER);
+        }
+    }
+}
+
 void FsmPark::handleExitUnconfirmedStop(
     const ParkObservation &observation,
     std::chrono::steady_clock::time_point now)
 {
     (void)now;
     params->setStopReason(
-        control_algorithms::StopReason::PARK_TARGET_LOST, true);
+        control_algorithms::StopReason::PARK_EXIT_UNCONFIRMED, true);
     // 出口左转标志重新连续确认后恢复FORKOUT，继续出口确认流程。
     const bool leftSign = observation.hasLeft &&
         observation.bestLeft.width < 100 && observation.bestLeft.height < 120;
@@ -805,6 +865,9 @@ void FsmPark::show(Mat &img)
     case Step::TARGET_LOST_STOP:
         str = "Target lost stop";
         break;
+    case Step::ENTER_UNCONFIRMED_STOP:
+        str = "Enter unconfirmed stop";
+        break;
     case Step::EXIT_UNCONFIRMED_STOP:
         str = "Exit unconfirmed stop";
         break;
@@ -831,10 +894,13 @@ void FsmPark::reset()
     params->setStopReason(control_algorithms::StopReason::PARK_GATE, false);
     params->setStopReason(
         control_algorithms::StopReason::PARK_TARGET_LOST, false);
+    params->setStopReason(
+        control_algorithms::StopReason::PARK_ENTER_UNCONFIRMED, false);
+    params->setStopReason(
+        control_algorithms::StopReason::PARK_EXIT_UNCONFIRMED, false);
     params->geometryPolicy = GeometryPolicy::PERCEPTION_ALLOWED;
     waiting = false;   // 停车等待使能
     waitTimerActive = false;
-    countOut = 0;      // 出库检测计数
     countIn = 0;       // 入库矫正计数器
     params->ctrl.back = false;
     params->ctrl.parking = false;
@@ -847,45 +913,26 @@ void FsmPark::reset()
  */
 void FsmPark::setStep(Step st)
 {
+    const Step from = state.stage;
+    if (!canTransition(from, st))
+    {
+        printf("[Park] Rejected illegal transition %d -> %d\n",
+               static_cast<int>(from), static_cast<int>(st));
+        return;
+    }
     params->clearPathOverride(PathSource::PARK);
     state.parkMarkerConfirmations = 0;
     state.markerMissingFreshFrames = 0;
     state.choiceApproachConfirmations = 0;
     state.gateConfirmations = 0;
+    state.gateApproachConfirmations = 0;
     state.exitSignSeenConfirmations = 0;
     state.exitSignMissingConfirmations = 0;
+    state.enterConfirmations = 0;
+    state.enterRecoveryConfirmations = 0;
     state.stageControlFrames = 0;  // 超时计数器
     state.trackInControlFrames = 0;
-    // 任务进度只能沿真实完成的阶段推进，禁止跳过入库/停车/出库流程。
-    switch (st)
-    {
-    case Step::ENTER:
-        if (state.missionProgress ==
-            ParkStateData::ParkMissionProgress::NOT_STARTED)
-            state.missionProgress =
-                ParkStateData::ParkMissionProgress::ENTERING;
-        break;
-    case Step::PARKING:
-        if (state.missionProgress ==
-            ParkStateData::ParkMissionProgress::ENTERING)
-            state.missionProgress =
-                ParkStateData::ParkMissionProgress::PARKED;
-        break;
-    case Step::EXIT:
-        if (state.missionProgress ==
-            ParkStateData::ParkMissionProgress::PARKED)
-            state.missionProgress =
-                ParkStateData::ParkMissionProgress::PICKUP_COMPLETED;
-        break;
-    case Step::TRACKOUT:
-        if (state.missionProgress ==
-            ParkStateData::ParkMissionProgress::PICKUP_COMPLETED)
-            state.missionProgress =
-                ParkStateData::ParkMissionProgress::EXIT_REPLAY_COMPLETED;
-        break;
-    default:
-        break;
-    }
+    updateMissionProgressForTransition(from, st);
     if (st == Step::NONE)
         state.exitSignArmed = false;
     state.stage = st;    // 停车步骤
@@ -894,11 +941,18 @@ void FsmPark::setStep(Step st)
         st == Step::PARKING || st == Step::WAIT_PICKUP);
     params->setStopReason(control_algorithms::StopReason::PARK_GATE, false);
     params->setStopReason(control_algorithms::StopReason::PARK_TARGET_LOST,
-        st == Step::TARGET_LOST_STOP ||
+        st == Step::TARGET_LOST_STOP);
+    params->setStopReason(
+        control_algorithms::StopReason::PARK_ENTER_UNCONFIRMED,
+        st == Step::ENTER_UNCONFIRMED_STOP);
+    params->setStopReason(
+        control_algorithms::StopReason::PARK_EXIT_UNCONFIRMED,
         st == Step::EXIT_UNCONFIRMED_STOP);
     if (st == Step::NONE || st == Step::ENABLE ||
         st == Step::PARKING || st == Step::WAIT_PICKUP ||
-        st == Step::TARGET_LOST_STOP || st == Step::EXIT_UNCONFIRMED_STOP)
+        st == Step::TARGET_LOST_STOP ||
+        st == Step::ENTER_UNCONFIRMED_STOP ||
+        st == Step::EXIT_UNCONFIRMED_STOP)
         params->releasePlannerSafety(PathSource::PARK);
     if (st == Step::FORKOUT)
         state.forkOutStartedAt = std::chrono::steady_clock::now();
@@ -920,6 +974,7 @@ void FsmPark::updateGeometryPolicy()
     case Step::PARKING:
     case Step::WAIT_PICKUP:
     case Step::TARGET_LOST_STOP:
+    case Step::ENTER_UNCONFIRMED_STOP:
     case Step::EXIT_UNCONFIRMED_STOP:
         params->geometryPolicy = GeometryPolicy::STOPPED;
         break;
@@ -927,6 +982,43 @@ void FsmPark::updateGeometryPolicy()
         params->geometryPolicy = GeometryPolicy::PERCEPTION_ALLOWED;
         break;
     }
+}
+
+bool FsmPark::canTransition(Step from, Step to) const
+{
+    const int parkSpot = params->config.currentLapConfig->parkSpot;
+    // 目标车位任务（parkSpot 1~4）禁止从TRACKIN直接出库/跳过入库。
+    if (from == Step::TRACKIN &&
+        (to == Step::TRACKOUT || to == Step::FORKOUT))
+        return parkSpot == 0;
+    // 只有确认入库后才能进入PARKING；超时不能视为停车成功。
+    if (to == Step::PARKING)
+        return from == Step::ENTER && state.enterConfirmations >= 3;
+    // 安全停止阶段只能由对应阶段超时进入。
+    if (to == Step::TARGET_LOST_STOP)
+        return from == Step::TRACKIN;
+    if (to == Step::ENTER_UNCONFIRMED_STOP)
+        return from == Step::ENTER;
+    if (to == Step::EXIT_UNCONFIRMED_STOP)
+        return from == Step::FORKOUT;
+    return true;
+}
+
+void FsmPark::updateMissionProgressForTransition(Step from, Step to)
+{
+    using Progress = ParkStateData::ParkMissionProgress;
+    if (to == Step::ENTER && from == Step::TRACKIN &&
+        state.missionProgress == Progress::NOT_STARTED)
+        state.missionProgress = Progress::ENTERING;
+    else if (to == Step::PARKING && from == Step::ENTER &&
+             state.missionProgress == Progress::ENTERING)
+        state.missionProgress = Progress::PARKED;
+    else if (to == Step::EXIT && from == Step::WAIT_PICKUP &&
+             state.missionProgress == Progress::PARKED)
+        state.missionProgress = Progress::PICKUP_COMPLETED;
+    else if (to == Step::TRACKOUT && from == Step::EXIT &&
+             state.missionProgress == Progress::PICKUP_COMPLETED)
+        state.missionProgress = Progress::EXIT_REPLAY_COMPLETED;
 }
 
 bool FsmPark::gateRequiresStop(const ParkObservation &observation) const
@@ -974,9 +1066,14 @@ void FsmPark::resetLap()
     params->setStopReason(control_algorithms::StopReason::PARK_GATE, false);
     params->setStopReason(
         control_algorithms::StopReason::PARK_TARGET_LOST, false);
+    params->setStopReason(
+        control_algorithms::StopReason::PARK_ENTER_UNCONFIRMED, false);
+    params->setStopReason(
+        control_algorithms::StopReason::PARK_EXIT_UNCONFIRMED, false);
     reset();
     spots.reset();
     pointsEdgeLeftPast.clear();
     pointsEdgeRightPast.clear();
     stopping = false;
+    completedThisLap = false; // 仅换圈时允许重新触发停车任务
 }

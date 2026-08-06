@@ -43,6 +43,11 @@ PredictResult farGate()
 {
     return PredictResult{LABEL_GATE, "", 0.9f, 150, 20, 120, 30};
 }
+
+PredictResult midGate()
+{
+    return PredictResult{LABEL_GATE, "", 0.9f, 150, 50, 120, 30};
+}
 } // namespace
 
 int main()
@@ -99,11 +104,15 @@ int main()
         ParkFsmTestFixture::run(park, img, {forkMarker(110, 20), forkMarker(160, 20)}, true);
         CHECK(ParkFsmTestFixture::stage(park) == ParkStep::ENTER);
 
-        // ENTER: PLANNED_REQUIRED, records dual-edge paths, timeout -> PARKING.
+        // ENTER: PLANNED_REQUIRED, records dual-edge paths. 只有连续确认
+        // 入库（车道捕获+合法路径+无PLANNER锁存）后才进入PARKING。
         CHECK(params->geometryPolicy == GeometryPolicy::PLANNED_REQUIRED);
-        for (int frame = 0; frame < 31; ++frame)
+        setStraightTrack(params, 239, 75, 80, 240);
+        for (int frame = 0; frame < 20; ++frame)
             ParkFsmTestFixture::run(park, img, {}, false);
         CHECK(ParkFsmTestFixture::stage(park) == ParkStep::PARKING);
+        CHECK(ParkFsmTestFixture::missionProgress(park) ==
+              ParkFsmTestFixture::MissionProgress::PARKED);
         CHECK(ParkFsmTestFixture::replayHistorySize(park) > 0);
         CHECK(params->hasStopReason(control_algorithms::StopReason::PARK));
         CHECK(params->geometryPolicy == GeometryPolicy::STOPPED);
@@ -162,6 +171,7 @@ int main()
             ParkFsmTestFixture::run(park, img, {}, true);
         CHECK(ParkFsmTestFixture::stage(park) == ParkStep::NONE);
         CHECK(params->lapTaskCompleted);
+        CHECK(park.completedThisLap);
         CHECK(params->ctrl.yforkReset);
         CHECK(params->ctrl.countAcc == params->config.startupRampFrames);
     }
@@ -183,7 +193,7 @@ int main()
               ParkStep::EXIT_UNCONFIRMED_STOP);
         CHECK(!params->lapTaskCompleted);
         CHECK(params->hasStopReason(
-            control_algorithms::StopReason::PARK_TARGET_LOST));
+            control_algorithms::StopReason::PARK_EXIT_UNCONFIRMED));
         CHECK(params->geometryPolicy == GeometryPolicy::STOPPED);
         CHECK(params->mustStop());
         // 出口标志重新连续出现后恢复FORKOUT。
@@ -191,7 +201,7 @@ int main()
         ParkFsmTestFixture::run(park, img, {leftMarker()}, true);
         CHECK(ParkFsmTestFixture::stage(park) == ParkStep::FORKOUT);
         CHECK(!params->hasStopReason(
-            control_algorithms::StopReason::PARK_TARGET_LOST));
+            control_algorithms::StopReason::PARK_EXIT_UNCONFIRMED));
     }
 
     // TRACKIN timeout with a configured target spot must enter the safe
@@ -256,6 +266,115 @@ int main()
         CHECK(!params->hasStopReason(
             control_algorithms::StopReason::PARK_GATE));
         CHECK(!params->mustStop());
+    }
+
+    // TRACKIN with a target spot (parkSpot=4): continuous gates or left
+    // signs must NOT jump to TRACKOUT -- the mission must go through ENTER.
+    {
+        auto params = makeTestParams();
+        params->config.currentLapConfig->park = true;
+        params->config.currentLapConfig->parkSpot = 4;
+        FsmPark park(params);
+        cv::Mat img;
+        ParkFsmTestFixture::setStage(park, ParkStep::TRACKIN);
+        for (int frame = 0; frame < 6; ++frame)
+            ParkFsmTestFixture::run(park, img, {midGate()}, true);
+        CHECK(ParkFsmTestFixture::stage(park) == ParkStep::TRACKIN);
+        for (int frame = 0; frame < 6; ++frame)
+            ParkFsmTestFixture::run(park, img, {leftMarker()}, true);
+        CHECK(ParkFsmTestFixture::stage(park) == ParkStep::TRACKIN);
+        CHECK(!params->hasStopReason(
+            control_algorithms::StopReason::PARK_GATE));
+    }
+
+    // ENTER timeout without real entry evidence must enter
+    // ENTER_UNCONFIRMED_STOP (not PARKING); mission stays ENTERING and the
+    // vehicle stops. Recovery returns to ENTER and re-confirms entry.
+    {
+        auto params = makeTestParams();
+        params->config.currentLapConfig->park = true;
+        params->config.currentLapConfig->parkSpot = 4;
+        params->lapTaskRequired = true;
+        params->lapTaskCompleted = false;
+        FsmPark park(params);
+        cv::Mat img;
+        ParkFsmTestFixture::setStage(park, ParkStep::TRACKIN);
+        ParkFsmTestFixture::setStage(park, ParkStep::ENTER);
+        for (int frame = 0; frame < 31; ++frame)
+            ParkFsmTestFixture::run(park, img, {}, false);
+        CHECK(ParkFsmTestFixture::stage(park) ==
+              ParkStep::ENTER_UNCONFIRMED_STOP);
+        CHECK(ParkFsmTestFixture::missionProgress(park) ==
+              ParkFsmTestFixture::MissionProgress::ENTERING);
+        CHECK(params->hasStopReason(
+            control_algorithms::StopReason::PARK_ENTER_UNCONFIRMED));
+        CHECK(params->geometryPolicy == GeometryPolicy::STOPPED);
+        CHECK(params->mustStop());
+
+        // 恢复：连续2帧新鲜车道数据后回到ENTER，重新累计确认后进入PARKING。
+        setStraightTrack(params, 239, 75, 80, 240);
+        ParkFsmTestFixture::run(park, img, {}, true);
+        CHECK(ParkFsmTestFixture::stage(park) ==
+              ParkStep::ENTER_UNCONFIRMED_STOP);
+        ParkFsmTestFixture::run(park, img, {}, true);
+        CHECK(ParkFsmTestFixture::stage(park) == ParkStep::ENTER);
+        CHECK(!params->hasStopReason(
+            control_algorithms::StopReason::PARK_ENTER_UNCONFIRMED));
+        for (int frame = 0; frame < 20; ++frame)
+            ParkFsmTestFixture::run(park, img, {}, false);
+        CHECK(ParkFsmTestFixture::stage(park) == ParkStep::PARKING);
+        CHECK(ParkFsmTestFixture::missionProgress(park) ==
+              ParkFsmTestFixture::MissionProgress::PARKED);
+    }
+
+    // Completed parking mission latches completedThisLap: the same lap must
+    // not re-trigger PARK; resetLap clears the latch for the next lap.
+    {
+        auto params = makeTestParams();
+        params->config.currentLapConfig->park = true;
+        params->lapTaskRequired = true;
+        params->lapTaskCompleted = false;
+        FsmPark park(params);
+        cv::Mat img;
+        ParkFsmTestFixture::setMissionProgress(
+            park, ParkFsmTestFixture::MissionProgress::EXIT_REPLAY_COMPLETED);
+        ParkFsmTestFixture::setStage(park, ParkStep::FORKOUT);
+        ParkFsmTestFixture::run(park, img, {leftMarker()}, true);
+        ParkFsmTestFixture::run(park, img, {leftMarker()}, true);
+        for (int frame = 0; frame < 3; ++frame)
+            ParkFsmTestFixture::run(park, img, {}, true);
+        CHECK(ParkFsmTestFixture::stage(park) == ParkStep::NONE);
+        CHECK(params->lapTaskCompleted);
+        CHECK(park.completedThisLap);
+        for (int frame = 0; frame < 10; ++frame)
+            ParkFsmTestFixture::run(park, img, {parkMarker()}, true);
+        CHECK(ParkFsmTestFixture::stage(park) == ParkStep::NONE);
+
+        park.resetLap();
+        CHECK(!park.completedThisLap);
+        params->lapTaskCompleted = false; // 换圈时由updateLapConfig清零
+        for (int frame = 0; frame < 3; ++frame)
+            ParkFsmTestFixture::run(park, img, {parkMarker()}, true);
+        CHECK(ParkFsmTestFixture::stage(park) == ParkStep::ENABLE);
+    }
+
+    // Pass-through (parkSpot=0): gate approach may exit TRACKIN to TRACKOUT,
+    // but the parking mission stays NOT_STARTED.
+    {
+        auto params = makeTestParams();
+        params->config.currentLapConfig->park = true;
+        params->config.currentLapConfig->parkSpot = 0;
+        params->lapTaskRequired = true;
+        params->lapTaskCompleted = false;
+        FsmPark park(params);
+        cv::Mat img;
+        ParkFsmTestFixture::setStage(park, ParkStep::TRACKIN);
+        for (int frame = 0; frame < 6; ++frame)
+            ParkFsmTestFixture::run(park, img, {midGate()}, true);
+        CHECK(ParkFsmTestFixture::stage(park) == ParkStep::TRACKOUT);
+        CHECK(ParkFsmTestFixture::missionProgress(park) ==
+              ParkFsmTestFixture::MissionProgress::NOT_STARTED);
+        CHECK(!params->lapTaskCompleted);
     }
 
     // ENABLE timeout resets immediately and must not advance to FORKIN in

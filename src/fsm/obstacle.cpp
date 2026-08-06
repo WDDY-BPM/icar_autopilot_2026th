@@ -2,6 +2,13 @@
 #include "ctrl/planned_geometry_builder.hpp"
 #include "utils/tools.hpp"
 
+namespace
+{
+// 最后已知危险记录的最大有效年龄。超过后旧障碍物坐标不再可信，危险记录
+// 清除并由AI_STALE（约500ms）与新AI结果接管决策；绝不用旧坐标继续规划。
+constexpr std::int64_t kObstacleHazardMaxAgeMs = 1000;
+} // namespace
+
 FsmObstacle::FsmObstacle(std::shared_ptr<Params> par) : params(par) {}
 FsmObstacle::~FsmObstacle() = default;
 
@@ -44,6 +51,17 @@ void FsmObstacle::run(Mat &img)
         planningResult = ObstaclePlanningResult::NOT_APPLICABLE;
         return;
     }
+    // 模式切换回Obstacle允许范围后，在新AI结果到达前保持PLANNER停车等待，
+    // 禁止使用切换前数秒的旧障碍物坐标继续规划。
+    if (needsFreshReevaluation && !params->aiResultFresh)
+    {
+        planningResult =
+            ObstaclePlanningResult::BLOCKED_WITHOUT_SAFE_PLAN;
+        params->plannerSafety.reject(PathSource::OBSTACLE);
+        params->setStopReason(control_algorithms::StopReason::PLANNER, true);
+        params->ctrl.obstacleSlow = true;
+        return;
+    }
     if (!params->aiResultFresh)
     {
         // Keep the previously generated obstacle plan alive between inference
@@ -57,15 +75,29 @@ void FsmObstacle::run(Mat &img)
         // 立即PLANNER停车，消除路径过期到AI_STALE之间的安全空窗。
         if (unresolvedHazard)
         {
-            planningResult =
-                ObstaclePlanningResult::BLOCKED_WITHOUT_SAFE_PLAN;
-            params->plannerSafety.reject(PathSource::OBSTACLE);
-            params->setStopReason(
-                control_algorithms::StopReason::PLANNER, true);
-            params->ctrl.obstacleSlow = true;
+            const std::int64_t hazardAgeMs =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() -
+                    lastHazardObservationAt).count();
+            if (hazardAgeMs <= kObstacleHazardMaxAgeMs)
+            {
+                planningResult =
+                    ObstaclePlanningResult::BLOCKED_WITHOUT_SAFE_PLAN;
+                params->plannerSafety.reject(PathSource::OBSTACLE);
+                params->setStopReason(
+                    control_algorithms::StopReason::PLANNER, true);
+                params->ctrl.obstacleSlow = true;
+            }
+            else
+            {
+                // 危险记录过期：旧坐标不可信，清除记录。停车由AI_STALE
+                // 与下一组新鲜AI结果负责，不再假装仍知道具体障碍物位置。
+                clearHazard();
+            }
         }
         return;
     }
+    needsFreshReevaluation = false; // 已获得新鲜AI结果，进入正常评估
 
     const auto &trackLeft = params->track->pointsEdgeLeft;
     const auto &trackRight = params->track->pointsEdgeRight;
@@ -176,9 +208,15 @@ void FsmObstacle::run(Mat &img)
     left.resize(static_cast<size_t>(left.size() * 0.7));
     right.resize(static_cast<size_t>(right.size() * 0.7));
     PathOverride candidate;
+    const bool recoveringObstaclePlan =
+        params->plannerSafety.latched &&
+        params->plannerSafety.rejectedSource == PathSource::OBSTACLE;
+    const auto ttl = recoveringObstaclePlan
+        ? std::chrono::milliseconds(220)
+        : std::chrono::milliseconds(120);
     candidate.setEdgesForTime(
         PathSource::OBSTACLE, std::move(left), std::move(right),
-        std::chrono::milliseconds(120),
+        ttl,
         0.45f, std::min(params->config.velSlow, 0.15f));
     const PlannedGeometryResult geometry = buildPlannedGeometry(
         candidate, params->mode);
@@ -188,9 +226,24 @@ void FsmObstacle::run(Mat &img)
         return;
     }
     recordHazard();
+    // 恢复链：新合法路径生成后立即计入一次规划验证；Center下一次真实
+    // 控制几何验证完成后（共连续2次）才解除PlannerSafety锁存。
+    params->plannerSafety.observe(PathSource::OBSTACLE, true);
+    params->setStopReason(control_algorithms::StopReason::PLANNER,
+                          params->plannerSafety.latched);
     params->pathOverride = std::move(candidate);
     planningResult = ObstaclePlanningResult::VALID_PLAN;
     params->ctrl.obstacleSlow = true;
+}
+
+void FsmObstacle::suspend()
+{
+    params->clearPathOverride(PathSource::OBSTACLE);
+    unresolvedHazard = false;
+    lastHazardResult = PredictResult{};
+    lastHazardObservationAt = {};
+    needsFreshReevaluation = true;
+    params->ctrl.obstacleSlow = false;
 }
 
 void FsmObstacle::resetLap()
@@ -198,6 +251,7 @@ void FsmObstacle::resetLap()
     resultObs = PredictResult();
     planningResult = ObstaclePlanningResult::NO_FRESH_RESULT;
     unresolvedHazard = false;
+    needsFreshReevaluation = false;
     lastHazardResult = PredictResult{};
     lastHazardObservationAt = {};
     params->ctrl.obstacleSlow = false;

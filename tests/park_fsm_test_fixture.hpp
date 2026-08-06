@@ -42,10 +42,6 @@ struct ParkFsmTestFixture
         park.spots.forks = std::move(forks);
     }
 
-    static void setCountOut(FsmPark &park, int value) { park.countOut = value; }
-
-    static int countOut(const FsmPark &park) { return park.countOut; }
-
     static void setStageStartedAt(
         FsmPark &park, std::chrono::steady_clock::time_point timePoint)
     {

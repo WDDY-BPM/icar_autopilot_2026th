@@ -34,11 +34,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # 生产主程序配置门：逻辑测试默认关闭。Ubuntu runner 缺少板端依赖
-      # （glib/OpenCV/libserial/ppnc/onnx），此处允许按预期依赖错误失败，
-      # 以验证测试目标不会混入真实主程序构建。
+      # （glib/OpenCV/libserial/ppnc/onnx），只有“预期依赖缺失”错误被容忍；
+      # CMake语法错误、路径错误等真实故障仍会使该步骤失败。
       - name: Configure production CMake (dependency gate)
-        continue-on-error: true
-        run: >-
-          cmake -S . -B build-production-config
-          -DICAR_BUILD_LOGIC_TESTS=OFF
-          -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+        run: |
+          set +e
+          cmake -S . -B build-production-config \
+            -DICAR_BUILD_LOGIC_TESTS=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            2>&1 | tee production-config.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          fi
+          if grep -Eiq "ppnc|onnx|libserial|OpenCV|glib" production-config.log; then
+            echo "Expected board dependency failure."
+            exit 0
+          fi
+          echo "Unexpected CMake configuration failure."
+          exit "$status"

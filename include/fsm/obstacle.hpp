@@ -43,6 +43,9 @@ public:
   void run(Mat &img);
   void show(Mat &img);
   void resetLap();
+  // 模式切换到不允许Obstacle的FSM（PARK/BUSY/YFORK等）时挂起：
+  // 清除路径与危险记录，并强制下一轮用新鲜AI重新评估，禁止用旧坐标规划。
+  void suspend();
 
   PredictResult resultObs;  // 当前避障目标（用于显示）
   ObstaclePlanningResult planningResult{
@@ -50,6 +53,7 @@ public:
   // 最后已知车道内障碍物是否仍未由新AI结果明确解除。
   // 路径过期但危险未解除时必须停车，不能等到AI_STALE才停。
   bool unresolvedHazard{false};
+  bool needsFreshReevaluation{false};
   PredictResult lastHazardResult{};
   std::chrono::steady_clock::time_point lastHazardObservationAt{};
 

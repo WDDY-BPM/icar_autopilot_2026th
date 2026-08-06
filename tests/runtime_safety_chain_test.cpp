@@ -138,6 +138,8 @@ int main()
         CHECK(ParkFsmTestFixture::stage(park) ==
               ParkStep::EXIT_UNCONFIRMED_STOP);
         CHECK(!params->lapTaskCompleted);
+        CHECK(params->hasStopReason(
+            control_algorithms::StopReason::PARK_EXIT_UNCONFIRMED));
         CHECK(params->mustStop());
         CHECK(finalCommandFor(params).speed == 0.0f);
     }
@@ -286,6 +288,156 @@ int main()
         CHECK(!params->hasStopReason(
             control_algorithms::StopReason::PARK_GATE));
         CHECK(!params->hasStopReason(control_algorithms::StopReason::PARK));
+        CHECK(!params->hasStopReason(
+            control_algorithms::StopReason::PARK_ENTER_UNCONFIRMED));
+        CHECK(!params->hasStopReason(
+            control_algorithms::StopReason::PARK_EXIT_UNCONFIRMED));
+    }
+
+    // ENTER timeout without real entry evidence holds PARK_ENTER_UNCONFIRMED
+    // with zero speed; the mission must not be marked PARKED.
+    {
+        auto params = makeTestParams();
+        params->config.currentLapConfig->park = true;
+        params->config.currentLapConfig->parkSpot = 4;
+        params->lapTaskRequired = true;
+        params->lapTaskCompleted = false;
+        FsmPark park(params);
+        cv::Mat img;
+        ParkFsmTestFixture::setStage(park, ParkStep::TRACKIN);
+        ParkFsmTestFixture::setStage(park, ParkStep::ENTER);
+        for (int frame = 0; frame < 31; ++frame)
+            ParkFsmTestFixture::run(park, img, {}, false);
+        CHECK(ParkFsmTestFixture::stage(park) ==
+              ParkStep::ENTER_UNCONFIRMED_STOP);
+        CHECK(ParkFsmTestFixture::missionProgress(park) ==
+              MissionProgress::ENTERING);
+        CHECK(params->hasStopReason(
+            control_algorithms::StopReason::PARK_ENTER_UNCONFIRMED));
+        CHECK(params->mustStop());
+        CHECK(finalCommandFor(params).speed == 0.0f);
+    }
+
+    // Obstacle replan recovery: expired hazard latches PLANNER; a fresh
+    // valid replan uses a longer recovery TTL, and a second consecutive
+    // control-geometry validation releases the latch and resumes motion
+    // at the obstacle speed limit.
+    {
+        auto params = makeTestParams();
+        params->config.currentLapConfig->obstacle = true;
+        FsmObstacle obstacle(params);
+        setStraightTrack(params, 220, 40, 60, 260);
+        params->mode = FsmMode::NORMAL;
+        cv::Mat img;
+        params->aiResultFresh = true;
+        params->results = {PredictResult{LABEL_CONE, "", 0.9f, 150, 100, 30, 30}};
+        obstacle.run(img);
+        CHECK(obstacle.planningResult == ObstaclePlanningResult::VALID_PLAN);
+        CHECK(!params->plannerSafety.latched);
+        std::this_thread::sleep_for(std::chrono::milliseconds(130));
+        params->aiResultFresh = false;
+        obstacle.run(img);
+        CHECK(obstacle.planningResult ==
+              ObstaclePlanningResult::BLOCKED_WITHOUT_SAFE_PLAN);
+        CHECK(params->plannerSafety.latched);
+        params->aiResultFresh = true;
+        params->results = {PredictResult{LABEL_CONE, "", 0.9f, 150, 100, 30, 30}};
+        obstacle.run(img);
+        CHECK(obstacle.planningResult == ObstaclePlanningResult::VALID_PLAN);
+        CHECK(params->pathOverride.validFor(PathSource::OBSTACLE));
+        CHECK(params->pathOverride.validForTime ==
+              std::chrono::milliseconds(220));
+        CHECK(params->plannerSafety.latched); // 仍需第二次验证
+        Center center;
+        center.fitting(params);
+        CHECK(center.geometry.source == ControlGeometrySource::PLANNED);
+        CHECK(center.geometry.pathSource == PathSource::OBSTACLE);
+        CHECK(center.geometry.valid);
+        params->plannerSafety.observeFrame(true);
+        params->setStopReason(control_algorithms::StopReason::PLANNER,
+                              params->plannerSafety.latched);
+        CHECK(!params->plannerSafety.latched);
+        CHECK(!params->hasStopReason(control_algorithms::StopReason::PLANNER));
+        CHECK(params->pathOverride.validFor(PathSource::OBSTACLE));
+        CHECK(params->ctrl.obstacleSlow);
+        const float limitedSpeed =
+            applyPathSpeedLimit(0.2f, params->pathOverride);
+        FinalCommand command = resolveFinalCommand(
+            {limitedSpeed, 1500}, {false, false, true, true}, 1500);
+        CHECK(command.speed > 0.0f);
+        CHECK(command.speed <= params->pathOverride.speedLimit);
+    }
+
+    // Obstacle cross-mode lifecycle: suspending for PARK/BUSY clears the
+    // hazard and forces a fresh-AI reevaluation before any new plan; old
+    // obstacle coordinates must never be reused.
+    {
+        auto params = makeTestParams();
+        params->config.currentLapConfig->obstacle = true;
+        FsmObstacle obstacle(params);
+        setStraightTrack(params, 220, 40, 60, 260);
+        params->mode = FsmMode::NORMAL;
+        cv::Mat img;
+        params->aiResultFresh = true;
+        params->results = {PredictResult{LABEL_CONE, "", 0.9f, 150, 100, 30, 30}};
+        obstacle.run(img);
+        CHECK(obstacle.unresolvedHazard);
+        params->mode = FsmMode::PARK;
+        obstacle.suspend();
+        CHECK(!obstacle.unresolvedHazard);
+        CHECK(obstacle.needsFreshReevaluation);
+        CHECK(!params->pathOverride.active());
+        params->mode = FsmMode::NORMAL;
+        params->aiResultFresh = false;
+        obstacle.run(img);
+        CHECK(obstacle.planningResult ==
+              ObstaclePlanningResult::BLOCKED_WITHOUT_SAFE_PLAN);
+        CHECK(params->hasStopReason(control_algorithms::StopReason::PLANNER));
+        params->aiResultFresh = true;
+        params->results.clear();
+        obstacle.run(img);
+        CHECK(!obstacle.needsFreshReevaluation);
+        CHECK(!params->plannerSafety.latched);
+        CHECK(!params->hasStopReason(control_algorithms::StopReason::PLANNER));
+        params->results = {PredictResult{LABEL_CONE, "", 0.9f, 150, 100, 30, 30}};
+        obstacle.run(img);
+        CHECK(obstacle.planningResult == ObstaclePlanningResult::VALID_PLAN);
+        CHECK(params->pathOverride.validFor(PathSource::OBSTACLE));
+    }
+
+    // PARK safety hold owns the path: obstacle must not overwrite a PARK
+    // path while PARK_GATE is latched.
+    {
+        auto params = makeTestParams();
+        params->config.currentLapConfig->park = true;
+        params->config.currentLapConfig->obstacle = true;
+        FsmPark park(params);
+        FsmObstacle obstacle(params);
+        cv::Mat img;
+        ParkFsmTestFixture::setStage(park, ParkStep::TRACKIN);
+        std::vector<PointX> left;
+        std::vector<PointX> right;
+        for (int row = 220; row >= 40; --row)
+        {
+            left.emplace_back(row, 60);
+            right.emplace_back(row, 260);
+        }
+        params->pathOverride.setEdgesForFrames(
+            PathSource::PARK, std::move(left), std::move(right),
+            0.65f, 0.5f, 2);
+        params->aiResultFresh = true;
+        params->results = {closeGate()};
+        park.run(img);
+        CHECK(params->hasStopReason(
+            control_algorithms::StopReason::PARK_GATE));
+        CHECK(params->pathOverride.validFor(PathSource::PARK));
+        params->results = {PredictResult{LABEL_CONE, "", 0.9f, 150, 100, 30, 30}};
+        obstacle.run(img);
+        CHECK(obstacle.planningResult ==
+              ObstaclePlanningResult::NOT_APPLICABLE);
+        CHECK(params->pathOverride.source == PathSource::PARK);
+        CHECK(params->pathOverride.validFor(PathSource::PARK));
+        CHECK(params->mustStop());
     }
 
     return 0;

@@ -48,6 +48,7 @@ int main()
         obstacle.unresolvedHazard = true;
         obstacle.lastHazardResult =
             PredictResult{LABEL_CONE, "", 0.9f, 150, 100, 30, 30};
+        obstacle.lastHazardObservationAt = std::chrono::steady_clock::now();
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
         params->aiResultFresh = false;
         cv::Mat img;

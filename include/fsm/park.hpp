@@ -55,6 +55,7 @@ public:
   void resetLap();
 
   bool stopping = false; // 停车等待标志
+  bool completedThisLap = false; // 本圈停车任务已完成锁存（仅resetLap清除）
   float spotUp = 0.49;    // 上停车位距离像素百分比[0,1]
   float spotDown = 0.35;  // 下停车位距离像素百分比[0,1]
 
@@ -104,6 +105,7 @@ private:
     TRACKOUT, // 出库巡线
     FORKOUT,  // 出库岔路转向
     TARGET_LOST_STOP,    // 目标车位丢失：安全停车，禁止跳过任务
+    ENTER_UNCONFIRMED_STOP, // 入库未确认：安全停车，禁止视为停车成功
     EXIT_UNCONFIRMED_STOP, // 出口未确认：安全停车，禁止完成任务
   };
   struct ParkStateData
@@ -127,6 +129,9 @@ private:
     int exitSignSeenConfirmations = 0;    // FORKOUT：出口左转标志连续确认帧数（先武装）
     int exitSignMissingConfirmations = 0; // FORKOUT：出口左转标志连续消失确认帧数
     bool exitSignArmed = false;           // FORKOUT：已连续确认出口标志后才允许缺失计数
+    int gateApproachConfirmations = 0;    // TRACKIN（parkSpot==0穿过模式）：道闸接近连续确认
+    int enterConfirmations = 0;           // ENTER：真实入库连续确认（lane+path+无PLANNER锁存）
+    int enterRecoveryConfirmations = 0;   // ENTER_UNCONFIRMED_STOP：恢复用连续车道确认
     int stageControlFrames = 0;           // 通用阶段超时计数
     int trackInControlFrames = 0;         // TRACKIN 纯控制周期计数（非AI证据）
     std::chrono::steady_clock::time_point forkOutStartedAt;
@@ -135,7 +140,6 @@ private:
   } state;
   Spots spots;
   bool waitTimerActive = false;
-  int countOut = 0;                                               // 出库检测计数
   bool waiting = false;                                           // 停车等待使能
   int countIn = 0;                                                // 入库矫正计数器
   vector<vector<PointX>> pointsEdgeLeftPast, pointsEdgeRightPast; // 记录赛道入库车道线
@@ -156,9 +160,13 @@ private:
   void handleForkOut(const ParkObservation &, std::chrono::steady_clock::time_point);
   void handleTargetLostStop(const ParkObservation &,
                             std::chrono::steady_clock::time_point);
+  void handleEnterUnconfirmedStop(const ParkObservation &,
+                                  std::chrono::steady_clock::time_point);
   void handleExitUnconfirmedStop(const ParkObservation &,
                                  std::chrono::steady_clock::time_point);
   void updateGeometryPolicy();
+  bool canTransition(Step from, Step to) const;
+  void updateMissionProgressForTransition(Step from, Step to);
   bool gateRequiresStop(const ParkObservation &observation) const;
   void reset();
   void replanTracking();

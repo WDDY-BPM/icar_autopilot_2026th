@@ -1,5 +1,22 @@
 #include "icar.hpp"
 
+namespace
+{
+// PARK 安全停止的统一判定：任意PARK类停止原因生效时，只允许PARK FSM
+// 运行以检测恢复条件，其他场景FSM与Obstacle不得继续推进。
+bool hasParkSafetyHold(const Params &params)
+{
+    return params.hasStopReason(control_algorithms::StopReason::PARK) ||
+        params.hasStopReason(control_algorithms::StopReason::PARK_GATE) ||
+        params.hasStopReason(
+            control_algorithms::StopReason::PARK_TARGET_LOST) ||
+        params.hasStopReason(
+            control_algorithms::StopReason::PARK_ENTER_UNCONFIRMED) ||
+        params.hasStopReason(
+            control_algorithms::StopReason::PARK_EXIT_UNCONFIRMED);
+}
+} // namespace
+
 void Icar::runFsm(Mat &img)
     {
         params->geometryPolicy = GeometryPolicy::PERCEPTION_ALLOWED;
@@ -87,7 +104,7 @@ void Icar::runFsm(Mat &img)
         if (params->hasStopReason(control_algorithms::StopReason::CROSS))
             return;
 
-        if (params->hasStopReason(control_algorithms::StopReason::PARK))
+        if (hasParkSafetyHold(*params))
         {
             fsmFactory.park->run(img);
             params->mode = fsmFactory.park->getMode();
@@ -115,7 +132,7 @@ void Icar::runFsm(Mat &img)
                 FsmMode mode = fsmFactory.park->getMode();
                 if (mode != FsmMode::NORMAL)
                     params->mode = mode;
-                if (params->hasStopReason(control_algorithms::StopReason::PARK))
+                if (hasParkSafetyHold(*params))
                     return;
             }
         }
@@ -167,7 +184,10 @@ void Icar::runFsm(Mat &img)
         const bool obstacleAllowed = pathSourceAllowed(
             PathSource::OBSTACLE, params->mode);
         if (!obstacleAllowed)
+        {
             params->clearPathOverride(PathSource::OBSTACLE);
+            fsmFactory.obstacle->suspend(); // 旧危险坐标不得跨模式复用
+        }
         if (params->featureEnabled(Feature::OBSTACLE) && obstacleAllowed)
             fsmFactory.obstacle->run(img);
 

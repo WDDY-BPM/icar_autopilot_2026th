@@ -129,6 +129,28 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertNotIn("completeLapTask", timeout_end.group(0))
         self.assertIn("completed = false", timeout_end.group(0))
 
+    def test_park_holds_freeze_other_fsms_and_mission_cannot_be_bypassed(self):
+        fsm = (ROOT / "src" / "runtime" / "fsm.cpp").read_text(encoding="utf-8")
+        park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
+        stop_reasons = (ROOT / "include" / "ctrl" / "stop_reasons.hpp").read_text(
+            encoding="utf-8")
+        self.assertIn("bool hasParkSafetyHold", fsm)
+        self.assertIn("PARK_ENTER_UNCONFIRMED", fsm)
+        self.assertIn("PARK_EXIT_UNCONFIRMED", fsm)
+        self.assertGreaterEqual(fsm.count("hasParkSafetyHold(*params)"), 2)
+        self.assertIn("fsmFactory.obstacle->suspend()", fsm)
+        # TRACKIN 不得直接进入 TRACKOUT/FORKOUT（除非 parkSpot==0 穿过模式）。
+        self.assertIn("from == Step::TRACKIN &&", park)
+        self.assertIn("to == Step::TRACKOUT || to == Step::FORKOUT", park)
+        # ENTER 必须连续确认后才进入 PARKING，超时只能进 ENTER_UNCONFIRMED_STOP。
+        self.assertIn("to == Step::PARKING", park)
+        self.assertIn("state.enterConfirmations >= 3", park)
+        self.assertIn("PARK_ENTER_UNCONFIRMED", park)
+        self.assertIn("PARK_EXIT_UNCONFIRMED", park)
+        self.assertIn("PARK_ENTER_UNCONFIRMED = 1u << 14", stop_reasons)
+        self.assertIn("PARK_EXIT_UNCONFIRMED = 1u << 15", stop_reasons)
+        self.assertIn("completedThisLap", park)
+
     def test_yfork_exit_uses_camera_edge_before_bezier_replan(self):
         source = (ROOT / "src" / "fsm" / "yfork.cpp").read_text(encoding="utf-8")
         capture = source.index("const YforkExitObservation exitObservation = observeRawExitEdge()")

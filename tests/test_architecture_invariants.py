@@ -36,6 +36,21 @@ class ArchitectureInvariantTests(unittest.TestCase):
         self.assertIn("target_compile_options", source)
         self.assertIn("ICAR_BUILD_LOGIC_TESTS \"Build hardware-independent control tests\" OFF", source)
 
+    def test_logic_test_cmake_isolation(self):
+        cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("target_include_directories(icar_logic_core PUBLIC ${OpenCV_INCLUDE_DIRS})", cmake)
+        self.assertIn("target_link_libraries(icar_logic_core PUBLIC ${OpenCV_LIBS})", cmake)
+        # OpenCV stub 只能出现在 ICAR_LOGIC_TESTS_ONLY 分支内。
+        stub = cmake.index("tests/stubs")
+        cutoff = cmake.index("if(ICAR_LOGIC_TESTS_ONLY)\n  return()")
+        self.assertLess(stub, cutoff)
+        self.assertNotIn("tests/stubs", cmake[cutoff:])
+        workflow = (ROOT / ".github" / "workflows" / "logic-tests.yml").read_text(
+            encoding="utf-8")
+        self.assertNotIn("continue-on-error", workflow)
+        self.assertIn("ICAR_BUILD_LOGIC_TESTS=ON", workflow)
+        self.assertIn("PIPESTATUS[0]", workflow)
+
     def test_planned_path_lifecycle_is_explicit(self):
         path = (ROOT / "include/runtime/path_override.hpp").read_text(encoding="utf-8")
         park = (ROOT / "src/fsm/park.cpp").read_text(encoding="utf-8")
