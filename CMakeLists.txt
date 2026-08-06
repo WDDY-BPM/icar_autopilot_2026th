@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.10)
 project(patrol_car LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,7 +18,9 @@ function(icar_target_defaults target_name)
       $<$<CONFIG:Release>:-O3>)
     if(NOT ICAR_LOGIC_TESTS_ONLY)
       target_compile_options(${target_name} PRIVATE $<$<CONFIG:Release>:-flto>)
-      target_link_options(${target_name} PRIVATE $<$<CONFIG:Release>:-flto>)
+      # target_link_options requires CMake 3.13; keep board compatibility
+      # with CMake 3.10 by passing the flag through the link line instead.
+      target_link_libraries(${target_name} PRIVATE $<$<CONFIG:Release>:-flto>)
     endif()
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|aarch64)")
       target_compile_options(${target_name} PRIVATE -mcpu=native)
