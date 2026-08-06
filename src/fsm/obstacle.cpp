@@ -11,14 +11,26 @@ void FsmObstacle::run(Mat &img)
     resultObs = PredictResult();
     planningResult = ObstaclePlanningResult::NO_FRESH_RESULT;
     params->ctrl.obstacleSlow = false;
+    const auto clearHazard = [&]() {
+        unresolvedHazard = false;
+        lastHazardResult = PredictResult{};
+        lastHazardObservationAt = {};
+    };
+    const auto recordHazard = [&]() {
+        unresolvedHazard = true;
+        lastHazardResult = resultObs;
+        lastHazardObservationAt = std::chrono::steady_clock::now();
+    };
     const auto markNotApplicable = [&]() {
         planningResult = ObstaclePlanningResult::NOT_APPLICABLE;
+        clearHazard();
         params->clearPathOverride(PathSource::OBSTACLE);
         params->releasePlannerSafety(PathSource::OBSTACLE);
         params->ctrl.obstacleSlow = false;
     };
     const auto markBlockedWithoutSafePlan = [&]() {
         planningResult = ObstaclePlanningResult::BLOCKED_WITHOUT_SAFE_PLAN;
+        recordHazard();
         params->clearPathOverride(PathSource::OBSTACLE);
         params->plannerSafety.reject(PathSource::OBSTACLE);
         params->setStopReason(control_algorithms::StopReason::PLANNER, true);
@@ -36,9 +48,22 @@ void FsmObstacle::run(Mat &img)
     {
         // Keep the previously generated obstacle plan alive between inference
         // frames; PathOverride's time TTL handles expiry on its own.
-        planningResult = ObstaclePlanningResult::NO_FRESH_RESULT;
         if (params->pathOverride.validFor(PathSource::OBSTACLE))
+        {
             params->ctrl.obstacleSlow = true;
+            return;
+        }
+        // 路径已过期但最后已知车道内障碍物未被新AI明确解除：
+        // 立即PLANNER停车，消除路径过期到AI_STALE之间的安全空窗。
+        if (unresolvedHazard)
+        {
+            planningResult =
+                ObstaclePlanningResult::BLOCKED_WITHOUT_SAFE_PLAN;
+            params->plannerSafety.reject(PathSource::OBSTACLE);
+            params->setStopReason(
+                control_algorithms::StopReason::PLANNER, true);
+            params->ctrl.obstacleSlow = true;
+        }
         return;
     }
 
@@ -162,6 +187,7 @@ void FsmObstacle::run(Mat &img)
         markBlockedWithoutSafePlan();
         return;
     }
+    recordHazard();
     params->pathOverride = std::move(candidate);
     planningResult = ObstaclePlanningResult::VALID_PLAN;
     params->ctrl.obstacleSlow = true;
@@ -171,6 +197,9 @@ void FsmObstacle::resetLap()
 {
     resultObs = PredictResult();
     planningResult = ObstaclePlanningResult::NO_FRESH_RESULT;
+    unresolvedHazard = false;
+    lastHazardResult = PredictResult{};
+    lastHazardObservationAt = {};
     params->ctrl.obstacleSlow = false;
     params->clearPathOverride(PathSource::OBSTACLE);
     params->releasePlannerSafety(PathSource::OBSTACLE);

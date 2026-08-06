@@ -47,6 +47,11 @@ public:
   PredictResult resultObs;  // 当前避障目标（用于显示）
   ObstaclePlanningResult planningResult{
       ObstaclePlanningResult::NO_FRESH_RESULT};
+  // 最后已知车道内障碍物是否仍未由新AI结果明确解除。
+  // 路径过期但危险未解除时必须停车，不能等到AI_STALE才停。
+  bool unresolvedHazard{false};
+  PredictResult lastHazardResult{};
+  std::chrono::steady_clock::time_point lastHazardObservationAt{};
 
 private:
   std::shared_ptr<Params> params;
