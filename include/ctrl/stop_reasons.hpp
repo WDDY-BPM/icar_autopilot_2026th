@@ -10,7 +10,8 @@ enum class StopReason : std::uint32_t
     STARTUP = 1u << 0, CAMERA = 1u << 1, EMERGENCY = 1u << 2,
     LANE = 1u << 3, GATE = 1u << 4, PARK = 1u << 5,
     BUSY = 1u << 6, STATION = 1u << 7, CROSS = 1u << 8,
-    MANUAL = 1u << 9, AI_STALE = 1u << 10, PLANNER = 1u << 11
+    MANUAL = 1u << 9, AI_STALE = 1u << 10, PLANNER = 1u << 11,
+    PARK_GATE = 1u << 12, PARK_TARGET_LOST = 1u << 13
 };
 
 class StopReasonState
@@ -52,6 +53,8 @@ public:
         append(StopReason::BUSY, "BUSY"); append(StopReason::STATION, "STATION");
         append(StopReason::CROSS, "CROSS"); append(StopReason::MANUAL, "MANUAL");
         append(StopReason::AI_STALE, "AI_STALE"); append(StopReason::PLANNER, "PLANNER");
+        append(StopReason::PARK_GATE, "PARK_GATE");
+        append(StopReason::PARK_TARGET_LOST, "PARK_TARGET_LOST");
         return result;
     }
 private:

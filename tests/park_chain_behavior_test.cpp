@@ -28,6 +28,16 @@ PredictResult forkMarker(int y, int height = 20)
 {
     return PredictResult{LABEL_FORK, "", 0.9f, 120, y, 30, height};
 }
+
+PredictResult closeGate()
+{
+    return PredictResult{LABEL_GATE, "", 0.9f, 150, 200, 120, 100};
+}
+
+PredictResult farGate()
+{
+    return PredictResult{LABEL_GATE, "", 0.9f, 150, 20, 120, 30};
+}
 } // namespace
 
 int main()
@@ -155,6 +165,25 @@ int main()
         ParkFsmTestFixture::run(park, img, {}, true);
         CHECK(ParkFsmTestFixture::stage(park) == ParkStep::NONE);
         CHECK(!params->lapTaskCompleted);
+    }
+
+    // TRACKIN gate too close must set PARK_GATE through stop arbitration;
+    // when the gate clears, PARK_GATE is released.
+    {
+        auto params = makeTestParams();
+        params->config.currentLapConfig->park = true;
+        FsmPark park(params);
+        cv::Mat img;
+        ParkFsmTestFixture::setStage(park, ParkStep::TRACKIN);
+        ParkFsmTestFixture::run(park, img, {closeGate()}, true);
+        CHECK(params->hasStopReason(
+            control_algorithms::StopReason::PARK_GATE));
+        CHECK(params->mustStop());
+        CHECK(park.stopping);
+        ParkFsmTestFixture::run(park, img, {farGate()}, true);
+        CHECK(!params->hasStopReason(
+            control_algorithms::StopReason::PARK_GATE));
+        CHECK(!params->mustStop());
     }
 
     // ENABLE timeout resets immediately and must not advance to FORKIN in

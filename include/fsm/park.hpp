@@ -103,7 +103,6 @@ private:
     EXIT,     // 出库
     TRACKOUT, // 出库巡线
     FORKOUT,  // 出库岔路转向
-
   };
   struct ParkStateData
   {
@@ -141,6 +140,7 @@ private:
   void handleTrackOut(const ParkObservation &, std::chrono::steady_clock::time_point);
   void handleForkOut(const ParkObservation &, std::chrono::steady_clock::time_point);
   void updateGeometryPolicy();
+  bool gateRequiresStop(const ParkObservation &observation) const;
   void reset();
   void replanTracking();
   void replanTracking(bool left);

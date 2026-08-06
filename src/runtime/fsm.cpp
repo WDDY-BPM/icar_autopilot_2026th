@@ -35,6 +35,14 @@ void Icar::runFsm(Mat &img)
         params->manualTakeover = fsmFactory.busy->isInManualTakeover();
         if (params->manualTakeover)
         {
+            // 手动接管期间把停车类停止原因交还驾驶员：接管结束后由各FSM
+            // 根据当前阶段重新断言，避免 PARK_GATE/PARK_TARGET_LOST/PARK
+            // 残留在手动控制链路中强制停车。
+            params->setStopReason(control_algorithms::StopReason::PARK, false);
+            params->setStopReason(
+                control_algorithms::StopReason::PARK_GATE, false);
+            params->setStopReason(
+                control_algorithms::StopReason::PARK_TARGET_LOST, false);
             // 检查是否返回自动模式
             if (fsmFactory.manual->checkForReturnKey())
             {

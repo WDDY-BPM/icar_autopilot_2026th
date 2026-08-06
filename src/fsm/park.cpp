@@ -77,10 +77,16 @@ void FsmPark::run(Mat &img)
     if (!params->featureEnabled(Feature::PARK)) // 该模式未启用
     {
         params->clearPathOverride(PathSource::PARK);
+        params->setStopReason(control_algorithms::StopReason::PARK_GATE, false);
+        params->setStopReason(
+            control_algorithms::StopReason::PARK_TARGET_LOST, false);
         return;
     }
     if (params->mustStopExcept(control_algorithms::StopReason::PLANNER) &&
-        !params->hasStopReason(control_algorithms::StopReason::PARK))
+        !params->hasStopReason(control_algorithms::StopReason::PARK) &&
+        !params->hasStopReason(control_algorithms::StopReason::PARK_GATE) &&
+        !params->hasStopReason(
+            control_algorithms::StopReason::PARK_TARGET_LOST))
         return;
 
     stopping = false; // 停车等待标志
@@ -252,18 +258,24 @@ void FsmPark::handleTrackIn(const ParkObservation &observation,
     state.stageControlFrames++;   // 超时计数
     state.trackInControlFrames++; // 纯控制周期计数（仅用于超时，不作为AI证据）
 
-    //[01] 道闸检测
+    //[01] 道闸检测：过近时必须进入StopReason仲裁（PARK_GATE），
+    // stopping仅供显示/遥测，不再是唯一停车依据。只有新鲜AI帧才能更新
+    // PARK_GATE；陈旧帧保持锁存，避免推理间隙中道闸停车被错误解除。
+    if (params->aiResultFresh)
+        params->setStopReason(control_algorithms::StopReason::PARK_GATE,
+                              gateRequiresStop(observation));
+    const bool gateStop =
+        params->hasStopReason(control_algorithms::StopReason::PARK_GATE);
+    if (gateStop)
+    {
+        stopping = true; // 停车等待标志（仅显示）
+        return;
+    }
     if (observation.hasGate)
     {
         const auto &gate = observation.gate;
         if (gate.width > 100 && gate.height < 130)
         {
-            if ((gate.y + gate.height) > ROWSIMAGE * 0.4) // 停车距离计算
-            {
-                stopping = true; // 停车等待标志
-                return;
-            }
-
             // 出停车场检测
             if (params->aiResultFresh &&
                 (gate.y + gate.height) > ROWSIMAGE * 0.25 &&
@@ -523,7 +535,17 @@ void FsmPark::handleTrackOut(const ParkObservation &observation,
 {
     (void)now;
     state.stageControlFrames++; // 超时计数
-    //[01] 道闸检测
+    //[01] 道闸检测：过近时通过PARK_GATE进入统一停车仲裁。
+    if (params->aiResultFresh)
+        params->setStopReason(control_algorithms::StopReason::PARK_GATE,
+                              gateRequiresStop(observation));
+    const bool gateStop =
+        params->hasStopReason(control_algorithms::StopReason::PARK_GATE);
+    if (gateStop)
+    {
+        stopping = true; // 停车等待标志（仅显示）
+        return;
+    }
     if (observation.hasGate)
     {
         const auto &gate = observation.gate;
@@ -533,11 +555,6 @@ void FsmPark::handleTrackOut(const ParkObservation &observation,
             {
                 state.stageControlFrames = 0;
                 state.gateConfirmations = 0;
-            }
-            if ((gate.y + gate.height) > ROWSIMAGE * 0.4) // 停车距离计算
-            {
-                stopping = true; // 停车等待标志
-                return;
             }
         }
     }
@@ -716,6 +733,9 @@ void FsmPark::reset()
     pointsEdgeRightPast.clear();
     stopping = false;
     params->setStopReason(control_algorithms::StopReason::PARK, false);
+    params->setStopReason(control_algorithms::StopReason::PARK_GATE, false);
+    params->setStopReason(
+        control_algorithms::StopReason::PARK_TARGET_LOST, false);
     params->geometryPolicy = GeometryPolicy::PERCEPTION_ALLOWED;
     waiting = false;   // 停车等待使能
     waitTimerActive = false;
@@ -744,6 +764,7 @@ void FsmPark::setStep(Step st)
     state.stageStartedAt = std::chrono::steady_clock::now();
     params->setStopReason(control_algorithms::StopReason::PARK,
         st == Step::PARKING || st == Step::WAIT_PICKUP);
+    params->setStopReason(control_algorithms::StopReason::PARK_GATE, false);
     if (st == Step::NONE || st == Step::ENABLE ||
         st == Step::PARKING || st == Step::WAIT_PICKUP)
         params->releasePlannerSafety(PathSource::PARK);
@@ -772,6 +793,15 @@ void FsmPark::updateGeometryPolicy()
         params->geometryPolicy = GeometryPolicy::PERCEPTION_ALLOWED;
         break;
     }
+}
+
+bool FsmPark::gateRequiresStop(const ParkObservation &observation) const
+{
+    if (!observation.hasGate)
+        return false;
+    const auto &gate = observation.gate;
+    return gate.width > 100 && gate.height < 130 &&
+           gate.y + gate.height > ROWSIMAGE * 0.4f;
 }
 
 /**
@@ -807,6 +837,9 @@ vector<PredictResult> FsmPark::findParkStation(const vector<PredictResult> &resu
 void FsmPark::resetLap()
 {
     params->setStopReason(control_algorithms::StopReason::PARK, false);
+    params->setStopReason(control_algorithms::StopReason::PARK_GATE, false);
+    params->setStopReason(
+        control_algorithms::StopReason::PARK_TARGET_LOST, false);
     reset();
     spots.reset();
     pointsEdgeLeftPast.clear();
