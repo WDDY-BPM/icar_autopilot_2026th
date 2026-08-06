@@ -32,7 +32,9 @@ if(ICAR_BUILD_LOGIC_TESTS OR ICAR_LOGIC_TESTS_ONLY)
   target_include_directories(control_algorithms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   icar_target_defaults(control_algorithms_test)
   add_test(NAME control_algorithms_test COMMAND control_algorithms_test)
-  add_executable(runtime_behavior_test tests/runtime_behavior_test.cpp)
+  add_executable(runtime_behavior_test tests/runtime_behavior_test.cpp
+    src/config/config_loader.cpp src/fsm/park/park_observation.cpp
+    src/fsm/park/park_path_planner.cpp)
   target_include_directories(runtime_behavior_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   icar_target_defaults(runtime_behavior_test)
   add_test(NAME runtime_behavior_test COMMAND runtime_behavior_test)
@@ -140,6 +142,7 @@ target_link_libraries(collection pthread ${OpenCV_LIBS} ${SERIAL_LIBRARIES})
 set(ICAR_SOURCES
   src/icar.cpp
   src/ctrl/center.cpp
+  src/ctrl/control_geometry.cpp
   src/ctrl/predeal.cpp
   src/ctrl/track.cpp
   src/fsm/busy.cpp
@@ -148,6 +151,9 @@ set(ICAR_SOURCES
   src/fsm/manualControl.cpp
   src/fsm/obstacle.cpp
   src/fsm/park.cpp
+  src/fsm/park/park_observation.cpp
+  src/fsm/park/park_path_planner.cpp
+  src/fsm/park/park_debug_renderer.cpp
   src/fsm/slow.cpp
   src/fsm/station.cpp
   src/fsm/stop.cpp
@@ -168,6 +174,7 @@ set(ICAR_SOURCES
   src/runtime/state_machines.cpp
   src/runtime/telemetry.cpp
   src/runtime/vehicle_output.cpp
+  src/config/config_loader.cpp
 )
 add_executable(icar ${ICAR_SOURCES})
 icar_target_defaults(icar)

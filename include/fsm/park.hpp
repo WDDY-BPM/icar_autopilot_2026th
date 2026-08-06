@@ -36,6 +36,9 @@
  */
 
 #include "fsm/fsm.hpp"
+#include "fsm/park_observation.hpp"
+#include "fsm/park_path_planner.hpp"
+#include "fsm/park/park_debug_renderer.hpp"
 
 /**
  * @brief 停车场控制
@@ -53,7 +56,6 @@ public:
 
   bool stopping = false; // 停车等待标志
   bool fitting = false;  // 控制中心拟合标志
-  uint16_t speedUp = 0;  // 出库加速延迟计数器
   float spotUp = 0.49;    // 上停车位距离像素百分比[0,1]
   float spotDown = 0.35;  // 下停车位距离像素百分比[0,1]
 
@@ -111,30 +113,38 @@ private:
     FORKOUT,  // 出库岔路转向
 
   };
-  Spots spots;                                                    // 车位信息
-  Step step = Step::NONE;                                         // 停车步骤
-  uint16_t countFlow = 0;                                         // 直行计数器
-  uint16_t countRes = 0;                                          // AI场景识别计数器
-  uint16_t countSes = 0;                                          // 场次计数器
-  uint16_t timeout = 0;                                           // 超时计数器
-  std::chrono::steady_clock::time_point forkOutStartedAt;         // 出库转向真实时间起点
-  std::chrono::steady_clock::time_point stepStartedAt;
-  std::chrono::steady_clock::time_point waitStartedAt;
+  struct ParkStateData
+  {
+    Step stage = Step::NONE;
+    uint16_t aiEvidenceFrames = 0;
+    uint16_t aiMissingFrames = 0;
+    uint16_t stageControlFrames = 0;
+    std::chrono::steady_clock::time_point forkOutStartedAt;
+    std::chrono::steady_clock::time_point stageStartedAt;
+    std::chrono::steady_clock::time_point waitStartedAt;
+  } state;
+  Spots spots;
+  Step &step = state.stage;
+  uint16_t &countRes = state.aiEvidenceFrames;
+  uint16_t &countSes = state.aiMissingFrames;
+  uint16_t &timeout = state.stageControlFrames;
+  std::chrono::steady_clock::time_point &forkOutStartedAt = state.forkOutStartedAt;
+  std::chrono::steady_clock::time_point &stepStartedAt = state.stageStartedAt;
+  std::chrono::steady_clock::time_point &waitStartedAt = state.waitStartedAt;
   bool waitTimerActive = false;
   int countOut = 0;                                               // 出库检测计数
   bool waiting = false;                                           // 停车等待使能
   int countIn = 0;                                                // 入库矫正计数器
   vector<vector<PointX>> pointsEdgeLeftPast, pointsEdgeRightPast; // 记录赛道入库车道线
+  ParkDebugRenderer debugRenderer;
 
   void setStep(Step st);
   void reset();
   void replanTracking();
   void replanTracking(bool left);
-  bool findSymbols(vector<PredictResult> results, int label);
-  bool findSymbols(vector<PredictResult> results, int label, PredictResult &target);
-  vector<PredictResult> findParkStation(vector<PredictResult> results);
-  PointX getResultCenter(PredictResult res);
-  void findParkCars(vector<PredictResult> results);
-  void setParkSpotOverride(int spotNumber); // 设置指定停车位
-  void setParkSpotOccupied(int spotNumber); // 设置指定停车位被占用
+  bool findSymbols(const vector<PredictResult> &results, int label) const;
+  bool findSymbols(const vector<PredictResult> &results, int label,
+                   PredictResult &target) const;
+  vector<PredictResult> findParkStation(const vector<PredictResult> &results) const;
+  PointX getResultCenter(const PredictResult &res) const;
 };

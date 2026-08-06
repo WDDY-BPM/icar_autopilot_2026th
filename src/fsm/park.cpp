@@ -71,20 +71,18 @@ FsmMode FsmPark::getMode()
 void FsmPark::run(Mat &img)
 {
     const auto now = std::chrono::steady_clock::now();
+    const ParkObservation observation = params->aiResultFresh
+        ? scanParkObservation(params->results) : ParkObservation{};
     if (!params->featureEnabled(Feature::PARK)) // 该模式未启用
     {
         params->clearPathOverride(PathSource::PARK);
         return;
     }
-    if (params->mustStop() &&
+    if (params->mustStopExcept(control_algorithms::StopReason::PLANNER) &&
         !params->hasStopReason(control_algorithms::StopReason::PARK))
         return;
 
     stopping = false; // 停车等待标志
-    speedUp++;
-    if (speedUp > 1000) // 出库缓加速计时
-        speedUp = 1000;
-
     if (params->ctrl.stop || waiting) // 禁行区不进行车库图像处理
     {
         if (params->ctrl.stop)
@@ -118,11 +116,10 @@ void FsmPark::run(Mat &img)
             break;
 
         bool parkDetectedThisFrame = false;
-        for (int i = 0; i < params->results.size(); i++)
+        for (const auto &marker : observation.parkMarkers)
         {
-            if (params->results[i].type == LABEL_PARK &&
-                params->results[i].height < 100 && params->results[i].width < 90 &&
-                params->results[i].x > COLSIMAGE / 2) // AI标志：停车场
+            if (marker.height < 100 && marker.width < 90 &&
+                marker.x > COLSIMAGE / 2) // AI标志：停车场
             {
                 parkDetectedThisFrame = true;
                 break;
@@ -159,21 +156,10 @@ void FsmPark::run(Mat &img)
         if (params->aiResultFresh)
         {
             countSes++;
-            if (findSymbols(params->results, LABEL_PARK))
+            if (!observation.parkMarkers.empty())
                 countSes = 0;
 
-            PredictResult fork;
-            fork.score = 0;
-            fork.y = 0;
-            for (int i = 0; i < params->results.size(); i++)
-            {
-                if (params->results[i].type == LABEL_CHOICE &&
-                    params->results[i].y > fork.y &&
-                    params->results[i].width < 120 && params->results[i].height < 120)
-                {
-                    fork = params->results[i];
-                }
-            }
+            const PredictResult &fork = observation.bestChoice;
             if (fork.score > 0)
             {
                 countSes = 0;
@@ -193,7 +179,7 @@ void FsmPark::run(Mat &img)
     {
         timeout++;
         replanTracking();                             // 车道线重绘（岔路左转）
-        if (params->aiResultFresh && findSymbols(params->results, LABEL_GATE))
+        if (observation.hasGate)
             countRes++;
         if (countRes > 2 || timeout > 24) // 转向超时：
         {
@@ -212,7 +198,7 @@ void FsmPark::run(Mat &img)
 
         if (params->aiResultFresh && timeout > 20)
         {
-            if (findSymbols(params->results, LABEL_FORK)) // 搜索AI标志：岔路箭头
+            if (!observation.forkMarkers.empty()) // 搜索AI标志：岔路箭头
                 countRes++;
         }
         break;
@@ -224,13 +210,12 @@ void FsmPark::run(Mat &img)
         countSes++; // 控制周期计数（仅用于超时，不作为AI证据）
 
         //[01] 道闸检测
-        for (int i = 0; i < params->results.size(); i++)
+        if (observation.hasGate)
         {
-            if (params->results[i].type == LABEL_GATE &&
-                params->results[i].width > 100 &&
-                params->results[i].height < 130) // 搜索AI标志：岔路箭头
+            const auto &gate = observation.gate;
+            if (gate.width > 100 && gate.height < 130)
             {
-                if ((params->results[i].y + params->results[i].height) > ROWSIMAGE * 0.4) // 停车距离计算
+                if ((gate.y + gate.height) > ROWSIMAGE * 0.4) // 停车距离计算
                 {
                     stopping = true; // 停车等待标志
                     break;
@@ -238,7 +223,7 @@ void FsmPark::run(Mat &img)
 
                 // 出停车场检测
                 if (params->aiResultFresh &&
-                    (params->results[i].y + params->results[i].height) > ROWSIMAGE * 0.25 &&
+                    (gate.y + gate.height) > ROWSIMAGE * 0.25 &&
                     spots.checked) // 道闸距离估算
                 {
                     countOut++;
@@ -256,17 +241,8 @@ void FsmPark::run(Mat &img)
         }
 
         //[02] 控制中心重规划
-        spots.forks = findParkStation(params->results); // 搜索停车位坐标
-        PredictResult resLeft;
-        resLeft.score = 0;
-        for (int i = 0; i < params->results.size(); i++) // 搜索左转箭头
-        {
-            if (params->results[i].type == LABEL_LEFT &&
-                params->results[i].width < 100 &&
-                params->results[i].height < 120 &&
-                params->results[i].score > resLeft.score)
-                resLeft = params->results[i];
-        }
+        spots.forks = findParkStation(observation.forkMarkers);
+        PredictResult resLeft = observation.bestLeft;
         if (spots.forks.size() > 0 || resLeft.score > 0)
         {
             int targetSpot = params->config.currentLapConfig->parkSpot;
@@ -329,7 +305,7 @@ void FsmPark::run(Mat &img)
         //[03] 空闲车位检测
         if (spots.forks.size() == 2) // 当AI图像同时检测到两个岔路箭头时判断车位是否空闲
         {
-            // 已通过setParkSpotOverride指定目标车位，非目标车位由FORKIN init标记，
+            // 目标车位来自圈次配置，非目标车位由FORKIN初始化为占用，
             // 不进行车辆检测（避免假车/他车误分类到目标车位；PredictResult默认未初始化，
             // carPark.score为随机值会导致所有车位被误判为已占用）
             for (int i = 0; i < 4; i++)
@@ -458,8 +434,8 @@ void FsmPark::run(Mat &img)
         }
 
         if (params->pathOverride.validFor(PathSource::PARK) &&
-            params->pathOverride.hasLeftEdge &&
-            params->pathOverride.hasRightEdge)
+            params->pathOverride.hasLeft() &&
+            params->pathOverride.hasRight())
         {
             pointsEdgeLeftPast.push_back(params->pathOverride.leftEdge);
             pointsEdgeRightPast.push_back(params->pathOverride.rightEdge);
@@ -515,17 +491,17 @@ void FsmPark::run(Mat &img)
     {
         timeout++; // 超时计数
         //[01] 道闸检测
-        for (int i = 0; i < params->results.size(); i++)
+        if (observation.hasGate)
         {
-            if (params->results[i].type == LABEL_GATE &&
-                params->results[i].width > 100 && params->results[i].height < 130) // 搜索AI标志：岔路箭头
+            const auto &gate = observation.gate;
+            if (gate.width > 100 && gate.height < 130)
             {
                 if (params->aiResultFresh)
                 {
                     timeout = 0;
                     countRes = 0;
                 }
-                if ((params->results[i].y + params->results[i].height) > ROWSIMAGE * 0.4) // 停车距离计算
+                if ((gate.y + gate.height) > ROWSIMAGE * 0.4) // 停车距离计算
                 {
                     stopping = true; // 停车等待标志
                     break;
@@ -534,17 +510,8 @@ void FsmPark::run(Mat &img)
         }
 
         //[02] 控制中心重规划
-        spots.forks = findParkStation(params->results); // 搜索停车位坐标
-        PredictResult resLeft;
-        resLeft.score = 0;
-        for (int i = 0; i < params->results.size(); i++) // 搜索左转箭头
-        {
-            if (params->results[i].type == LABEL_LEFT &&
-                params->results[i].width < 100 &&
-                params->results[i].height < 120 &&
-                params->results[i].score > resLeft.score)
-                resLeft = params->results[i];
-        }
+        spots.forks = findParkStation(observation.forkMarkers);
+        PredictResult resLeft = observation.bestLeft;
 
         if (spots.forks.size() > 0 || resLeft.score > 0)
         {
@@ -579,22 +546,12 @@ void FsmPark::run(Mat &img)
 
     case Step::FORKOUT: // 出库岔路转向
     {
-        speedUp = 0;
         timeout++;
         replanTracking(); // 车道线重绘（岔路左转）
 
         // 搜索左转标志
-        bool leftSign = false;
-        for (int i = 0; i < params->results.size(); i++) // 搜索左转箭头
-        {
-            if (params->results[i].type == LABEL_LEFT &&
-                params->results[i].width < 100 &&
-                params->results[i].height < 120)
-            {
-                leftSign = true;
-                break;
-            }
-        }
+        const bool leftSign = observation.hasLeft &&
+            observation.bestLeft.width < 100 && observation.bestLeft.height < 120;
         if (params->aiResultFresh)
         {
             if (leftSign) // 标志未丢失
@@ -701,8 +658,8 @@ void FsmPark::show(Mat &img)
             putText(img, "4", Point(COLSIMAGE - 31, spots.forks[1].y + spots.forks[1].height / 2),
                     cv::FONT_HERSHEY_TRIPLEX, 0.5, c4, 0.5);
         }
-        savePicture("../res/samples/imgs/", imgIpm);
-        savePicture("../res/samples/imgs/", img);
+        debugRenderer.maybeSave(params->config.debug, params->config.saveImg,
+                                img, imgIpm);
         break;
     }
     case Step::ENTER:
@@ -730,59 +687,13 @@ void FsmPark::show(Mat &img)
 }
 
 /**
- * @brief 设置指定停车位
- */
-void FsmPark::setParkSpotOverride(int spotNumber)
-{
-    std::cout << "[Park] setParkSpotOverride: " << spotNumber << std::endl;
-
-    // 使能指定的停车位
-    for (int i = 0; i < 4; i++)
-    {
-        spots.spotEnable[i] = false; // 先禁用所有停车位
-    }
-
-    if (spotNumber > 0 && spotNumber <= 4)
-    {
-        spots.spotEnable[spotNumber - 1] = true; // 使能指定的停车位
-        std::cout << "[Park] Enabled spot " << spotNumber << std::endl;
-    }
-}
-
-/**
- * @brief 设置指定停车位被占用
- */
-void FsmPark::setParkSpotOccupied(int spotNumber)
-{
-    if (spotNumber > 0 && spotNumber <= 4)
-    {
-        spots.spotEnable[spotNumber - 1] = false; // 设置指定停车位被占用
-
-        // 在计数器中增加，使其被判定为已占用
-        spots.counter[spotNumber - 1] = 5; // 设置足够大的计数值
-
-        // 为其他停车位设置不占用状态
-        for (int i = 0; i < 4; i++)
-        {
-            if (i != (spotNumber - 1))
-            {
-                // 清除其他停车位的占用状态
-                if (spots.counter[i] > 3)
-                {
-                    spots.spotEnable[i] = true;
-                }
-            }
-        }
-    }
-}
-
-/**
  * @brief 停车场数据复位
  *
  */
 void FsmPark::reset()
 {
     params->clearPathOverride(PathSource::PARK);
+    params->releasePlannerSafety(PathSource::PARK);
     countSes = 0;      // AI场景识别计数器
     timeout = 0;       // 超时计数器
     step = Step::NONE; // 停车步骤
@@ -790,8 +701,6 @@ void FsmPark::reset()
     waitTimerActive = false;
     countOut = 0;      // 出库检测计数
     countIn = 0;       // 入库矫正计数器
-    speedUp = 0;       // 出库加速延迟计数器
-    countFlow = 0;     // 直行计数器
     params->ctrl.back = false;
     params->ctrl.parking = false;
     params->ctrl.fitting = false;
@@ -813,10 +722,12 @@ void FsmPark::setStep(Step st)
     params->ctrl.fitting = false;
     params->setStopReason(control_algorithms::StopReason::PARK,
         st == Step::PARKING || st == Step::WAIT_PICKUP);
+    if (st == Step::NONE || st == Step::ENABLE ||
+        st == Step::PARKING || st == Step::WAIT_PICKUP)
+        params->releasePlannerSafety(PathSource::PARK);
     if (st == Step::FORKOUT)
         forkOutStartedAt = std::chrono::steady_clock::now();
     countIn = 0;  // 入库矫正计数器
-    countFlow = 0;
     params->ctrl.back = false; // 倒车失能
 }
 
@@ -899,7 +810,7 @@ void FsmPark::replanTracking(bool left)
  * @return true
  * @return false
  */
-bool FsmPark::findSymbols(vector<PredictResult> results, int label)
+bool FsmPark::findSymbols(const vector<PredictResult> &results, int label) const
 {
     for (int i = 0; i < results.size(); i++)
     {
@@ -918,7 +829,8 @@ bool FsmPark::findSymbols(vector<PredictResult> results, int label)
  * @return true
  * @return false
  */
-bool FsmPark::findSymbols(vector<PredictResult> results, int label, PredictResult &target)
+bool FsmPark::findSymbols(const vector<PredictResult> &results, int label,
+                          PredictResult &target) const
 {
     bool res = false;
     target.y = ROWSIMAGE - 1;
@@ -942,90 +854,9 @@ bool FsmPark::findSymbols(vector<PredictResult> results, int label, PredictResul
  *
  * @param results
  */
-vector<PredictResult> FsmPark::findParkStation(vector<PredictResult> results)
+vector<PredictResult> FsmPark::findParkStation(const vector<PredictResult> &results) const
 {
-    vector<PredictResult> resFork;
-    for (int i = 0; i < results.size(); i++)
-    {
-        if (results[i].type == LABEL_FORK)
-        {
-            if (results[i].width < 100 && results[i].height < 120 && results[i].y > 15)
-            {
-                resFork.push_back(results[i]);
-            }
-        }
-    }
-    vector<PredictResult> resSpot;   // size=0:无停车位，size=1:停车位1/2，size=2:停车位1/2/3/4
-    vector<PredictResult> resFilter; // 滤波后的坐标
-
-    if (resFork.size() < 1) // 未检测AI标志
-        return resSpot;
-
-    if (resFork.size() > 0)
-    {
-        resFilter.push_back(resFork[0]);
-        for (int i = 1; i < resFork.size(); i++) // Start from 1 since index 0 is already added
-        {
-            bool added = false;
-            for (int n = 0; n < resFilter.size(); n++)
-            {
-                PointX centerFilter = getResultCenter(resFilter[n]);
-                PointX centerResult = getResultCenter(resFork[i]);
-                if (centerFilter.x > 0 && centerFilter.y > 0 &&
-                    centerResult.x > 0 && centerResult.y > 0) // 数据有效
-                {
-                    if (abs(centerFilter.y - centerResult.y) > 30) // 两个坐标不重叠（降低阈值）
-                    {
-                        bool newFork = true;
-                        for (int y = 0; y < resFilter.size(); y++) // 重复筛选
-                        {
-                            PointX centerF = getResultCenter(resFilter[y]);
-                            if (abs(centerF.y - centerResult.y) < 30) // 数据重复
-                            {
-                                newFork = false;
-                                break;
-                            }
-                        }
-                        if (newFork)
-                        {
-                            resFilter.push_back(resFork[i]);
-                            added = true;
-                        }
-                        else if (resFork[i].score > resFilter[n].score) // 更新数据
-                        {
-                            resFilter[n] = resFork[i];
-                            added = true;
-                        }
-                    }
-                    else if (resFork[i].score > resFilter[n].score) // 更新数据
-                    {
-                        resFilter[n] = resFork[i];
-                        added = true;
-                    }
-                }
-            }
-            if (!added)
-            {
-            }
-        }
-    }
-    if (resFilter.size() == 1) // 一个车位
-    {
-        resSpot = resFilter;
-    }
-    else if (resFilter.size() == 2) // 两个车位标识
-    {
-        if ((resFilter[0].y + resFilter[0].height / 2) < (resFilter[1].y + resFilter[1].height / 2))
-        {
-            resSpot = resFilter;
-        }
-        else // 车位号重新排序
-        {
-            resSpot.push_back(resFilter[1]);
-            resSpot.push_back(resFilter[0]);
-        }
-    }
-    return resSpot;
+    return selectParkStations(results);
 }
 
 /**
@@ -1034,7 +865,7 @@ vector<PredictResult> FsmPark::findParkStation(vector<PredictResult> results)
  * @param res
  * @return PointX
  */
-PointX FsmPark::getResultCenter(PredictResult res)
+PointX FsmPark::getResultCenter(const PredictResult &res) const
 {
     PointX center;
     center.x = res.x + res.width / 2;
@@ -1047,36 +878,10 @@ PointX FsmPark::getResultCenter(PredictResult res)
 
     if (center.y < 0)
         center.y = 0;
-    else if (center.y > ROWSIMAGE)
-        center.y = ROWSIMAGE;
+    else if (center.y >= ROWSIMAGE)
+        center.y = ROWSIMAGE - 1;
 
     return center;
-}
-
-/**
- * @brief 检测停车位上是否有车
- *
- * @param results
- * @return vector<PredictResult>
- */
-void FsmPark::findParkCars(vector<PredictResult> results)
-{
-    // 数据复位
-    for (int i = 0; i < spots.carPark.size(); i++)
-        spots.carPark[i].score = 0;
-
-    if (spots.forks.size() != 2) // 基于岔路标志检测车位
-        return;
-
-    if (spots.forks[1].y < ROWSIMAGE / 4) // 图像清晰度限制
-        return;
-
-    spots.forksIpm.clear();
-    spots.carsIpm.clear();
-    Point2d spot1Ipm = ipm.homography(Point2d(spots.forks[0].y, spots.forks[0].x));
-    Point2d spot2Ipm = ipm.homography(Point2d(spots.forks[1].y, spots.forks[1].x));
-    spots.forksIpm.push_back(spot1Ipm);
-    spots.forksIpm.push_back(spot2Ipm);
 }
 
 void FsmPark::resetLap()
