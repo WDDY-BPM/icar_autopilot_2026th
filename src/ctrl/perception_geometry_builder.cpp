@@ -93,10 +93,16 @@ PerceptionGeometryResult buildPerceptionGeometry(
     result.geometryContinuous = continuous;
     const bool weakHybrid =
         result.recoveryMode == LaneRecoveryMode::WEAK_HYBRID;
+    const bool singleMode =
+        result.recoveryMode == LaneRecoveryMode::LEFT_SINGLE ||
+        result.recoveryMode == LaneRecoveryMode::RIGHT_SINGLE;
     const int minimumCenterPoints = weakHybrid
         ? std::max(8, config.singleLaneInteriorPointsMin)
+        : singleMode
+        ? std::max(12, config.singleLaneInteriorPointsMin)
         : 20;
-    const int minimumNearSamples = weakHybrid ? 8 : 4;
+    const int minimumNearSamples =
+        weakHybrid ? 8 : singleMode ? 6 : 4;
     const bool strictDual =
         result.recoveryMode == LaneRecoveryMode::STRICT_DUAL;
     const bool strictDualAcceptable =

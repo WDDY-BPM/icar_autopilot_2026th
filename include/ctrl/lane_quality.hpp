@@ -6,6 +6,30 @@
 
 namespace control_algorithms
 {
+// 车道判定共用具名常量（集中定义，禁止散落魔法数字）。
+inline constexpr float kClippedBorderRatio = 0.55f; // 边缘贴图像边界的比例阈值
+inline constexpr int kClippedBorderRun = 20;        // 边缘贴边的最长连续点数
+inline constexpr int kStartupCommonRows = 20;       // 启动严格双边最小公共行数
+inline constexpr int kStartupBottomTolerance = 6;   // 启动近场覆盖容差（行）
+inline constexpr int kEdgeBottomTolerance = 4;      // 质量评估近场覆盖容差（行）
+
+// 权威的近场覆盖判定：边缘是否延伸到图像底部（近场）。
+template <typename Point>
+inline bool edgeCoversNearField(const std::vector<Point> &edge,
+                                int bottomRequiredRow)
+{
+    for (const auto &point : edge)
+        if (point.x >= bottomRequiredRow)
+            return true;
+    return false;
+}
+
+// 启动稳定帧计数：有效帧+1，任一无效帧立即归零（严格连续）。
+inline int advanceStartupLaneCount(int stableCount, bool laneValid)
+{
+    return laneValid ? stableCount + 1 : 0;
+}
+
 struct LaneUnconfirmedState
 {
     int frames = 0;
@@ -100,6 +124,7 @@ struct EdgeReliability
     float borderRatio = 1.0f;
     float maximumJump = 0.0f;
     bool coversBottom = false;
+    bool clipped = false; // 本边缘被图像边界裁剪（另一侧出画面）
 };
 
 template <typename Point>
@@ -111,13 +136,12 @@ inline EdgeReliability assessEdgeReliability(const std::vector<Point> &edge,
     EdgeReliability result;
     result.pointCount = static_cast<int>(edge.size());
     if (edge.empty()) return result;
-    int borderPoints = 0, currentBorderRun = 0, nearestRow = 0;
+    int borderPoints = 0, currentBorderRun = 0;
     int leftRun = 0, rightRun = 0;
     int previousColumn = edge.front().y;
     for (std::size_t i = 0; i < edge.size(); ++i)
     {
         const auto &point = edge[i];
-        nearestRow = std::max(nearestRow, point.x);
         if (i > 0)
             result.maximumJump = std::max(result.maximumJump,
                 static_cast<float>(std::abs(point.y - previousColumn)));
@@ -139,7 +163,10 @@ inline EdgeReliability assessEdgeReliability(const std::vector<Point> &edge,
         if (!onLeftBorder && !onRightBorder) result.interiorPointCount++;
     }
     result.borderRatio = static_cast<float>(borderPoints) / edge.size();
-    result.coversBottom = nearestRow >= imageHeight - rowCutBottom - 4;
+    result.coversBottom = edgeCoversNearField(
+        edge, imageHeight - rowCutBottom - kEdgeBottomTolerance);
+    result.clipped = result.borderRatio > kClippedBorderRatio ||
+                     result.longestBorderRun > kClippedBorderRun;
     const bool borderFailure = result.borderRatio > 0.25f && result.longestBorderRun >= 8;
     result.expectedBorderRun = leftEdge ? result.leftBorderRun : result.rightBorderRun;
     result.oppositeBorderRun = leftEdge ? result.rightBorderRun : result.leftBorderRun;

@@ -215,5 +215,60 @@ int main()
         CHECK(result.centerLine.empty());
         CHECK(!result.candidateValid);
     }
+    // 12. Reliable right single edge -> RIGHT_SINGLE with near-field samples.
+    {
+        auto params = makeTestParams();
+        Track track;
+        track.quality = Track::LaneQuality{};
+        track.quality.rightSingleUsable = true;
+        track.pointsEdgeRight = straightEdge(220, 40, 240);
+        PlannedLaneWidthModel widthModel;
+        widthModel.ready = true;
+        widthModel.fallbackWidth = 96.0f;
+        for (int row = 176; row <= 220; ++row)
+            widthModel.widthByRow[row] = 100.0f;
+        const auto result = buildPerceptionGeometry(
+            track, widthModel, params->config);
+        CHECK(result.recoveryMode == LaneRecoveryMode::RIGHT_SINGLE);
+        CHECK(result.singleSide == 1);
+        CHECK(!result.centerLine.empty());
+        CHECK(result.nearSamples >= 6);
+        CHECK(result.candidateValid);
+    }
+    // 13. Reconstructed single center with an excessive jump must be invalid.
+    {
+        auto params = makeTestParams();
+        Track track;
+        track.quality = Track::LaneQuality{};
+        track.quality.leftSingleUsable = true;
+        track.pointsEdgeLeft = straightEdge(220, 120, 80);
+        const auto far = straightEdge(119, 40, 200);
+        track.pointsEdgeLeft.insert(
+            track.pointsEdgeLeft.end(), far.begin(), far.end());
+        const auto result = buildPerceptionGeometry(
+            track, PlannedLaneWidthModel{}, params->config);
+        CHECK(result.recoveryMode == LaneRecoveryMode::LEFT_SINGLE);
+        CHECK(!result.geometryContinuous);
+        CHECK(!result.candidateValid);
+    }
+    // 14. Width model not ready: safe fallback, bounded output, no crash.
+    {
+        auto params = makeTestParams();
+        Track track;
+        track.quality = Track::LaneQuality{};
+        track.quality.leftSingleUsable = true;
+        track.pointsEdgeLeft = straightEdge(220, 40, 60);
+        PlannedLaneWidthModel widthModel; // ready=false, fallbackWidth=96
+        const auto result = buildPerceptionGeometry(
+            track, widthModel, params->config);
+        CHECK(result.recoveryMode == LaneRecoveryMode::LEFT_SINGLE);
+        CHECK(!result.centerLine.empty());
+        bool inRange = true;
+        for (const auto &point : result.centerLine)
+            if (point.y < 0 || point.y >= COLSIMAGE)
+                inRange = false;
+        CHECK(inRange);
+        CHECK(result.candidateValid);
+    }
     return 0;
 }

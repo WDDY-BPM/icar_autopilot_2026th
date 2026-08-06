@@ -169,13 +169,19 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("raw_center_jump", core)
         self.assertIn("control_valid", core)
 
-    def test_startup_does_not_accept_weakened_single_edge(self):
-        core = read_runtime_sources()
-        lane_valid = core[core.index("const bool laneValid ="):]
-        lane_valid = lane_valid[:lane_valid.index(";")]
-        self.assertIn("leftReliable", lane_valid)
-        self.assertIn("rightReliable", lane_valid)
-        self.assertNotIn("SingleUsable", lane_valid)
+    def test_startup_accepts_stable_single_edge(self):
+        builder = (ROOT / "include/ctrl/perception_geometry_builder.hpp").read_text(
+            encoding="utf-8")
+        track = (ROOT / "src/ctrl/track.cpp").read_text(encoding="utf-8")
+        lane_quality = (ROOT / "include/ctrl/lane_quality.hpp").read_text(
+            encoding="utf-8")
+        self.assertIn("assessStartupLaneMode", builder)
+        self.assertIn("edgeCoversNearField", lane_quality)
+        self.assertIn("singleEdgeUsable", lane_quality)
+        # 另一侧贴边裁剪时，可靠侧允许单边重建；但不伪造双边可靠。
+        self.assertIn("rightClipped && stableLeftEdge", track)
+        self.assertIn("leftClipped && stableRightEdge", track)
+        self.assertNotIn("quality.leftReliable = true", track)
 
     def test_obsolete_outline_stop_path_remains_removed(self):
         center_h = (ROOT / "include/ctrl/center.hpp").read_text(encoding="utf-8")
@@ -250,11 +256,16 @@ class LaneControlBehaviorTests(unittest.TestCase):
 
     def test_curved_lane_can_release_startup_gate(self):
         core = read_runtime_sources()
-        center = (ROOT / 'src/ctrl/center.cpp').read_text(encoding='utf-8')
-        self.assertIn('laneQuality.leftReliable &&', core)
-        self.assertIn('laneQuality.leftReliable', core)
-        self.assertNotIn('laneQuality.centerJump <= 8.0f', core)
-        self.assertIn('const PerceptionGeometryResult perceptionGeometry', center)
+        builder = (ROOT / "include/ctrl/perception_geometry_builder.hpp").read_text(
+            encoding="utf-8")
+        self.assertIn("assessStartupLaneMode", core)
+        self.assertIn("edgeCoversNearField", core)
+        self.assertIn("advanceStartupLaneCount", core)
+        self.assertIn("startupLaneMode != LaneRecoveryMode::INVALID", core)
+        self.assertIn("startupLaneValidCount >= params->config.startupStableFrames", core)
+        self.assertIn("quality.leftReliable && quality.rightReliable", builder)
+        self.assertIn("LEFT_SINGLE", builder)
+        self.assertIn("RIGHT_SINGLE", builder)
 
     def test_visual_cone_confirmation_reaches_icar(self):
         launcher = (ROOT / 'src/start.py').read_text(encoding='utf-8')
@@ -308,13 +319,16 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertEqual(config['velHigh'], 0.20)
         self.assertEqual(config['velCurve'], 0.18)
 
-    def test_startup_single_lane_remains_locked(self):
+    def test_startup_single_edge_requires_stable_geometry(self):
         core = read_runtime_sources()
-        track = (ROOT / "src/ctrl/track.cpp").read_text(encoding="utf-8")
-        self.assertIn("const bool laneValid = laneQuality.leftReliable", core)
-        self.assertIn("laneQuality.rightReliable", core)
-        self.assertIn("quality.leftReliable && quality.rightReliable", track)
+        builder = (ROOT / "include/ctrl/perception_geometry_builder.hpp").read_text(
+            encoding="utf-8")
+        self.assertIn("leftSingleUsable && leftCoversNear", builder)
+        self.assertIn("rightSingleUsable && rightCoversNear", builder)
+        self.assertIn("singleLaneInteriorPointsMin", builder)
         self.assertIn("startupLaneValidCount >= params->config.startupStableFrames", core)
+        self.assertNotIn("quality.leftReliable = true",
+                         (ROOT / "src/ctrl/track.cpp").read_text(encoding="utf-8"))
 
     def test_production_code_wires_behavior_guards(self):
         track = (ROOT / "src/ctrl/track.cpp").read_text(encoding="utf-8")

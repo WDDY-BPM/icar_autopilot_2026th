@@ -18,9 +18,11 @@ function(icar_target_defaults target_name)
       $<$<CONFIG:Release>:-O3>)
     if(NOT ICAR_LOGIC_TESTS_ONLY)
       target_compile_options(${target_name} PRIVATE $<$<CONFIG:Release>:-flto>)
-      # target_link_options requires CMake 3.13; keep board compatibility
-      # with CMake 3.10 by passing the flag through the link line instead.
-      target_link_libraries(${target_name} PRIVATE $<$<CONFIG:Release>:-flto>)
+      # target_link_options requires CMake 3.13, and passing -flto through
+      # target_link_libraries would mix keyword/plain signatures. Use the
+      # old-style LINK_FLAGS_RELEASE property (CMake 3.10 compatible).
+      set_property(TARGET ${target_name} APPEND_STRING
+        PROPERTY LINK_FLAGS_RELEASE " -flto")
     endif()
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|aarch64)")
       target_compile_options(${target_name} PRIVATE -mcpu=native)
@@ -51,6 +53,7 @@ if(ICAR_BUILD_LOGIC_TESTS OR ICAR_LOGIC_TESTS_ONLY)
     src/ctrl/control_geometry_validator.cpp
     src/ctrl/perception_geometry_builder.cpp
     src/ctrl/planned_geometry_builder.cpp
+    src/ctrl/track.cpp
     src/fsm/obstacle.cpp
     src/fsm/park.cpp
     src/fsm/yfork.cpp
@@ -120,6 +123,15 @@ if(ICAR_BUILD_LOGIC_TESTS OR ICAR_LOGIC_TESTS_ONLY)
   icar_target_defaults(runtime_safety_chain_test)
   add_test(NAME runtime_safety_chain_test
     COMMAND runtime_safety_chain_test)
+
+  add_executable(track_behavior_test tests/track_behavior_test.cpp)
+  target_include_directories(track_behavior_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  target_compile_definitions(track_behavior_test PRIVATE
+    ICAR_TEST_RES_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/res/config.json")
+  target_link_libraries(track_behavior_test PRIVATE icar_logic_core)
+  icar_target_defaults(track_behavior_test)
+  add_test(NAME track_behavior_test COMMAND track_behavior_test)
 
   add_executable(runtime_behavior_test tests/runtime_behavior_test.cpp
     src/config/config_loader.cpp src/fsm/park/park_observation.cpp

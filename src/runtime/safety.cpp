@@ -53,15 +53,23 @@ bool Icar::updateStartupGate(bool receivedNewAiResult)
         }
 
         const auto &laneQuality = params->track->quality;
-        // At a curved start line, temporal center jump and perspective lane
-        // width variation can legitimately exceed the straight-road quality
-        // thresholds.  Requiring those metrics here could keep the startup
-        // gate closed forever even though both physical lane edges are sound.
-        // The normal controller performs its own recovery checks after release.
-        const bool laneValid = laneQuality.leftReliable &&
-            laneQuality.rightReliable && laneQuality.coversBottom &&
-            laneQuality.commonRows >= 20;
-        startupLaneValidCount = laneValid ? startupLaneValidCount + 1 : 0;
+        // 启动接受严格双边或稳定单边（弯道起点一侧边界出画面时，由可靠
+        // 单边重建中心线）。稳定帧数仍是 startupStableFrames，不许降低。
+        const int bottomRequiredRow =
+            ROWSIMAGE - params->track->rowCutBottom -
+            control_algorithms::kStartupBottomTolerance;
+        const bool leftCoversNear =
+            control_algorithms::edgeCoversNearField(
+                params->track->pointsEdgeLeft, bottomRequiredRow);
+        const bool rightCoversNear =
+            control_algorithms::edgeCoversNearField(
+                params->track->pointsEdgeRight, bottomRequiredRow);
+        const auto startupLaneMode = assessStartupLaneMode(
+            laneQuality, leftCoversNear, rightCoversNear, params->config);
+        const bool laneValid =
+            startupLaneMode != LaneRecoveryMode::INVALID;
+        startupLaneValidCount = control_algorithms::advanceStartupLaneCount(
+            startupLaneValidCount, laneValid);
 
         if (!params->config.requireStartCone)
         {
@@ -113,16 +121,35 @@ bool Icar::updateStartupGate(bool receivedNewAiResult)
         {
             const char *state = startupGateState == StartupGateState::WAIT_FOR_CONE
                 ? "WAIT_FOR_CONE" : "WAIT_FOR_REMOVAL";
+            const char *modeName =
+                startupLaneMode == LaneRecoveryMode::STRICT_DUAL ? "STRICT_DUAL" :
+                startupLaneMode == LaneRecoveryMode::LEFT_SINGLE ? "LEFT_SINGLE" :
+                startupLaneMode == LaneRecoveryMode::RIGHT_SINGLE ? "RIGHT_SINGLE" :
+                "INVALID";
             std::cout << "[Startup] state=" << state
                       << " coneDetected=" << coneDetected
                       << " coneSeen=" << startupConeSeenCount
                       << " coneMissing=" << startupConeMissingCount
+                      << " startupLaneMode=" << modeName
+                      << " strictDualStart="
+                      << (startupLaneMode == LaneRecoveryMode::STRICT_DUAL)
+                      << " leftSingleStart="
+                      << (startupLaneMode == LaneRecoveryMode::LEFT_SINGLE)
+                      << " rightSingleStart="
+                      << (startupLaneMode == LaneRecoveryMode::RIGHT_SINGLE)
                       << " leftReliable=" << laneQuality.leftReliable
                       << " rightReliable=" << laneQuality.rightReliable
+                      << " leftSingleUsable=" << laneQuality.leftSingleUsable
+                      << " rightSingleUsable=" << laneQuality.rightSingleUsable
+                      << " leftCoversNear=" << leftCoversNear
+                      << " rightCoversNear=" << rightCoversNear
+                      << " leftInteriorPoints=" << laneQuality.leftInteriorPoints
+                      << " rightInteriorPoints=" << laneQuality.rightInteriorPoints
                       << " coversBottom=" << laneQuality.coversBottom
                       << " commonRows=" << laneQuality.commonRows
                       << " laneValid=" << laneValid
                       << " laneFrames=" << startupLaneValidCount
+                      << " centerSamples=" << params->ctrl.centerEdge.size()
                       << " confidence=" << laneQuality.confidence
                       << " centerJump=" << laneQuality.centerJump
                       << " widthVariation=" << laneQuality.widthVariation

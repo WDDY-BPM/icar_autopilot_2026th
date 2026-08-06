@@ -46,6 +46,8 @@ public:
         bool rightReliable = false;
         bool leftSingleUsable = false;
         bool rightSingleUsable = false;
+        bool leftClipped = false;  // 左边缘被图像左边界裁剪
+        bool rightClipped = false; // 右边缘被图像右边界裁剪
         int leftInteriorPoints = 0;
         int rightInteriorPoints = 0;
         float leftBorderRatio = 1.0f;

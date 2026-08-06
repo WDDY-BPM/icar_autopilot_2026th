@@ -146,10 +146,20 @@ void Track::handle(bool isResearch, uint16_t rowStart)
                 const int width = right - left;
                 if (width <= 0)
                     return;
+                // 贴边道路色块：边界被图像裁剪但包含车头种子点且宽度足够时，
+                // 仍作为初始道路候选；裁剪侧由质量评估标记为border，不会把
+                // 图像边界伪装成真实车道线。
+                const bool clippedAtBorder =
+                    left <= 1 || right >= COLSIMAGE - 2;
+                const bool containsVehicleSeed =
+                    left <= COLSIMAGE / 2 && COLSIMAGE / 2 <= right;
+                const bool clippedSeedBlock =
+                    clippedAtBorder && containsVehicleSeed &&
+                    width >= COLSIMAGE / 4;
                 int limitWidth = static_cast<int>((COLSIMAGE - (ROWSIMAGE - row)) * 0.65f);
                 if (row < ROWSIMAGE * 0.75f)
                     limitWidth = static_cast<int>(COLSIMAGE * 0.5f);
-                if (width <= limitWidth)
+                if (!clippedSeedBlock && width <= limitWidth)
                     return;
                 const int center = (left + right) / 2;
                 const int referenceCenter = initialLeft >= 0
@@ -399,8 +409,22 @@ void Track::evaluateQuality()
         singleLaneInteriorPointsMin);
     quality.leftReliable = leftReliability.reliable;
     quality.rightReliable = rightReliability.reliable;
-    quality.leftSingleUsable = leftReliability.singleEdgeUsable;
-    quality.rightSingleUsable = rightReliability.singleEdgeUsable;
+    quality.leftClipped = leftReliability.clipped;
+    quality.rightClipped = rightReliability.clipped;
+    // 可靠可见边缘允许单边重建：自身可用，或另一侧被图像边界裁剪时
+    // 由本侧稳定边缘重建中心线。双边可靠性保持严格，不伪装。
+    const bool stableLeftEdge =
+        leftReliability.interiorPointCount >= singleLaneInteriorPointsMin &&
+        leftReliability.coversBottom;
+    const bool stableRightEdge =
+        rightReliability.interiorPointCount >= singleLaneInteriorPointsMin &&
+        rightReliability.coversBottom;
+    quality.leftSingleUsable =
+        leftReliability.singleEdgeUsable ||
+        (quality.rightClipped && stableLeftEdge);
+    quality.rightSingleUsable =
+        rightReliability.singleEdgeUsable ||
+        (quality.leftClipped && stableRightEdge);
     quality.leftInteriorPoints = leftReliability.interiorPointCount;
     quality.rightInteriorPoints = rightReliability.interiorPointCount;
     quality.leftBorderRatio = leftReliability.borderRatio;

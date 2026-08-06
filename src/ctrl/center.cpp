@@ -347,6 +347,20 @@ void Center::drawImage(shared_ptr<Params> &params, Mat &img)
     putText(img, to_string(params->ctrl.center), Point(COLSIMAGE / 2 - 10, ROWSIMAGE - 40),
             FONT_HERSHEY_PLAIN, 1.2, Scalar(0, 0, 255), 1); // 中心
 
+    // 调试画面：车道模式 + 中心线点数 + 近场点数（便于直接判断失败原因）
+    const char *laneModeName =
+        recoveryMode == LaneRecoveryMode::STRICT_DUAL ? "STRICT_DUAL" :
+        recoveryMode == LaneRecoveryMode::RELAXED_DUAL ? "RELAXED_DUAL" :
+        recoveryMode == LaneRecoveryMode::WEAK_HYBRID ? "WEAK_HYBRID" :
+        recoveryMode == LaneRecoveryMode::LEFT_SINGLE ? "LEFT_SINGLE" :
+        recoveryMode == LaneRecoveryMode::RIGHT_SINGLE ? "RIGHT_SINGLE" :
+        "INVALID";
+    putText(img, string("lane=") + laneModeName +
+            " samples=" + to_string(usableCenterRows) +
+            " near=" + to_string(nearCenterSamples),
+            Point(10, 3 * dis), FONT_HERSHEY_PLAIN, 0.7,
+            Scalar(0, 0, 255), 1);
+
     // 绘制FSM状态
     showMode(img, params->mode);
 }

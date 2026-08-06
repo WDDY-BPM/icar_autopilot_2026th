@@ -23,6 +23,7 @@ enum
     FONT_HERSHEY_PLAIN = 0,
     FONT_HERSHEY_TRIPLEX = 3,
     FILLED = -1,
+    LINE_AA = 16,
     INTER_LINEAR = 1,
     CV_INTER_LINEAR = 1
 };
