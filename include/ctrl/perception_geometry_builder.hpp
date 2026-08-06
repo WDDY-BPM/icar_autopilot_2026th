@@ -19,11 +19,12 @@ struct PerceptionGeometryResult
 {
     std::vector<PointX> centerLine;
     LaneRecoveryMode recoveryMode{LaneRecoveryMode::INVALID};
-    bool candidateValid{false};
     int singleSide{0};
     int nearSamples{0};
     int farSamples{0};
     bool widthConsistent{false};
+    bool geometryContinuous{false};
+    bool candidateValid{false};
 };
 
 PerceptionGeometryResult buildPerceptionGeometry(

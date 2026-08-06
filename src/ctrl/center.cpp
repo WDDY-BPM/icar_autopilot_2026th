@@ -205,9 +205,10 @@ void Center::fitting(shared_ptr<Params> &params)
     else
         sigmaCenter = 1000;
 
-    // Two independently reliable, bottom-covering edges provide a usable
-    // centerline even on a tight curve. Aggregate quality.valid also contains
-    // straight-road temporal/width thresholds and must not reject that path.
+    // Dynamic continuity (previous-frame dependent) stays in Center; every
+    // static validity decision (row alignment, recovery mode, width
+    // consistency, near/far samples, base geometry continuity) is owned by
+    // PerceptionGeometryBuilder.
     bool degradedCenterContinuous = false;
     const bool degradedMode = recoveryMode == LaneRecoveryMode::RELAXED_DUAL ||
         recoveryMode == LaneRecoveryMode::WEAK_HYBRID ||
@@ -225,26 +226,21 @@ void Center::fitting(shared_ptr<Params> &params)
         degradedCenterContinuous = limited.valid;
         if (limited.valid) params->ctrl.center = limited.appliedCenter;
     }
-    const bool strictValid = recoveryMode == LaneRecoveryMode::STRICT_DUAL &&
-        laneQuality.valid && params->ctrl.centerEdge.size() >= 20;
-    const bool relaxedValid = recoveryMode == LaneRecoveryMode::RELAXED_DUAL &&
-        params->ctrl.centerEdge.size() >= 20 && degradedCenterContinuous;
-    const bool weakHybridValid = recoveryMode == LaneRecoveryMode::WEAK_HYBRID &&
-        params->ctrl.centerEdge.size() >= 12 && nearCenterSamples >= 8 &&
-        degradedCenterContinuous;
-    const bool singleValid = (recoveryMode == LaneRecoveryMode::LEFT_SINGLE ||
-        recoveryMode == LaneRecoveryMode::RIGHT_SINGLE) &&
-        params->ctrl.centerEdge.size() >= 20 && degradedCenterContinuous;
+    const bool continuityValid = !degradedMode || degradedCenterContinuous;
     const bool candidateValid = plannedPath
         ? controlWindowValid && plannedValidation.valid &&
             params->pathOverride.validFor(laneInput.source) &&
             pathSourceAllowed(laneInput.source, params->mode) &&
             validateControlGeometry(params->ctrl.centerEdge, selectedSource,
                 params->geometryPolicy, laneInput.source, params->mode)
-        : controlWindowValid &&
-            (strictValid || relaxedValid || weakHybridValid || singleValid) &&
-            validateControlGeometry(params->ctrl.centerEdge, selectedSource,
-                params->geometryPolicy, PathSource::NONE, params->mode);
+        : visionLaneMode
+            ? perceptionGeometry.candidateValid && controlWindowValid &&
+                continuityValid &&
+                validateControlGeometry(params->ctrl.centerEdge, selectedSource,
+                    params->geometryPolicy, PathSource::NONE, params->mode)
+            : controlWindowValid &&
+                validateControlGeometry(params->ctrl.centerEdge, selectedSource,
+                    params->geometryPolicy, PathSource::NONE, params->mode);
     const bool perceptionControlled = selectedSource ==
         ControlGeometrySource::PERCEPTION;
     if (perceptionControlled && !params->manualTakeover)

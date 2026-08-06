@@ -138,10 +138,31 @@ int main()
                           [](const PointX &point) { return point.x == 220; }));
 
         PathOverride invalidGap;
-        leftEdge.erase(leftEdge.begin() + 1, leftEdge.begin() + 4);
+        leftEdge.erase(leftEdge.begin() + 1, leftEdge.begin() + 10);
         invalidGap.setEdges(PathSource::PARK, leftEdge, rightEdge,
                             0.8f, 0.15f, 2);
-        CHECK(!buildPlannedGeometry(invalidGap, FsmMode::PARK).valid);
+        // A hole wider than the interpolation gap splits the path into
+        // segments; the near-field segment must remain usable instead of
+        // rejecting the whole path because of a far-side gap.
+        const auto splitResult =
+            buildPlannedGeometry(invalidGap, FsmMode::PARK);
+        CHECK(splitResult.valid);
+        CHECK(std::any_of(splitResult.centerLine.begin(),
+                          splitResult.centerLine.end(),
+                          [](const PointX &point) {
+                              return point.x >= 176;
+                          }));
+
+        PathOverride noNear;
+        std::vector<PointX> farLeft;
+        std::vector<PointX> farRight;
+        for (int row = 170; row >= 150; --row)
+        {
+            farLeft.emplace_back(row, 80);
+            farRight.emplace_back(row, 240);
+        }
+        noNear.setEdges(PathSource::PARK, farLeft, farRight, 0.8f, 0.15f, 2);
+        CHECK(!buildPlannedGeometry(noNear, FsmMode::PARK).valid);
     }
     {
         control_algorithms::StopReasonState reasons;
