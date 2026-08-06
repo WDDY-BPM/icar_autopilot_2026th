@@ -103,15 +103,30 @@ private:
     EXIT,     // 出库
     TRACKOUT, // 出库巡线
     FORKOUT,  // 出库岔路转向
+    TARGET_LOST_STOP,    // 目标车位丢失：安全停车，禁止跳过任务
+    EXIT_UNCONFIRMED_STOP, // 出口未确认：安全停车，禁止完成任务
   };
   struct ParkStateData
   {
+    enum class ParkMissionProgress
+    {
+      NOT_STARTED,
+      ENTERING,
+      PARKED,
+      PICKUP_COMPLETED,
+      EXIT_REPLAY_COMPLETED
+    };
+
     Step stage = Step::NONE;
+    ParkMissionProgress missionProgress{
+        ParkMissionProgress::NOT_STARTED};
     int parkMarkerConfirmations = 0;      // NONE：停车场标志连续确认帧数（仅fresh推进）
     int markerMissingFreshFrames = 0;     // 当前阶段AI标志连续缺失帧数（仅fresh推进）
     int choiceApproachConfirmations = 0;  // ENABLE：车位选择标志接近确认帧数
     int gateConfirmations = 0;            // FORKIN/TRACKIN/TRACKOUT：道闸/出口标志确认帧数
+    int exitSignSeenConfirmations = 0;    // FORKOUT：出口左转标志连续确认帧数（先武装）
     int exitSignMissingConfirmations = 0; // FORKOUT：出口左转标志连续消失确认帧数
+    bool exitSignArmed = false;           // FORKOUT：已连续确认出口标志后才允许缺失计数
     int stageControlFrames = 0;           // 通用阶段超时计数
     int trackInControlFrames = 0;         // TRACKIN 纯控制周期计数（非AI证据）
     std::chrono::steady_clock::time_point forkOutStartedAt;
@@ -139,6 +154,10 @@ private:
   void handleExit(const ParkObservation &, std::chrono::steady_clock::time_point);
   void handleTrackOut(const ParkObservation &, std::chrono::steady_clock::time_point);
   void handleForkOut(const ParkObservation &, std::chrono::steady_clock::time_point);
+  void handleTargetLostStop(const ParkObservation &,
+                            std::chrono::steady_clock::time_point);
+  void handleExitUnconfirmedStop(const ParkObservation &,
+                                 std::chrono::steady_clock::time_point);
   void updateGeometryPolicy();
   bool gateRequiresStop(const ParkObservation &observation) const;
   void reset();

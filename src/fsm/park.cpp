@@ -135,6 +135,12 @@ void FsmPark::dispatchStage(const ParkObservation &observation,
     case Step::EXIT: handleExit(observation, now); break;
     case Step::TRACKOUT: handleTrackOut(observation, now); break;
     case Step::FORKOUT: handleForkOut(observation, now); break;
+    case Step::TARGET_LOST_STOP:
+        handleTargetLostStop(observation, now);
+        break;
+    case Step::EXIT_UNCONFIRMED_STOP:
+        handleExitUnconfirmedStop(observation, now);
+        break;
     }
 }
 
@@ -142,8 +148,8 @@ void FsmPark::handleNone(const ParkObservation &observation,
                          std::chrono::steady_clock::time_point now)
 {
     (void)now;
-    // 只有新AI帧才允许累计停车场标志证据；连续缺失5帧立即清零，
-    // 避免非连续证据无限累计。
+    // 只有新AI帧才允许累计停车场标志证据；任何缺失的fresh帧立即清零，
+    // 入口标志必须是严格连续的确认，避免非连续证据无限累计。
     if (!params->aiResultFresh)
         return;
 
@@ -162,14 +168,10 @@ void FsmPark::handleNone(const ParkObservation &observation,
         state.parkMarkerConfirmations++;
         state.markerMissingFreshFrames = 0;
     }
-    else if (state.parkMarkerConfirmations > 0)
+    else
     {
+        state.parkMarkerConfirmations = 0;
         state.markerMissingFreshFrames++;
-        if (state.markerMissingFreshFrames >= 5)
-        {
-            state.parkMarkerConfirmations = 0;
-            state.markerMissingFreshFrames = 0;
-        }
     }
 
     if (state.parkMarkerConfirmations >= 3)
@@ -202,6 +204,7 @@ void FsmPark::handleEnable(const ParkObservation &observation,
     }
     else
     {
+        state.choiceApproachConfirmations = 0;
         state.markerMissingFreshFrames++;
     }
 
@@ -226,8 +229,14 @@ void FsmPark::handleForkIn(const ParkObservation &observation,
         return;
     }
 
-    if (observation.hasGate)
-        state.gateConfirmations++;
+    // 道闸/岔路箭头证据只在fresh帧上按连续确认累计，缺失立即清零。
+    if (params->aiResultFresh)
+    {
+        const bool gateOrForkEvidence =
+            observation.hasGate || !observation.forkMarkers.empty();
+        state.gateConfirmations =
+            gateOrForkEvidence ? state.gateConfirmations + 1 : 0;
+    }
     if (state.gateConfirmations > 2 || state.stageControlFrames > 24) // 转向超时：
     {
         spots.reset(); // 车位信息复位
@@ -242,12 +251,6 @@ void FsmPark::handleForkIn(const ParkObservation &observation,
         countOut = 0;
         setStep(Step::TRACKIN); // 设置停车场新步骤
         return;
-    }
-
-    if (params->aiResultFresh && state.stageControlFrames > 20)
-    {
-        if (!observation.forkMarkers.empty()) // 搜索AI标志：岔路箭头
-            state.gateConfirmations++;
     }
 }
 
@@ -424,9 +427,24 @@ void FsmPark::handleTrackIn(const ParkObservation &observation,
         }
     }
 
-    // 出库状态切换（纯控制周期超时，不混入AI证据计数器）
+    // 超时切换（纯控制周期计数，不混入AI证据计数器）
     if (state.trackInControlFrames > 100 && state.stageControlFrames > 23)
-        setStep(Step::FORKOUT);
+    {
+        const int parkSpot = params->config.currentLapConfig->parkSpot;
+        if (parkSpot == 0)
+        {
+            // 只穿过停车场：允许继续FORKOUT，但任务进度仍为NOT_STARTED，
+            // 因此不会把停车任务错误标记为完成。
+            setStep(Step::FORKOUT);
+        }
+        else
+        {
+            // 目标车位任务（parkSpot 1~4）：禁止静默跳过入库。
+            printf("[Park] TrackIn timeout with target spot %d; "
+                   "entering safe stop, lap task NOT completed.\n", parkSpot);
+            setStep(Step::TARGET_LOST_STOP);
+        }
+    }
 }
 
 void FsmPark::handleEnter(const ParkObservation &observation,
@@ -595,30 +613,101 @@ void FsmPark::handleForkOut(const ParkObservation &observation,
     state.stageControlFrames++;
     replanTracking(); // 车道线重绘（岔路左转）
 
-    // 搜索左转标志：只有连续消失确认才认为已经退出岔路。
+    // 出口确认流程：先连续看到出口左转标志（武装），武装后连续消失才确认。
+    // 从未武装时缺失不算出口确认，防止"标志从未出现却把缺失当出口"。
     const bool leftSign = observation.hasLeft &&
         observation.bestLeft.width < 100 && observation.bestLeft.height < 120;
     if (params->aiResultFresh)
     {
-        if (leftSign) // 标志未丢失
+        if (leftSign)
+        {
+            state.exitSignSeenConfirmations++;
+            if (state.exitSignSeenConfirmations >= 2)
+                state.exitSignArmed = true;
             state.exitSignMissingConfirmations = 0;
-        else
+        }
+        else if (state.exitSignArmed)
+        {
             state.exitSignMissingConfirmations++;
+        }
+        else
+        {
+            state.exitSignSeenConfirmations = 0;
+            state.exitSignMissingConfirmations = 0;
+        }
     }
 
     const bool exitTimedOut =
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - state.forkOutStartedAt).count() >= 2000;
-    if (exitTimedOut || state.exitSignMissingConfirmations > 2) // 转向超时
+    const bool missionReady = state.missionProgress ==
+        ParkStateData::ParkMissionProgress::EXIT_REPLAY_COMPLETED;
+    const bool exitConfirmed = state.exitSignArmed &&
+        state.exitSignMissingConfirmations >= 3;
+
+    if (exitConfirmed)
     {
-        const bool exitConfirmed = state.exitSignMissingConfirmations > 2;
         params->ctrl.countAcc = params->config.startupRampFrames; // 跳过缓加速，直接恢复速度
         params->ctrl.yforkReset = true; // 通知yfork复位，防止残留forkSeen误触发
-        if (exitConfirmed)
+        if (missionReady)
             params->completeLapTask("park-exit");
         else
-            printf("[Park] Exit timed out; lap task remains incomplete\n");
+            printf("[Park] Exit confirmed without completed parking mission; "
+                   "lap task remains incomplete\n");
         setStep(Step::NONE); // 设置停车场新步骤
+        return;
+    }
+
+    if (exitTimedOut)
+    {
+        // 超时且未确认出口：进入安全停止状态，保持lapTaskCompleted=false，
+        // 不得静默退出并继续下一圈。
+        printf("[Park] ForkOut timeout without exit confirmation; "
+               "holding safe stop, lap task NOT completed\n");
+        setStep(Step::EXIT_UNCONFIRMED_STOP);
+    }
+}
+
+void FsmPark::handleTargetLostStop(
+    const ParkObservation &observation,
+    std::chrono::steady_clock::time_point now)
+{
+    (void)now;
+    params->setStopReason(
+        control_algorithms::StopReason::PARK_TARGET_LOST, true);
+    // 目标重新可识别后恢复TRACKIN继续任务；未恢复前保持停车。
+    if (params->aiResultFresh &&
+        (!observation.forkMarkers.empty() ||
+         observation.bestLeft.score > 0))
+        setStep(Step::TRACKIN);
+}
+
+void FsmPark::handleExitUnconfirmedStop(
+    const ParkObservation &observation,
+    std::chrono::steady_clock::time_point now)
+{
+    (void)now;
+    params->setStopReason(
+        control_algorithms::StopReason::PARK_TARGET_LOST, true);
+    // 出口左转标志重新连续确认后恢复FORKOUT，继续出口确认流程。
+    const bool leftSign = observation.hasLeft &&
+        observation.bestLeft.width < 100 && observation.bestLeft.height < 120;
+    if (params->aiResultFresh)
+    {
+        if (leftSign)
+        {
+            state.exitSignSeenConfirmations++;
+            if (state.exitSignSeenConfirmations >= 2)
+            {
+                state.exitSignArmed = true;
+                state.exitSignMissingConfirmations = 0;
+                setStep(Step::FORKOUT);
+            }
+        }
+        else
+        {
+            state.exitSignSeenConfirmations = 0;
+        }
     }
 }
 
@@ -713,6 +802,12 @@ void FsmPark::show(Mat &img)
     case Step::FORKOUT:
         str = "Forkout";
         break;
+    case Step::TARGET_LOST_STOP:
+        str = "Target lost stop";
+        break;
+    case Step::EXIT_UNCONFIRMED_STOP:
+        str = "Exit unconfirmed stop";
+        break;
     default:
         break;
     }
@@ -757,16 +852,53 @@ void FsmPark::setStep(Step st)
     state.markerMissingFreshFrames = 0;
     state.choiceApproachConfirmations = 0;
     state.gateConfirmations = 0;
+    state.exitSignSeenConfirmations = 0;
     state.exitSignMissingConfirmations = 0;
     state.stageControlFrames = 0;  // 超时计数器
     state.trackInControlFrames = 0;
+    // 任务进度只能沿真实完成的阶段推进，禁止跳过入库/停车/出库流程。
+    switch (st)
+    {
+    case Step::ENTER:
+        if (state.missionProgress ==
+            ParkStateData::ParkMissionProgress::NOT_STARTED)
+            state.missionProgress =
+                ParkStateData::ParkMissionProgress::ENTERING;
+        break;
+    case Step::PARKING:
+        if (state.missionProgress ==
+            ParkStateData::ParkMissionProgress::ENTERING)
+            state.missionProgress =
+                ParkStateData::ParkMissionProgress::PARKED;
+        break;
+    case Step::EXIT:
+        if (state.missionProgress ==
+            ParkStateData::ParkMissionProgress::PARKED)
+            state.missionProgress =
+                ParkStateData::ParkMissionProgress::PICKUP_COMPLETED;
+        break;
+    case Step::TRACKOUT:
+        if (state.missionProgress ==
+            ParkStateData::ParkMissionProgress::PICKUP_COMPLETED)
+            state.missionProgress =
+                ParkStateData::ParkMissionProgress::EXIT_REPLAY_COMPLETED;
+        break;
+    default:
+        break;
+    }
+    if (st == Step::NONE)
+        state.exitSignArmed = false;
     state.stage = st;    // 停车步骤
     state.stageStartedAt = std::chrono::steady_clock::now();
     params->setStopReason(control_algorithms::StopReason::PARK,
         st == Step::PARKING || st == Step::WAIT_PICKUP);
     params->setStopReason(control_algorithms::StopReason::PARK_GATE, false);
+    params->setStopReason(control_algorithms::StopReason::PARK_TARGET_LOST,
+        st == Step::TARGET_LOST_STOP ||
+        st == Step::EXIT_UNCONFIRMED_STOP);
     if (st == Step::NONE || st == Step::ENABLE ||
-        st == Step::PARKING || st == Step::WAIT_PICKUP)
+        st == Step::PARKING || st == Step::WAIT_PICKUP ||
+        st == Step::TARGET_LOST_STOP || st == Step::EXIT_UNCONFIRMED_STOP)
         params->releasePlannerSafety(PathSource::PARK);
     if (st == Step::FORKOUT)
         state.forkOutStartedAt = std::chrono::steady_clock::now();
@@ -787,6 +919,8 @@ void FsmPark::updateGeometryPolicy()
         break;
     case Step::PARKING:
     case Step::WAIT_PICKUP:
+    case Step::TARGET_LOST_STOP:
+    case Step::EXIT_UNCONFIRMED_STOP:
         params->geometryPolicy = GeometryPolicy::STOPPED;
         break;
     default:

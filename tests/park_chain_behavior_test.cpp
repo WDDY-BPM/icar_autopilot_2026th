@@ -29,6 +29,11 @@ PredictResult forkMarker(int y, int height = 20)
     return PredictResult{LABEL_FORK, "", 0.9f, 120, y, 30, height};
 }
 
+PredictResult leftMarker()
+{
+    return PredictResult{LABEL_LEFT, "", 0.9f, 150, 100, 30, 30};
+}
+
 PredictResult closeGate()
 {
     return PredictResult{LABEL_GATE, "", 0.9f, 150, 200, 120, 100};
@@ -141,8 +146,18 @@ int main()
 
         // FORKOUT: only continuous left-sign disappearance completes the lap.
         CHECK(params->geometryPolicy == GeometryPolicy::PLANNED_REQUIRED);
+        CHECK(ParkFsmTestFixture::missionProgress(park) ==
+              ParkFsmTestFixture::MissionProgress::EXIT_REPLAY_COMPLETED);
         params->lapTaskRequired = true;
         params->lapTaskCompleted = false;
+        // 必须先武装：连续2帧新鲜左转标志。
+        CHECK(!ParkFsmTestFixture::exitSignArmed(park));
+        ParkFsmTestFixture::run(park, img, {leftMarker()}, true);
+        CHECK(!ParkFsmTestFixture::exitSignArmed(park));
+        ParkFsmTestFixture::run(park, img, {leftMarker()}, true);
+        CHECK(ParkFsmTestFixture::exitSignArmed(park));
+        CHECK(ParkFsmTestFixture::exitSignSeen(park) == 2);
+        // 武装后连续3帧缺失才确认出口。
         for (int frame = 0; frame < 3; ++frame)
             ParkFsmTestFixture::run(park, img, {}, true);
         CHECK(ParkFsmTestFixture::stage(park) == ParkStep::NONE);
@@ -151,7 +166,8 @@ int main()
         CHECK(params->ctrl.countAcc == params->config.startupRampFrames);
     }
 
-    // FORKOUT 2s timeout must NOT complete the lap task.
+    // FORKOUT 2s timeout without arming must hold a safe stop and must NOT
+    // complete the lap task; fresh left-sign frames recover back to FORKOUT.
     {
         auto params = makeTestParams();
         params->config.currentLapConfig->park = true;
@@ -163,8 +179,64 @@ int main()
         ParkFsmTestFixture::setForkOutStartedAt(
             park, Clock::now() - std::chrono::milliseconds(2100));
         ParkFsmTestFixture::run(park, img, {}, true);
-        CHECK(ParkFsmTestFixture::stage(park) == ParkStep::NONE);
+        CHECK(ParkFsmTestFixture::stage(park) ==
+              ParkStep::EXIT_UNCONFIRMED_STOP);
         CHECK(!params->lapTaskCompleted);
+        CHECK(params->hasStopReason(
+            control_algorithms::StopReason::PARK_TARGET_LOST));
+        CHECK(params->geometryPolicy == GeometryPolicy::STOPPED);
+        CHECK(params->mustStop());
+        // 出口标志重新连续出现后恢复FORKOUT。
+        ParkFsmTestFixture::run(park, img, {leftMarker()}, true);
+        ParkFsmTestFixture::run(park, img, {leftMarker()}, true);
+        CHECK(ParkFsmTestFixture::stage(park) == ParkStep::FORKOUT);
+        CHECK(!params->hasStopReason(
+            control_algorithms::StopReason::PARK_TARGET_LOST));
+    }
+
+    // TRACKIN timeout with a configured target spot must enter the safe
+    // TARGET_LOST_STOP instead of silently skipping to FORKOUT/completing.
+    {
+        auto params = makeTestParams();
+        params->config.currentLapConfig->park = true;
+        params->config.currentLapConfig->parkSpot = 4;
+        params->lapTaskRequired = true;
+        params->lapTaskCompleted = false;
+        FsmPark park(params);
+        cv::Mat img;
+        ParkFsmTestFixture::setStage(park, ParkStep::TRACKIN);
+        for (int frame = 0; frame < 101; ++frame)
+            ParkFsmTestFixture::run(park, img, {}, false);
+        CHECK(ParkFsmTestFixture::stage(park) == ParkStep::TARGET_LOST_STOP);
+        CHECK(!params->lapTaskCompleted);
+        CHECK(params->hasStopReason(
+            control_algorithms::StopReason::PARK_TARGET_LOST));
+        CHECK(params->geometryPolicy == GeometryPolicy::STOPPED);
+        CHECK(params->mustStop());
+        // 目标标志重新出现后恢复TRACKIN。
+        ParkFsmTestFixture::run(park, img, {forkMarker(100)}, true);
+        CHECK(ParkFsmTestFixture::stage(park) == ParkStep::TRACKIN);
+        CHECK(!params->hasStopReason(
+            control_algorithms::StopReason::PARK_TARGET_LOST));
+    }
+
+    // TRACKIN pass-through (parkSpot=0) timeout may advance to FORKOUT but
+    // must never complete the parking lap task.
+    {
+        auto params = makeTestParams();
+        params->config.currentLapConfig->park = true;
+        params->config.currentLapConfig->parkSpot = 0;
+        params->lapTaskRequired = true;
+        params->lapTaskCompleted = false;
+        FsmPark park(params);
+        cv::Mat img;
+        ParkFsmTestFixture::setStage(park, ParkStep::TRACKIN);
+        for (int frame = 0; frame < 101; ++frame)
+            ParkFsmTestFixture::run(park, img, {}, false);
+        CHECK(ParkFsmTestFixture::stage(park) == ParkStep::FORKOUT);
+        CHECK(!params->lapTaskCompleted);
+        CHECK(ParkFsmTestFixture::missionProgress(park) ==
+              ParkFsmTestFixture::MissionProgress::NOT_STARTED);
     }
 
     // TRACKIN gate too close must set PARK_GATE through stop arbitration;

@@ -10,6 +10,7 @@
 struct ParkFsmTestFixture
 {
     using Step = FsmPark::Step;
+    using MissionProgress = FsmPark::ParkStateData::ParkMissionProgress;
 
     static Step stage(const FsmPark &park) { return park.state.stage; }
 
@@ -60,6 +61,26 @@ struct ParkFsmTestFixture
     static int exitSignMissing(const FsmPark &park)
     {
         return park.state.exitSignMissingConfirmations;
+    }
+
+    static int exitSignSeen(const FsmPark &park)
+    {
+        return park.state.exitSignSeenConfirmations;
+    }
+
+    static bool exitSignArmed(const FsmPark &park)
+    {
+        return park.state.exitSignArmed;
+    }
+
+    static MissionProgress missionProgress(const FsmPark &park)
+    {
+        return park.state.missionProgress;
+    }
+
+    static void setMissionProgress(FsmPark &park, MissionProgress progress)
+    {
+        park.state.missionProgress = progress;
     }
 
     static std::size_t replayHistorySize(const FsmPark &park)

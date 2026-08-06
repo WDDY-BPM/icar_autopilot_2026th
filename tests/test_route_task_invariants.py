@@ -113,7 +113,10 @@ class RouteTaskInvariantTests(unittest.TestCase):
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
         yfork = (ROOT / "src" / "fsm" / "yfork.cpp").read_text(encoding="utf-8")
-        self.assertIn('const bool exitConfirmed = state.exitSignMissingConfirmations > 2;', park)
+        self.assertIn("const bool exitConfirmed = state.exitSignArmed &&", park)
+        self.assertIn("state.exitSignMissingConfirmations >= 3", park)
+        self.assertIn("state.exitSignArmed = true", park)
+        self.assertIn("ParkMissionProgress::EXIT_REPLAY_COMPLETED", park)
         self.assertIn('params->completeLapTask("park-exit")', park)
         busy_state = (ROOT / "include" / "fsm" / "busy_exit_state.hpp").read_text(
             encoding="utf-8")
