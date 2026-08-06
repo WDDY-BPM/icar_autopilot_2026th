@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-option(ICAR_BUILD_LOGIC_TESTS "Build hardware-independent control tests" ON)
+option(ICAR_BUILD_LOGIC_TESTS "Build hardware-independent control tests" OFF)
 option(ICAR_LOGIC_TESTS_ONLY "Build only hardware-independent control tests" OFF)
 
 function(icar_target_defaults target_name)
@@ -28,6 +28,12 @@ endfunction()
 
 if(ICAR_BUILD_LOGIC_TESTS OR ICAR_LOGIC_TESTS_ONLY)
   enable_testing()
+  if(ICAR_LOGIC_TESTS_ONLY)
+    message(STATUS "Logic tests: hardware-free build using OpenCV stubs")
+  else()
+    find_package(OpenCV REQUIRED)
+    message(STATUS "Logic tests: building against real OpenCV")
+  endif()
   add_executable(control_algorithms_test tests/control_algorithms_test.cpp)
   target_include_directories(control_algorithms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   icar_target_defaults(control_algorithms_test)
@@ -55,6 +61,11 @@ if(ICAR_BUILD_LOGIC_TESTS OR ICAR_LOGIC_TESTS_ONLY)
     # OpenCV stub headers replace the real library for hardware-free builds.
     target_include_directories(icar_logic_core PUBLIC
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/stubs)
+  else()
+    # Real-OpenCV logic tests must link the same OpenCV libraries the main
+    # program uses (putText/circle/rectangle/imwrite/Mat live in libopencv_*).
+    target_include_directories(icar_logic_core PUBLIC ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(icar_logic_core PUBLIC ${OpenCV_LIBS})
   endif()
   icar_target_defaults(icar_logic_core)
 

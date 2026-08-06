@@ -34,7 +34,7 @@ class ArchitectureInvariantTests(unittest.TestCase):
         self.assertNotIn("CMAKE_CXX_FLAGS", source)
         self.assertNotIn("GLOB_RECURSE", source)
         self.assertIn("target_compile_options", source)
-        self.assertIn("ICAR_BUILD_LOGIC_TESTS \"Build hardware-independent control tests\" ON", source)
+        self.assertIn("ICAR_BUILD_LOGIC_TESTS \"Build hardware-independent control tests\" OFF", source)
 
     def test_planned_path_lifecycle_is_explicit(self):
         path = (ROOT / "include/runtime/path_override.hpp").read_text(encoding="utf-8")

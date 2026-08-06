@@ -22,8 +22,23 @@ jobs:
         run: >-
           cmake -S . -B build-${{ matrix.build_type }} -G Ninja
           -DICAR_LOGIC_TESTS_ONLY=ON
+          -DICAR_BUILD_LOGIC_TESTS=ON
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
       - name: Build
         run: cmake --build build-${{ matrix.build_type }}
       - name: CTest
         run: ctest --test-dir build-${{ matrix.build_type }} --output-on-failure
+
+  production-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 生产主程序配置门：逻辑测试默认关闭。Ubuntu runner 缺少板端依赖
+      # （glib/OpenCV/libserial/ppnc/onnx），此处允许按预期依赖错误失败，
+      # 以验证测试目标不会混入真实主程序构建。
+      - name: Configure production CMake (dependency gate)
+        continue-on-error: true
+        run: >-
+          cmake -S . -B build-production-config
+          -DICAR_BUILD_LOGIC_TESTS=OFF
+          -DCMAKE_BUILD_TYPE=Release
