@@ -69,6 +69,15 @@ if(ICAR_BUILD_LOGIC_TESTS OR ICAR_LOGIC_TESTS_ONLY)
   add_test(NAME production_logic_compile_test
     COMMAND production_logic_compile_test)
 
+  add_executable(fsm_behavior_test tests/fsm_behavior_test.cpp)
+  target_include_directories(fsm_behavior_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  target_compile_definitions(fsm_behavior_test PRIVATE
+    ICAR_TEST_RES_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/res/config.json")
+  target_link_libraries(fsm_behavior_test PRIVATE icar_logic_core)
+  icar_target_defaults(fsm_behavior_test)
+  add_test(NAME fsm_behavior_test COMMAND fsm_behavior_test)
+
   add_executable(runtime_behavior_test tests/runtime_behavior_test.cpp
     src/config/config_loader.cpp src/fsm/park/park_observation.cpp
     src/fsm/park/park_path_planner.cpp src/ctrl/planned_geometry_builder.cpp)

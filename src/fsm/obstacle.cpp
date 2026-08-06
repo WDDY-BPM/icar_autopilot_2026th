@@ -15,25 +15,35 @@ void FsmObstacle::run(Mat &img)
         planningResult = ObstaclePlanningResult::NOT_APPLICABLE;
         params->clearPathOverride(PathSource::OBSTACLE);
         params->releasePlannerSafety(PathSource::OBSTACLE);
+        params->ctrl.obstacleSlow = false;
+    };
+    const auto markBlockedWithoutSafePlan = [&]() {
+        planningResult = ObstaclePlanningResult::BLOCKED_WITHOUT_SAFE_PLAN;
+        params->clearPathOverride(PathSource::OBSTACLE);
+        params->plannerSafety.reject(PathSource::OBSTACLE);
+        params->setStopReason(control_algorithms::StopReason::PLANNER, true);
+        params->ctrl.obstacleSlow = true;
     };
     if (params->pathOverride.active() &&
         params->pathOverride.source != PathSource::OBSTACLE)
     {
-        markNotApplicable();
+        // Another owner (PARK/BUSY/YFORK/...) is driving; do not disturb the
+        // obstacle path or its planner-safety latch in this frame.
+        planningResult = ObstaclePlanningResult::NOT_APPLICABLE;
         return;
     }
-    params->clearPathOverride(PathSource::OBSTACLE);
     if (!params->aiResultFresh)
+    {
+        // Keep the previously generated obstacle plan alive between inference
+        // frames; PathOverride's time TTL handles expiry on its own.
+        planningResult = ObstaclePlanningResult::NO_FRESH_RESULT;
+        if (params->pathOverride.validFor(PathSource::OBSTACLE))
+            params->ctrl.obstacleSlow = true;
         return;
+    }
 
     const auto &trackLeft = params->track->pointsEdgeLeft;
     const auto &trackRight = params->track->pointsEdgeRight;
-    if (trackLeft.size() < ROWSIMAGE / 2 ||
-        trackRight.size() < ROWSIMAGE / 2)
-    {
-        markNotApplicable();
-        return;
-    }
 
     vector<PredictResult> obstacles;
     for (const auto &result : params->results)
@@ -56,6 +66,15 @@ void FsmObstacle::run(Mat &img)
         });
     resultObs = *nearest;
 
+    // Without enough lane data the obstacle cannot be proven to be outside
+    // the driving corridor, so an in-front obstacle must stop the vehicle.
+    if (trackLeft.size() < ROWSIMAGE / 2 ||
+        trackRight.size() < ROWSIMAGE / 2)
+    {
+        markBlockedWithoutSafePlan();
+        return;
+    }
+
     size_t row = 0;
     int closestDistance = COLSIMAGE;
     for (size_t index = 0; index < trackLeft.size(); ++index)
@@ -67,10 +86,17 @@ void FsmObstacle::run(Mat &img)
             row = index;
         }
     }
-    row = std::min(row, trackRight.size() - 1);
+    if (row >= trackRight.size())
+        row = trackRight.size() - 1;
     const int obstacleRight = resultObs.x + resultObs.width;
     const int leftColumn = trackLeft[row].y;
     const int rightColumn = trackRight[row].y;
+    if (rightColumn <= leftColumn)
+    {
+        // Abnormal left/right edge order: cannot classify the obstacle.
+        markBlockedWithoutSafePlan();
+        return;
+    }
     if (obstacleRight <= leftColumn || rightColumn <= resultObs.x)
     {
         markNotApplicable();
@@ -125,17 +151,15 @@ void FsmObstacle::run(Mat &img)
     left.resize(static_cast<size_t>(left.size() * 0.7));
     right.resize(static_cast<size_t>(right.size() * 0.7));
     PathOverride candidate;
-    candidate.setEdges(
+    candidate.setEdgesForTime(
         PathSource::OBSTACLE, std::move(left), std::move(right),
-        0.45f, std::min(params->config.velSlow, 0.15f), 1);
+        std::chrono::milliseconds(120),
+        0.45f, std::min(params->config.velSlow, 0.15f));
     const PlannedGeometryResult geometry = buildPlannedGeometry(
         candidate, params->mode);
     if (!geometry.valid)
     {
-        planningResult = ObstaclePlanningResult::BLOCKED_WITHOUT_SAFE_PLAN;
-        params->plannerSafety.reject(PathSource::OBSTACLE);
-        params->setStopReason(control_algorithms::StopReason::PLANNER, true);
-        params->ctrl.obstacleSlow = true;
+        markBlockedWithoutSafePlan();
         return;
     }
     params->pathOverride = std::move(candidate);

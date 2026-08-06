@@ -7,21 +7,10 @@
 #include "park_fsm_test_fixture.hpp"
 #include "runtime/path_override.hpp"
 #include "test_check.hpp"
+#include "test_params.hpp"
 
 #include <memory>
 #include <vector>
-
-#ifndef ICAR_TEST_RES_CONFIG
-#error "ICAR_TEST_RES_CONFIG must point at res/config.json for logic tests"
-#endif
-
-namespace
-{
-std::shared_ptr<Params> makeParams()
-{
-    return std::shared_ptr<Params>(new Params(ICAR_TEST_RES_CONFIG));
-}
-} // namespace
 
 int main()
 {
@@ -29,7 +18,7 @@ int main()
     // this executable proves src/fsm/park.cpp compiles with the production
     // source set.
     {
-        auto params = makeParams();
+        auto params = makeTestParams();
         params->config.currentLapConfig->park = true;
         FsmPark park(params);
         CHECK(park.getMode() == FsmMode::NORMAL);
@@ -41,7 +30,7 @@ int main()
         CHECK(!params->ctrl.parking);
     }
     {
-        auto params = makeParams();
+        auto params = makeTestParams();
         params->config.currentLapConfig->park = false;
         FsmPark park(params);
         ParkFsmTestFixture::setStage(park, ParkFsmTestFixture::Step::ENABLE);
@@ -50,7 +39,7 @@ int main()
     }
     // FsmObstacle compiles and reports NO_FRESH_RESULT without an AI frame.
     {
-        auto params = makeParams();
+        auto params = makeTestParams();
         FsmObstacle obstacle(params);
         params->aiResultFresh = false;
         cv::Mat img;
@@ -59,14 +48,14 @@ int main()
     }
     // FsmYfork compiles and stays disabled while the feature is off.
     {
-        auto params = makeParams();
+        auto params = makeTestParams();
         params->config.currentLapConfig->yfork = false;
         FsmYfork yfork(params);
         CHECK(yfork.getMode() == FsmMode::NORMAL);
     }
     // Center compiles; empty track yields an invalid control geometry.
     {
-        auto params = makeParams();
+        auto params = makeTestParams();
         Center center;
         params->geometryPolicy = GeometryPolicy::PERCEPTION_ALLOWED;
         params->mode = FsmMode::NORMAL;
