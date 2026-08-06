@@ -295,7 +295,8 @@ class RouteTaskInvariantTests(unittest.TestCase):
         self.assertIsNotNone(enable)
         self.assertIsNotNone(forkin)
         self.assertIn("if (params->aiResultFresh)", enable.group(0))
-        self.assertIn("params->aiResultFresh && findSymbols", forkin.group(0))
+        self.assertIn("observation.hasGate", forkin.group(0))
+        self.assertIn("observation.forkMarkers", forkin.group(0))
         self.assertIn("count() >= 2000", park)
         busy_state = (ROOT / "include" / "fsm" / "busy_exit_state.hpp").read_text(
             encoding="utf-8")

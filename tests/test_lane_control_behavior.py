@@ -213,7 +213,7 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("if (!center->controlValid)", hold)
         self.assertIn("StopReason::GATE))\n            return;", core)
         self.assertIn("StopReason::CROSS))\n            return;", core)
-        self.assertIn("params->mustStop()", park)
+        self.assertIn("params->mustStopExcept", park)
 
     def test_single_reliable_edge_is_published_independently(self):
         core = read_runtime_sources()
@@ -223,11 +223,11 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("overlay[\"right\"] = rightOverlayValid", core)
 
     def test_steering_json_fallbacks_match_tuned_defaults(self):
-        params = (ROOT / "include/utils/params.hpp").read_text(encoding="utf-8")
-        self.assertIn('value("servoRate", 600.0f)', params)
-        self.assertIn('value("startupServoRate", 550.0f)', params)
-        self.assertIn('value("startupServoLimit", 180)', params)
-        self.assertIn('value("laneHeadingGain", 300.0f)', params)
+        loader = (ROOT / "src/config/config_loader.cpp").read_text(encoding="utf-8")
+        self.assertIn('value("servoRate", 600.0f)', loader)
+        self.assertIn('value("startupServoRate", 550.0f)', loader)
+        self.assertIn('value("startupServoLimit", 180)', loader)
+        self.assertIn('value("laneHeadingGain", 300.0f)', loader)
 
     def test_normal_lane_speed_uses_centerline_curvature(self):
         motion = (ROOT / 'include/ctrl/motion.hpp').read_text(encoding='utf-8')
@@ -333,7 +333,8 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("control_algorithms::applyStartupSpeed", motion)
         self.assertIn("mode == FsmMode::CROSS", center)
         self.assertIn("!params->laneSafetyStop", core)
-        self.assertIn("automaticControlActive && laneHold", core)
+        self.assertIn("evaluateRuntimeControl", core)
+        self.assertIn("controlDecision.centerSteering", core)
         self.assertIn("center->laneInvalidFrames, center->laneRecoveryFrames, 7, 5", core)
         self.assertIn("motion->syncServoCommand(previousFinalServo)", core)
         self.assertNotIn("derailmentCheck", center)

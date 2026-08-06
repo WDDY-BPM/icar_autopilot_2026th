@@ -1,0 +1,29 @@
+name: Logic Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  logic-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Python tests
+        run: python -m unittest discover -s tests -p "test_*.py"
+      - name: Configure
+        run: >-
+          cmake -S . -B build-${{ matrix.build_type }} -G Ninja
+          -DICAR_LOGIC_TESTS_ONLY=ON
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+      - name: Build
+        run: cmake --build build-${{ matrix.build_type }}
+      - name: CTest
+        run: ctest --test-dir build-${{ matrix.build_type }} --output-on-failure

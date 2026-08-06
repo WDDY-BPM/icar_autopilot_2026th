@@ -1,12 +1,18 @@
 #include "com/control_watchdog.hpp"
+#include "config/config_loader.hpp"
 #include "ctrl/control_algorithms.hpp"
 #include "fsm/busy_exit_state.hpp"
+#include "fsm/park_observation.hpp"
+#include "fsm/park_path_planner.hpp"
 #include "fsm/yfork_guide_hold.hpp"
 #include "runtime/camera_recovery.hpp"
+#include "runtime/control_decision.hpp"
 #include "runtime/final_command.hpp"
 #include "runtime/path_override.hpp"
 #include "runtime/planned_path_validation.hpp"
+#include "runtime/planner_safety.hpp"
 #include "utils/config_validation.hpp"
+#include "vision/predict_result.hpp"
 #include "test_check.hpp"
 
 #include <chrono>
@@ -55,6 +61,30 @@ bool throwsInvalid(Function function)
 
 int main()
 {
+    {
+        nlohmann::json lapJson = {
+            {"park", true}, {"parkSpot", 4}, {"yfork", true},
+            {"yforkLeft", false}, {"busyStopEnable", false}};
+        const auto lap = parseLapConfig(lapJson);
+        CHECK(lap.park && lap.parkSpot == 4);
+        CHECK(lap.yfork && !lap.yforkLeft);
+    }
+    {
+        const std::vector<PredictResult> detections{
+            PredictResult{LABEL_FORK, "", 0.4f, 0, 30, 20, 20},
+            PredictResult{LABEL_FORK, "", 0.9f, 0, 32, 20, 20},
+            PredictResult{LABEL_FORK, "", 0.7f, 0, 100, 20, 20},
+            PredictResult{LABEL_CHOICE, "", 0.8f, 0, 0, 10, 10}};
+        const auto observation = scanParkObservation(detections);
+        CHECK(observation.forkMarkers.size() == 3);
+        CHECK(observation.hasChoice && observation.bestChoice.score == 0.8f);
+        auto stations = selectParkStations(detections);
+        CHECK(stations.size() == 2);
+        CHECK(stations[0].score == 0.9f && stations[1].score == 0.7f);
+        const auto planned = ParkPathPlanner::fromEdges(
+            PathSource::PARK, {{220, 100}}, {{220, 220}}, 0.7f, 0.18f, 2);
+        CHECK(planned.hasValidGeometry() && planned.source == PathSource::PARK);
+    }
     {
         control_algorithms::StopReasonState reasons;
         const RequestedCommand requested{0.2f, 1700};
@@ -161,7 +191,7 @@ int main()
                               0.65f, 0.15f, 2);
         input = selectLaneInput(trackLeft, trackRight, overridePath);
         CHECK(input.source == PathSource::YFORK && input.left != &trackLeft);
-        CHECK(overridePath.centerLine.empty() && !overridePath.hasCenterLine);
+        CHECK(overridePath.centerLine.empty() && !overridePath.hasCenter());
         CHECK(overridePath.headingConfidence == 0.65f);
         CHECK(overridePath.speedLimit == 0.15f && overridePath.ttlFrames == 2);
         CHECK(applyPathSpeedLimit(0.20f, overridePath) == 0.15f);
@@ -170,11 +200,11 @@ int main()
         overridePath.leftEdge[0].y = 30;
         CHECK(trackLeft[0].y == 10);
         CHECK(!overridePath.clear(PathSource::BUSY));
-        CHECK(overridePath.active);
+        CHECK(overridePath.active());
         overridePath.tick(101);
         CHECK(overridePath.validFor(PathSource::YFORK));
         overridePath.tick(102);
-        CHECK(!overridePath.active);
+        CHECK(!overridePath.active());
 
         overridePath.setEdges(PathSource::FORK, {{1, 20}}, {{1, 80}});
         overridePath.setEdges(PathSource::OBSTACLE, {{2, 30}}, {{2, 70}});
@@ -182,11 +212,61 @@ int main()
         CHECK(overridePath.leftEdge.size() == 1 &&
                overridePath.leftEdge[0].y == 30);
         CHECK(overridePath.clear(PathSource::OBSTACLE));
-        CHECK(!overridePath.active);
+        CHECK(!overridePath.active());
         CHECK(pathSourceAllowed(PathSource::PARK, FsmMode::PARK));
         CHECK(!pathSourceAllowed(PathSource::PARK, FsmMode::NORMAL));
         CHECK(pathSourceAllowed(PathSource::OBSTACLE, FsmMode::CROSS));
         CHECK(!pathSourceAllowed(PathSource::OBSTACLE, FsmMode::YFORK));
+    }
+    {
+        control_algorithms::StopReasonState reasons;
+        ControlGeometry perception{ControlGeometrySource::PERCEPTION,
+                                   PathSource::NONE, {{220, 160}}, true, true};
+        CHECK(evaluateRuntimeControl(perception, reasons, true).allowMotion);
+        perception.updated = false;
+        CHECK(!evaluateRuntimeControl(perception, reasons, true).allowMotion);
+        perception.updated = true;
+        perception.valid = false;
+        CHECK(!evaluateRuntimeControl(perception, reasons, true).allowMotion);
+        perception.valid = true;
+        perception.centerLine.clear();
+        CHECK(!evaluateRuntimeControl(perception, reasons, true).allowMotion);
+        perception.centerLine = {{220, 160}};
+        reasons.set(control_algorithms::StopReason::LANE, true);
+        CHECK(!evaluateRuntimeControl(perception, reasons, true).allowMotion);
+        reasons.set(control_algorithms::StopReason::LANE, false);
+        reasons.set(control_algorithms::StopReason::PLANNER, true);
+        CHECK(reasons.string() == "PLANNER");
+        CHECK(!evaluateRuntimeControl(perception, reasons, true).allowMotion);
+        reasons.set(control_algorithms::StopReason::PLANNER, false);
+        CHECK(!evaluateRuntimeControl(perception, reasons, false).allowMotion);
+
+        ControlGeometry planned{ControlGeometrySource::PLANNED,
+                                PathSource::PARK, {{220, 160}}, true, true};
+        CHECK(evaluateRuntimeControl(planned, reasons, true).allowMotion);
+        planned.source = ControlGeometrySource::NONE;
+        CHECK(!evaluateRuntimeControl(planned, reasons, true).allowMotion);
+        planned.source = ControlGeometrySource::PLANNED;
+        planned.valid = false;
+        CHECK(evaluateRuntimeControl(planned, reasons, true).centerSteering);
+    }
+    {
+        PlannerSafetyState safety;
+        safety.reject(PathSource::YFORK);
+        CHECK(safety.latched && safety.validRecoveryFrames == 0);
+        CHECK(!safety.observe(PathSource::YFORK, false));
+        CHECK(!safety.observe(PathSource::YFORK, true));
+        CHECK(safety.validRecoveryFrames == 1);
+        CHECK(!safety.observe(PathSource::YFORK, false));
+        CHECK(safety.validRecoveryFrames == 0);
+        CHECK(!safety.observe(PathSource::YFORK, true));
+        CHECK(safety.observe(PathSource::YFORK, true));
+        CHECK(!safety.latched);
+        safety.reject(PathSource::PARK);
+        safety.clear(PathSource::BUSY);
+        CHECK(safety.latched);
+        safety.clear(PathSource::PARK);
+        CHECK(!safety.latched);
     }
     {
         std::vector<PointX> valid;
