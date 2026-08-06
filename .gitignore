@@ -7,6 +7,7 @@ __pycache__/
 *.core
 core
 core.*
+!tests/stubs/opencv2/core.hpp
 .vscode/
 *.tmp
 *.docx
