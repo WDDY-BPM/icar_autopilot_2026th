@@ -72,6 +72,15 @@ bool Center::laneWidthProfileReady() const
     return laneWidthObservationFrames >= 10 && readyRows >= 40;
 }
 
+void Center::beginPerceptionRecovery()
+{
+    laneRecoveryState = control_algorithms::LaneRecoveryState{};
+    laneRecoveryState.recovering = true;
+    laneRecoveryState.controlValid = false;
+    laneRecoveryState.invalidFrames = 0;
+    laneRecoveryState.recoveryFrames = 0;
+}
+
 void Center::fitting(shared_ptr<Params> &params)
 {
 
@@ -81,6 +90,14 @@ void Center::fitting(shared_ptr<Params> &params)
         params->pathOverride);
     const ControlGeometrySource selectedSource = selectGeometrySource(
         params->geometryPolicy, laneInput.planned());
+    // PLANNED -> PERCEPTION 的控制权切换必须重新连续确认：第一帧感知
+    // 即使有效也不放行，连续5帧稳定后才恢复控制，避免规划路径过期后
+    // 第一帧立即接管。
+    const bool plannedToPerception =
+        previousSource == ControlGeometrySource::PLANNED &&
+        selectedSource == ControlGeometrySource::PERCEPTION;
+    if (plannedToPerception)
+        beginPerceptionRecovery();
     const bool plannedPath = selectedSource == ControlGeometrySource::PLANNED;
     const bool visionLaneMode = selectedSource ==
         ControlGeometrySource::PERCEPTION;
@@ -271,6 +288,7 @@ void Center::fitting(shared_ptr<Params> &params)
         }
     }
     applyControlGeometry(*params, plannedPath, visionLaneMode, laneInput.source);
+    previousSource = selectedSource;
     const bool dualStrict = laneQuality.leftReliable && laneQuality.rightReliable;
     const int laneDiagnosticState = dualStrict ? 0 :
         (singleSide != 0 ? singleSide : 2);

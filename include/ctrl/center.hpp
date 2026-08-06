@@ -66,6 +66,7 @@ public:
     void observeLaneWidth(const vector<PointX> &left, const vector<PointX> &right,
                           bool measurementValid);
     bool laneWidthProfileReady() const;
+    void beginPerceptionRecovery();
     void drawImage(shared_ptr<Params> &params, Mat &img);
 
 private:
@@ -82,4 +83,5 @@ private:
     int lastValidLaneCenter = COLSIMAGE / 2;
     int previousLaneDiagnosticState = -99;
     control_algorithms::LaneRecoveryState laneRecoveryState;
+    ControlGeometrySource previousSource{ControlGeometrySource::NONE};
 };

@@ -97,6 +97,17 @@ if(ICAR_BUILD_LOGIC_TESTS OR ICAR_LOGIC_TESTS_ONLY)
   icar_target_defaults(park_chain_behavior_test)
   add_test(NAME park_chain_behavior_test COMMAND park_chain_behavior_test)
 
+  add_executable(runtime_safety_chain_test
+    tests/runtime_safety_chain_test.cpp)
+  target_include_directories(runtime_safety_chain_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  target_compile_definitions(runtime_safety_chain_test PRIVATE
+    ICAR_TEST_RES_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/res/config.json")
+  target_link_libraries(runtime_safety_chain_test PRIVATE icar_logic_core)
+  icar_target_defaults(runtime_safety_chain_test)
+  add_test(NAME runtime_safety_chain_test
+    COMMAND runtime_safety_chain_test)
+
   add_executable(runtime_behavior_test tests/runtime_behavior_test.cpp
     src/config/config_loader.cpp src/fsm/park/park_observation.cpp
     src/fsm/park/park_path_planner.cpp src/ctrl/planned_geometry_builder.cpp)
