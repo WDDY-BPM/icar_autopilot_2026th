@@ -113,7 +113,7 @@ class RouteTaskInvariantTests(unittest.TestCase):
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
         yfork = (ROOT / "src" / "fsm" / "yfork.cpp").read_text(encoding="utf-8")
-        self.assertIn('const bool exitConfirmed = state.aiEvidenceFrames > 2;', park)
+        self.assertIn('const bool exitConfirmed = state.exitSignMissingConfirmations > 2;', park)
         self.assertIn('params->completeLapTask("park-exit")', park)
         busy_state = (ROOT / "include" / "fsm" / "busy_exit_state.hpp").read_text(
             encoding="utf-8")
@@ -208,11 +208,10 @@ class RouteTaskInvariantTests(unittest.TestCase):
     def test_passenger_wait_states_stop_the_vehicle(self):
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
         station = (ROOT / "src" / "fsm" / "station.cpp").read_text(encoding="utf-8")
-        legacy = park[park.index("void FsmPark::dispatchStageLegacy") :]
-        pickup = re.search(r"case Step::WAIT_PICKUP:.*?break;", legacy, re.DOTALL)
-        self.assertIsNotNone(pickup)
-        self.assertIn("StopReason::PARK, true", pickup.group(0))
-        self.assertIn("std::chrono::seconds(3)", pickup.group(0))
+        pickup = park[park.index("void FsmPark::handleWaitPickup") :]
+        pickup = pickup[: pickup.index("void FsmPark::handleExit")]
+        self.assertIn("StopReason::PARK, true", pickup)
+        self.assertIn("std::chrono::seconds(3)", pickup)
         self.assertIn("stopCounter > 90", station)
 
     def test_emergency_stop_freezes_all_fsm_progress(self):
@@ -285,39 +284,39 @@ class RouteTaskInvariantTests(unittest.TestCase):
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
         self.assertIn("busyConfirmation, params->aiResultFresh, busyDetected", busy)
-        legacy = park[park.index("void FsmPark::dispatchStageLegacy") :]
-        park_none = re.search(r"case Step::NONE:.*?break;", legacy, re.DOTALL)
-        self.assertIsNotNone(park_none)
-        self.assertIn("if (!params->aiResultFresh)", park_none.group(0))
+        park_none = park[park.index("void FsmPark::handleNone") :]
+        park_none = park_none[: park_none.index("void FsmPark::handleEnable")]
+        self.assertIn("if (!params->aiResultFresh)", park_none)
     def test_park_internal_ai_evidence_and_exit_timeouts(self):
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
-        legacy = park[park.index("void FsmPark::dispatchStageLegacy") :]
-        enable = re.search(r"case Step::ENABLE:.*?case Step::FORKIN:", legacy, re.DOTALL)
-        forkin = re.search(r"case Step::FORKIN:.*?case Step::TRACKIN:", legacy, re.DOTALL)
-        self.assertIsNotNone(enable)
-        self.assertIsNotNone(forkin)
-        self.assertIn("if (params->aiResultFresh)", enable.group(0))
-        self.assertIn("observation.hasGate", forkin.group(0))
-        self.assertIn("observation.forkMarkers", forkin.group(0))
+        enable = park[park.index("void FsmPark::handleEnable") :
+                      park.index("void FsmPark::handleForkIn")]
+        forkin = park[park.index("void FsmPark::handleForkIn") :
+                      park.index("void FsmPark::handleTrackIn")]
+        self.assertIn("if (!params->aiResultFresh)", enable)
+        self.assertIn("observation.hasGate", forkin)
+        self.assertIn("observation.forkMarkers", forkin)
         self.assertIn("count() >= 2000", park)
         busy_state = (ROOT / "include" / "fsm" / "busy_exit_state.hpp").read_text(
             encoding="utf-8")
         self.assertIn("std::chrono::seconds(2)", busy_state)
 
-        trackin = re.search(r"case Step::TRACKIN:.*?case Step::ENTER:", legacy, re.DOTALL)
-        trackout = re.search(r"case Step::TRACKOUT:.*?case Step::FORKOUT:", legacy, re.DOTALL)
-        self.assertIsNotNone(trackin)
-        self.assertIsNotNone(trackout)
-        self.assertIn("params->aiResultFresh", trackin.group(0))
-        self.assertIn("params->aiResultFresh", trackout.group(0))
-        self.assertNotIn("if (timeout > 45)\n            countRes++", trackout.group(0))
+        trackin = park[park.index("void FsmPark::handleTrackIn") :
+                       park.index("void FsmPark::handleEnter")]
+        trackout = park[park.index("void FsmPark::handleTrackOut") :
+                        park.index("void FsmPark::handleForkOut")]
+        self.assertIn("params->aiResultFresh", trackin)
+        self.assertIn("params->aiResultFresh", trackout)
+        self.assertNotIn("if (timeout > 45)\n            countRes++", trackout)
+        self.assertNotIn("dispatchStageLegacy", park)
 
     def test_scene_entry_counts_at_most_once_per_ai_frame(self):
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
         self.assertIn("bool parkDetectedThisFrame = false;", park)
-        self.assertIn("if (parkDetectedThisFrame)\n            state.aiEvidenceFrames++;", park)
+        self.assertIn("state.parkMarkerConfirmations++;", park)
+        self.assertIn("state.markerMissingFreshFrames = 0;", park)
         self.assertIn("std::any_of(params->results.begin(), params->results.end()", busy)
         self.assertIn("updateBusyConfirmation", busy)
 

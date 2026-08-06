@@ -102,7 +102,7 @@ class ManualProtocolTests(unittest.TestCase):
         park = (ROOT / "src/fsm/park.cpp").read_text(encoding="utf-8")
         self.assertRegex(
             park,
-            r"if \(params->aiResultFresh\)\s*\{\s*if \(left(?:Visible|Sign)\)[\s\S]*?(?:countRes|state\.aiEvidenceFrames)\+\+;",
+            r"if \(params->aiResultFresh\)\s*\{\s*if \(left(?:Visible|Sign)\)[\s\S]*?(?:countRes|state\.(?:aiEvidenceFrames|exitSignMissingConfirmations))\+\+;",
         )
         busy_state = (ROOT / "include/fsm/busy_exit_state.hpp").read_text(
             encoding="utf-8")

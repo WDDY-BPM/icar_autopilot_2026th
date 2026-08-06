@@ -108,9 +108,13 @@ private:
   struct ParkStateData
   {
     Step stage = Step::NONE;
-    uint16_t aiEvidenceFrames = 0;
-    uint16_t aiMissingFrames = 0;
-    uint16_t stageControlFrames = 0;
+    int parkMarkerConfirmations = 0;      // NONE：停车场标志连续确认帧数（仅fresh推进）
+    int markerMissingFreshFrames = 0;     // 当前阶段AI标志连续缺失帧数（仅fresh推进）
+    int choiceApproachConfirmations = 0;  // ENABLE：车位选择标志接近确认帧数
+    int gateConfirmations = 0;            // FORKIN/TRACKIN/TRACKOUT：道闸/出口标志确认帧数
+    int exitSignMissingConfirmations = 0; // FORKOUT：出口左转标志连续消失确认帧数
+    int stageControlFrames = 0;           // 通用阶段超时计数
+    int trackInControlFrames = 0;         // TRACKIN 纯控制周期计数（非AI证据）
     std::chrono::steady_clock::time_point forkOutStartedAt;
     std::chrono::steady_clock::time_point stageStartedAt;
     std::chrono::steady_clock::time_point waitStartedAt;
@@ -136,7 +140,6 @@ private:
   void handleExit(const ParkObservation &, std::chrono::steady_clock::time_point);
   void handleTrackOut(const ParkObservation &, std::chrono::steady_clock::time_point);
   void handleForkOut(const ParkObservation &, std::chrono::steady_clock::time_point);
-  void dispatchStageLegacy(const ParkObservation &, std::chrono::steady_clock::time_point);
   void updateGeometryPolicy();
   void reset();
   void replanTracking();

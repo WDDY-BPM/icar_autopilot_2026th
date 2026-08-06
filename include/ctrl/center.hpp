@@ -32,10 +32,6 @@
 #include "ctrl/control_geometry.hpp"
 #include "ctrl/perception_geometry_builder.hpp"
 
-#define DIS_MOVE 48       // 偏移距离，对应赛道距离的一般，在我的打表软件中默认48像素对应20cm
-#define MAX_POINT_NUM 240 // 无需修改
-#define DIS_SECTION 75    // 使用centerMove时每一段点集的最大长度
-
 /**
  * @brief 控制中心处理类
  *
@@ -44,8 +40,6 @@ class Center
 {
 
 public:
-    uint16_t validRowsLeft = 0;  // 边缘有效行数（左）
-    uint16_t validRowsRight = 0; // 边缘有效行数（右）
     double sigmaCenter = 0;
     bool controlValid = false;
     PathSource rejectedPathSource = PathSource::NONE;
@@ -67,7 +61,6 @@ public:
     int appliedCenterStep = 0;
     int usableCenterRows = 0;
     LaneRecoveryMode recoveryMode = LaneRecoveryMode::INVALID;
-    int selectedRecoverySide = 0;
 
     void fitting(shared_ptr<Params> &params);
     void observeLaneWidth(const vector<PointX> &left, const vector<PointX> &right,
@@ -83,17 +76,9 @@ private:
                               bool perceptionPath, PathSource pathSource);
 
     void showMode(Mat &img, FsmMode mode);
-    uint16_t searchBreakLeftDown(vector<PointX> pointsEdgeLeft);
-    uint16_t searchBreakRightDown(vector<PointX> pointsEdgeRight);
-    vector<PointX> centerCompute(vector<PointX> pointsEdge, int side);
-    void validRowsCal(vector<PointX> pointsEdgeLeft, vector<PointX> pointsEdgeRight);
-    vector<PointX> buildRowAlignedCenter(const vector<PointX> &left,
-                                         const vector<PointX> &right,
-                                         bool updateHistory);
     std::array<float, ROWSIMAGE> laneWidthProfile{};
     std::array<uint16_t, ROWSIMAGE> laneWidthSamples{};
     int laneWidthObservationFrames = 0;
-    int lastValidCenter = COLSIMAGE / 2;
     int lastValidLaneCenter = COLSIMAGE / 2;
     int previousLaneDiagnosticState = -99;
     control_algorithms::LaneRecoveryState laneRecoveryState;

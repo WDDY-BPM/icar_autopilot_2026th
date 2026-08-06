@@ -108,7 +108,6 @@ void Center::fitting(shared_ptr<Params> &params)
         params->ctrl.centerEdge = perceptionGeometry.centerLine;
         recoveryMode = perceptionGeometry.recoveryMode;
         singleSide = perceptionGeometry.singleSide;
-        selectedRecoverySide = perceptionGeometry.singleSide;
         style = "PERCEPTION";
     }
     else if (plannedPath)
@@ -251,7 +250,6 @@ void Center::fitting(shared_ptr<Params> &params)
         laneRecoveryFrames = laneRecoveryState.recoveryFrames;
         if (controlValid)
         {
-            lastValidCenter = params->ctrl.center;
             lastValidLaneCenter = params->ctrl.center;
         }
         else
@@ -265,9 +263,7 @@ void Center::fitting(shared_ptr<Params> &params)
         controlValid = candidateValid;
         laneInvalidFrames = 0;
         laneRecoveryFrames = 0;
-        if (controlValid)
-            lastValidCenter = params->ctrl.center;
-        else if (plannedPath)
+        if (!controlValid && plannedPath)
         {
             rejectedPathSource = laneInput.source;
             params->clearPathOverride(laneInput.source);
@@ -386,211 +382,3 @@ void Center::showMode(Mat &img, FsmMode mode)
     }
 }
 
-/**
- * @brief 搜索十字赛道突变行（左下）
- *
- * @param pointsEdgeLeft
- * @return uint16_t
- */
-uint16_t Center::searchBreakLeftDown(vector<PointX> pointsEdgeLeft)
-{
-    uint16_t counter = 0;
-
-    for (int i = 0; i < pointsEdgeLeft.size() - 10; i++)
-    {
-        if (pointsEdgeLeft[i].y >= 2)
-        {
-            counter++;
-            if (counter > 3)
-            {
-                return i - 2;
-            }
-        }
-        else
-            counter = 0;
-    }
-
-    return 0;
-}
-
-/**
- * @brief 搜索十字赛道突变行（右下）
- *
- * @param pointsEdgeRight
- * @return uint16_t
- */
-uint16_t Center::searchBreakRightDown(vector<PointX> pointsEdgeRight)
-{
-    uint16_t counter = 0;
-
-    for (int i = 0; i < pointsEdgeRight.size() - 10; i++) // 寻找左边跳变点
-    {
-        if (pointsEdgeRight[i].y < COLSIMAGE - 2)
-        {
-            counter++;
-            if (counter > 3)
-            {
-                return i - 2;
-            }
-        }
-        else
-            counter = 0;
-    }
-
-    return 0;
-}
-
-/**
- * @brief 赛道中心点计算：单边控制
- *
- * @param pointsEdge 赛道边缘点集
- * @param side 单边类型：左边0/右边1
- * @return vector<PointX>
- */
-vector<PointX> Center::buildRowAlignedCenter(const vector<PointX> &left,
-                                             const vector<PointX> &right,
-                                             bool updateHistory)
-{
-    std::array<int, ROWSIMAGE> leftByRow;
-    std::array<int, ROWSIMAGE> rightByRow;
-    leftByRow.fill(-1);
-    rightByRow.fill(-1);
-    for (const auto &point : left)
-        if (point.x >= 0 && point.x < ROWSIMAGE)
-            leftByRow[point.x] = point.y;
-    for (const auto &point : right)
-        if (point.x >= 0 && point.x < ROWSIMAGE)
-            rightByRow[point.x] = point.y;
-
-    vector<PointX> center;
-    center.reserve(ROWSIMAGE);
-    for (int row = ROWSIMAGE - 1; row >= 0; --row)
-    {
-        if (leftByRow[row] < 0 || rightByRow[row] <= leftByRow[row])
-            continue;
-        const float measuredWidth = rightByRow[row] - leftByRow[row];
-        if (updateHistory)
-            laneWidthProfile[row] = laneWidthProfile[row] > 1.0f
-                ? 0.8f * laneWidthProfile[row] + 0.2f * measuredWidth
-                : measuredWidth;
-        center.emplace_back(row,
-            static_cast<int>(std::lround((leftByRow[row] + rightByRow[row]) * 0.5f)));
-    }
-
-    // Remove isolated horizontal spikes without changing row alignment.
-    if (center.size() >= 5)
-    {
-        vector<PointX> filtered = center;
-        for (size_t i = 2; i + 2 < center.size(); ++i)
-        {
-            std::array<int, 5> columns = {
-                center[i - 2].y, center[i - 1].y, center[i].y,
-                center[i + 1].y, center[i + 2].y};
-            std::sort(columns.begin(), columns.end());
-            filtered[i].y = columns[2];
-        }
-        center.swap(filtered);
-    }
-    return center;
-}
-
-vector<PointX> Center::centerCompute(vector<PointX> pointsEdge, int side)
-{
-    return control_algorithms::reconstructSingleLaneCenter(
-        pointsEdge, laneWidthProfile, side == 0, ROWSIMAGE, COLSIMAGE);
-}
-/**
- * @brief 边缘有效行计算：左/右
- *
- * @param pointsEdgeLeft
- * @param pointsEdgeRight
- */
-void Center::validRowsCal(vector<PointX> pointsEdgeLeft, vector<PointX> pointsEdgeRight)
-{
-    int counter = 0;
-    if (pointsEdgeRight.size() > 10 && pointsEdgeLeft.size() > 10)
-    {
-        uint16_t rowBreakLeft = searchBreakLeftDown(pointsEdgeLeft);                                           // 右边缘上升拐点
-        uint16_t rowBreakRight = searchBreakRightDown(pointsEdgeRight);                                        // 右边缘上升拐点
-        if (pointsEdgeRight[pointsEdgeRight.size() - 1].y < COLSIMAGE / 2 && rowBreakRight - rowBreakLeft > 5) // 左弯道
-        {
-            if (pointsEdgeLeft.size() > rowBreakRight) // 左边缘有效行重新搜索
-            {
-                for (int i = rowBreakRight; i < pointsEdgeLeft.size(); i++)
-                {
-                    if (pointsEdgeLeft[i].y < 1)
-                    {
-                        counter++;
-                        if (counter >= 3)
-                        {
-                            pointsEdgeLeft.resize(i - 3);
-                        }
-                    }
-                    else
-                        counter = 0;
-                }
-            }
-        }
-
-        else if (pointsEdgeLeft[pointsEdgeLeft.size() - 1].y > COLSIMAGE / 2 && rowBreakLeft - rowBreakRight > 5) // 右弯道
-        {
-
-            if (pointsEdgeRight.size() > rowBreakLeft) // 右边缘有效行重新搜索
-            {
-                for (int i = rowBreakLeft; i < pointsEdgeRight.size(); i++)
-                {
-                    if (pointsEdgeRight[i].y > COLSIMAGE - 2)
-                    {
-                        counter++;
-                        if (counter >= 3)
-                        {
-                            pointsEdgeRight.resize(i - 3);
-                        }
-                    }
-                    else
-                        counter = 0;
-                }
-            }
-        }
-    }
-
-    // 左边有效行
-    validRowsLeft = 0;
-    int count = 0;
-    if (pointsEdgeLeft.size() > 10)
-    {
-        for (int i = pointsEdgeLeft.size() - 1; i >= 1; i--)
-        {
-            if (pointsEdgeLeft[i].y > 2)
-            {
-                count++;
-                if (count > 4)
-                {
-                    validRowsLeft = i + 4;
-                    break;
-                }
-            }
-        }
-    }
-
-    // 右边有效行
-    validRowsRight = 0;
-    if (pointsEdgeRight.size() > 1)
-    {
-        for (int i = pointsEdgeRight.size() - 1; i >= 1; i--)
-        {
-            if (pointsEdgeRight[i].y <= COLSIMAGE - 2 &&
-                pointsEdgeRight[i - 1].y <= COLSIMAGE - 2)
-            {
-                validRowsRight = i + 1;
-                break;
-            }
-            if (pointsEdgeRight[i].y >= COLSIMAGE - 2 &&
-                pointsEdgeRight[i - 1].y < COLSIMAGE - 2)
-            {
-                validRowsRight = i + 1;
-                break;
-            }
-        }
-    }
-}
