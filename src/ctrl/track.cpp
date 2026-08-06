@@ -414,9 +414,11 @@ void Track::evaluateQuality()
     // 可靠可见边缘允许单边重建：自身可用，或另一侧被图像边界裁剪时
     // 由本侧稳定边缘重建中心线。双边可靠性保持严格，不伪装。
     const bool stableLeftEdge =
+        leftReliability.reliable &&
         leftReliability.interiorPointCount >= singleLaneInteriorPointsMin &&
         leftReliability.coversBottom;
     const bool stableRightEdge =
+        rightReliability.reliable &&
         rightReliability.interiorPointCount >= singleLaneInteriorPointsMin &&
         rightReliability.coversBottom;
     quality.leftSingleUsable =

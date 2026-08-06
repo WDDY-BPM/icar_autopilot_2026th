@@ -24,12 +24,6 @@ inline bool edgeCoversNearField(const std::vector<Point> &edge,
     return false;
 }
 
-// 启动稳定帧计数：有效帧+1，任一无效帧立即归零（严格连续）。
-inline int advanceStartupLaneCount(int stableCount, bool laneValid)
-{
-    return laneValid ? stableCount + 1 : 0;
-}
-
 struct LaneUnconfirmedState
 {
     int frames = 0;
@@ -174,10 +168,12 @@ inline EdgeReliability assessEdgeReliability(const std::vector<Point> &edge,
     result.reliable = result.pointCount >= 20 && result.coversBottom &&
                       result.maximumJump <= 30.0f && !borderFailure &&
                       !oppositeBorderFailure;
+    // 本边缘严重贴着其预期图像边界（borderFailure）时视为被裁剪，
+    // 不能作为真实单边控制边缘；只有可靠可见边缘才能单边重建。
     result.singleEdgeUsable = result.pointCount >= 20 && result.coversBottom &&
         result.maximumJump <= 30.0f &&
-        !oppositeBorderFailure && result.interiorPointCount >= interiorPointsMinimum &&
-        (!borderFailure || result.interiorPointCount >= interiorPointsMinimum);
+        !borderFailure && !oppositeBorderFailure &&
+        result.interiorPointCount >= interiorPointsMinimum;
     return result;
 }
 

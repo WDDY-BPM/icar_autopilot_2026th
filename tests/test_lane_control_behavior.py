@@ -176,8 +176,11 @@ class LaneControlBehaviorTests(unittest.TestCase):
         lane_quality = (ROOT / "include/ctrl/lane_quality.hpp").read_text(
             encoding="utf-8")
         self.assertIn("assessStartupLaneMode", builder)
+        self.assertIn("selectSingleLaneMode", builder)
+        self.assertIn("laneRecoveryModeName", builder)
         self.assertIn("edgeCoversNearField", lane_quality)
         self.assertIn("singleEdgeUsable", lane_quality)
+        self.assertIn("!borderFailure && !oppositeBorderFailure", lane_quality)
         # 另一侧贴边裁剪时，可靠侧允许单边重建；但不伪造双边可靠。
         self.assertIn("rightClipped && stableLeftEdge", track)
         self.assertIn("leftClipped && stableRightEdge", track)
@@ -260,7 +263,8 @@ class LaneControlBehaviorTests(unittest.TestCase):
             encoding="utf-8")
         self.assertIn("assessStartupLaneMode", core)
         self.assertIn("edgeCoversNearField", core)
-        self.assertIn("advanceStartupLaneCount", core)
+        self.assertIn("startupLaneValidCount = laneValid", core)
+        self.assertNotIn("advanceStartupLaneCount", core)
         self.assertIn("startupLaneMode != LaneRecoveryMode::INVALID", core)
         self.assertIn("startupLaneValidCount >= params->config.startupStableFrames", core)
         self.assertIn("quality.leftReliable && quality.rightReliable", builder)
@@ -323,9 +327,10 @@ class LaneControlBehaviorTests(unittest.TestCase):
         core = read_runtime_sources()
         builder = (ROOT / "include/ctrl/perception_geometry_builder.hpp").read_text(
             encoding="utf-8")
-        self.assertIn("leftSingleUsable && leftCoversNear", builder)
-        self.assertIn("rightSingleUsable && rightCoversNear", builder)
+        self.assertIn("LaneRecoveryMode::LEFT_SINGLE && leftCoversNear", builder)
+        self.assertIn("LaneRecoveryMode::RIGHT_SINGLE && rightCoversNear", builder)
         self.assertIn("singleLaneInteriorPointsMin", builder)
+        self.assertIn("laneRecoveryModeName", core)
         self.assertIn("startupLaneValidCount >= params->config.startupStableFrames", core)
         self.assertNotIn("quality.leftReliable = true",
                          (ROOT / "src/ctrl/track.cpp").read_text(encoding="utf-8"))

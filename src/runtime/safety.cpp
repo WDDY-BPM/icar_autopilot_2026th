@@ -68,8 +68,8 @@ bool Icar::updateStartupGate(bool receivedNewAiResult)
             laneQuality, leftCoversNear, rightCoversNear, params->config);
         const bool laneValid =
             startupLaneMode != LaneRecoveryMode::INVALID;
-        startupLaneValidCount = control_algorithms::advanceStartupLaneCount(
-            startupLaneValidCount, laneValid);
+        startupLaneValidCount = laneValid
+            ? startupLaneValidCount + 1 : 0; // 严格连续：任一无效帧归零
 
         if (!params->config.requireStartCone)
         {
@@ -121,16 +121,12 @@ bool Icar::updateStartupGate(bool receivedNewAiResult)
         {
             const char *state = startupGateState == StartupGateState::WAIT_FOR_CONE
                 ? "WAIT_FOR_CONE" : "WAIT_FOR_REMOVAL";
-            const char *modeName =
-                startupLaneMode == LaneRecoveryMode::STRICT_DUAL ? "STRICT_DUAL" :
-                startupLaneMode == LaneRecoveryMode::LEFT_SINGLE ? "LEFT_SINGLE" :
-                startupLaneMode == LaneRecoveryMode::RIGHT_SINGLE ? "RIGHT_SINGLE" :
-                "INVALID";
             std::cout << "[Startup] state=" << state
                       << " coneDetected=" << coneDetected
                       << " coneSeen=" << startupConeSeenCount
                       << " coneMissing=" << startupConeMissingCount
-                      << " startupLaneMode=" << modeName
+                      << " startupLaneMode="
+                      << laneRecoveryModeName(startupLaneMode)
                       << " strictDualStart="
                       << (startupLaneMode == LaneRecoveryMode::STRICT_DUAL)
                       << " leftSingleStart="

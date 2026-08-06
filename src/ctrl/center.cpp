@@ -230,8 +230,9 @@ void Center::fitting(shared_ptr<Params> &params)
         recoveryMode == LaneRecoveryMode::WEAK_HYBRID ||
         recoveryMode == LaneRecoveryMode::LEFT_SINGLE ||
         recoveryMode == LaneRecoveryMode::RIGHT_SINGLE;
-    if (degradedMode && laneWidthProfileReady() &&
-        params->ctrl.centerEdge.size() >= 12)
+    // 弯道起点宽度模型通常尚未学习完成（laneWidthProfileReady=false），
+    // 单边中心线仍由fallbackWidth生成，连续性检查不能因此被跳过。
+    if (degradedMode && params->ctrl.centerEdge.size() >= 12)
     {
         const auto limited = control_algorithms::limitSingleLaneCenter(
             params->ctrl.center, lastValidLaneCenter,
@@ -348,14 +349,7 @@ void Center::drawImage(shared_ptr<Params> &params, Mat &img)
             FONT_HERSHEY_PLAIN, 1.2, Scalar(0, 0, 255), 1); // 中心
 
     // 调试画面：车道模式 + 中心线点数 + 近场点数（便于直接判断失败原因）
-    const char *laneModeName =
-        recoveryMode == LaneRecoveryMode::STRICT_DUAL ? "STRICT_DUAL" :
-        recoveryMode == LaneRecoveryMode::RELAXED_DUAL ? "RELAXED_DUAL" :
-        recoveryMode == LaneRecoveryMode::WEAK_HYBRID ? "WEAK_HYBRID" :
-        recoveryMode == LaneRecoveryMode::LEFT_SINGLE ? "LEFT_SINGLE" :
-        recoveryMode == LaneRecoveryMode::RIGHT_SINGLE ? "RIGHT_SINGLE" :
-        "INVALID";
-    putText(img, string("lane=") + laneModeName +
+    putText(img, string("lane=") + laneRecoveryModeName(recoveryMode) +
             " samples=" + to_string(usableCenterRows) +
             " near=" + to_string(nearCenterSamples),
             Point(10, 3 * dis), FONT_HERSHEY_PLAIN, 0.7,

@@ -318,7 +318,8 @@ int main()
     const auto clippedReliability = control_algorithms::assessEdgeReliability(
         clippedRight, false, 320, 240, 20, 12);
     CHECK(!clippedReliability.reliable);
-    CHECK(clippedReliability.singleEdgeUsable);
+    // 本边缘严重贴边（被裁剪）时不能作为真实单边控制边缘。
+    CHECK(!clippedReliability.singleEdgeUsable);
     CHECK(clippedReliability.interiorPointCount == 12);
     std::vector<float> learnedWidths(240, 240.0f);
     const auto clippedCenter = control_algorithms::reconstructSingleLaneCenter(

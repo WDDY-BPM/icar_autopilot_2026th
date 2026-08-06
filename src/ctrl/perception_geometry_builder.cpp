@@ -42,6 +42,7 @@ PerceptionGeometryResult buildPerceptionGeometry(
         /*maximumInterpolationGap=*/6,
         /*maximumAcceptedCenterGap=*/8,
         /*nearFieldStartRow=*/ROWSIMAGE - 64};
+    const auto selectedSingleMode = selectSingleLaneMode(quality);
     if (quality.leftReliable && quality.rightReliable)
     {
         result.centerLine = buildDualCenterByRow(
@@ -55,14 +56,14 @@ PerceptionGeometryResult buildPerceptionGeometry(
             : LaneRecoveryMode::RELAXED_DUAL;
         result.widthConsistent = quality.widthVariation <= 0.30f;
     }
-    else if (quality.leftSingleUsable)
+    else if (selectedSingleMode == LaneRecoveryMode::LEFT_SINGLE)
     {
         result.centerLine = singleCenter(
             track.pointsEdgeLeft, true, laneWidthModel);
         result.singleSide = -1;
         result.recoveryMode = LaneRecoveryMode::LEFT_SINGLE;
     }
-    else if (quality.rightSingleUsable)
+    else if (selectedSingleMode == LaneRecoveryMode::RIGHT_SINGLE)
     {
         result.centerLine = singleCenter(
             track.pointsEdgeRight, false, laneWidthModel);

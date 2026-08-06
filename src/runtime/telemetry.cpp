@@ -38,17 +38,8 @@ void Icar::publishTelemetry(const FrameCycle &frame)
             overlay["steering"] = params->ctrl.servo;
             overlay["center"] = params->ctrl.center;
             overlay["center_error"] = params->ctrl.center - COLSIMAGE / 2;
-            const auto recoveryModeName = [](LaneRecoveryMode mode) {
-                switch (mode) {
-                case LaneRecoveryMode::STRICT_DUAL: return "STRICT_DUAL";
-                case LaneRecoveryMode::RELAXED_DUAL: return "RELAXED_DUAL";
-                case LaneRecoveryMode::WEAK_HYBRID: return "WEAK_HYBRID";
-                case LaneRecoveryMode::LEFT_SINGLE: return "LEFT_SINGLE";
-                case LaneRecoveryMode::RIGHT_SINGLE: return "RIGHT_SINGLE";
-                default: return "INVALID";
-                }
-            };
-            overlay["recovery_mode"] = recoveryModeName(center->recoveryMode);
+            overlay["recovery_mode"] =
+                laneRecoveryModeName(center->recoveryMode);
             overlay["ctrl_stop"] = params->ctrl.stop;
             overlay["must_stop"] = params->mustStop();
             overlay["stop_reasons"] = params->stopReasonString();
