@@ -1,9 +1,10 @@
 #include "com/control_watchdog.hpp"
 #include "config/config_loader.hpp"
 #include "ctrl/control_algorithms.hpp"
+#include "ctrl/planned_geometry_builder.hpp"
 #include "fsm/busy_exit_state.hpp"
-#include "fsm/park_observation.hpp"
-#include "fsm/park_path_planner.hpp"
+#include "fsm/park/park_observation.hpp"
+#include "fsm/park/park_path_planner.hpp"
 #include "fsm/yfork_guide_hold.hpp"
 #include "runtime/camera_recovery.hpp"
 #include "runtime/control_decision.hpp"
@@ -17,6 +18,7 @@
 
 #include <chrono>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 struct TestLapConfig
@@ -62,6 +64,16 @@ bool throwsInvalid(Function function)
 int main()
 {
     {
+        CHECK(selectGeometrySource(GeometryPolicy::PERCEPTION_ALLOWED, false) ==
+              ControlGeometrySource::PERCEPTION);
+        CHECK(selectGeometrySource(GeometryPolicy::PERCEPTION_ALLOWED, true) ==
+              ControlGeometrySource::PLANNED);
+        CHECK(selectGeometrySource(GeometryPolicy::PLANNED_REQUIRED, false) ==
+              ControlGeometrySource::NONE);
+        CHECK(selectGeometrySource(GeometryPolicy::STOPPED, true) ==
+              ControlGeometrySource::NONE);
+    }
+    {
         nlohmann::json lapJson = {
             {"park", true}, {"parkSpot", 4}, {"yfork", true},
             {"yforkLeft", false}, {"busyStopEnable", false}};
@@ -84,6 +96,24 @@ int main()
         const auto planned = ParkPathPlanner::fromEdges(
             PathSource::PARK, {{220, 100}}, {{220, 220}}, 0.7f, 0.18f, 2);
         CHECK(planned.hasValidGeometry() && planned.source == PathSource::PARK);
+        const Config config;
+        const auto leftTurn = ParkPathPlanner::buildParkingTurn(true, config);
+        CHECK(leftTurn.leftEdge.size() == 51 && leftTurn.rightEdge.size() == 51);
+        CHECK(leftTurn.leftEdge.front().x == 230 &&
+              leftTurn.leftEdge.back().x == 80);
+        const auto rightTurn = ParkPathPlanner::buildParkingTurn(false, config);
+        CHECK(rightTurn.leftEdge.front().y == 64 &&
+              rightTurn.leftEdge.back().y == 319);
+        const auto guide = ParkPathPlanner::buildTrackGuide(
+            {220, 160}, PredictResult{LABEL_FORK, "", 0.9f, 120, 90, 20, 20},
+            true, config);
+        CHECK(guide.freshnessMode == PathFreshnessMode::TIME_TTL);
+        CHECK(guide.validForTime == std::chrono::milliseconds(150));
+        const auto inSpot = ParkPathPlanner::buildInSpotStraight(config);
+        const auto plannedGeometry = buildPlannedGeometry(inSpot, FsmMode::PARK);
+        CHECK(plannedGeometry.source == PathSource::PARK);
+        CHECK(plannedGeometry.valid && !plannedGeometry.centerLine.empty());
+        CHECK(!buildPlannedGeometry(inSpot, FsmMode::NORMAL).valid);
     }
     {
         control_algorithms::StopReasonState reasons;
@@ -205,6 +235,13 @@ int main()
         CHECK(overridePath.validFor(PathSource::YFORK));
         overridePath.tick(102);
         CHECK(!overridePath.active());
+        overridePath.setCenterLineForTime(
+            PathSource::PARK, {{230, 160}, {220, 161}},
+            std::chrono::milliseconds(20));
+        CHECK(overridePath.freshnessMode == PathFreshnessMode::TIME_TTL);
+        CHECK(overridePath.hasValidGeometry());
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        CHECK(!overridePath.hasValidGeometry());
 
         overridePath.setEdges(PathSource::FORK, {{1, 20}}, {{1, 80}});
         overridePath.setEdges(PathSource::OBSTACLE, {{2, 30}}, {{2, 70}});
@@ -221,7 +258,7 @@ int main()
     {
         control_algorithms::StopReasonState reasons;
         ControlGeometry perception{ControlGeometrySource::PERCEPTION,
-                                   PathSource::NONE, {{220, 160}}, true, true};
+                                   PathSource::NONE, true, true, 1};
         CHECK(evaluateRuntimeControl(perception, reasons, true).allowMotion);
         perception.updated = false;
         CHECK(!evaluateRuntimeControl(perception, reasons, true).allowMotion);
@@ -229,9 +266,9 @@ int main()
         perception.valid = false;
         CHECK(!evaluateRuntimeControl(perception, reasons, true).allowMotion);
         perception.valid = true;
-        perception.centerLine.clear();
+        perception.pointCount = 0;
         CHECK(!evaluateRuntimeControl(perception, reasons, true).allowMotion);
-        perception.centerLine = {{220, 160}};
+        perception.pointCount = 1;
         reasons.set(control_algorithms::StopReason::LANE, true);
         CHECK(!evaluateRuntimeControl(perception, reasons, true).allowMotion);
         reasons.set(control_algorithms::StopReason::LANE, false);
@@ -242,7 +279,7 @@ int main()
         CHECK(!evaluateRuntimeControl(perception, reasons, false).allowMotion);
 
         ControlGeometry planned{ControlGeometrySource::PLANNED,
-                                PathSource::PARK, {{220, 160}}, true, true};
+                                PathSource::PARK, true, true, 1};
         CHECK(evaluateRuntimeControl(planned, reasons, true).allowMotion);
         planned.source = ControlGeometrySource::NONE;
         CHECK(!evaluateRuntimeControl(planned, reasons, true).allowMotion);
@@ -261,6 +298,15 @@ int main()
         CHECK(safety.validRecoveryFrames == 0);
         CHECK(!safety.observe(PathSource::YFORK, true));
         CHECK(safety.observe(PathSource::YFORK, true));
+        CHECK(!safety.latched);
+        safety.reject(PathSource::YFORK);
+        CHECK(!safety.observeFrame(true));
+        CHECK(!safety.observeFrame(false));
+        CHECK(!safety.observeFrame(true));
+        CHECK(safety.latched);
+        CHECK(!safety.observeFrame(false));
+        CHECK(!safety.observeFrame(true));
+        CHECK(safety.observeFrame(true));
         CHECK(!safety.latched);
         safety.reject(PathSource::PARK);
         safety.clear(PathSource::BUSY);

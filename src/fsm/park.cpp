@@ -71,6 +71,7 @@ FsmMode FsmPark::getMode()
 void FsmPark::run(Mat &img)
 {
     const auto now = std::chrono::steady_clock::now();
+    updateGeometryPolicy();
     const ParkObservation observation = params->aiResultFresh
         ? scanParkObservation(params->results) : ParkObservation{};
     if (!params->featureEnabled(Feature::PARK)) // 该模式未启用
@@ -87,7 +88,7 @@ void FsmPark::run(Mat &img)
     {
         if (params->ctrl.stop)
         {
-            if (step == Step::ENABLE || step == Step::FORKIN)
+            if (state.stage == Step::ENABLE || state.stage == Step::FORKIN)
             {
                 stopping = true; // 停车等待标志
             }
@@ -97,10 +98,10 @@ void FsmPark::run(Mat &img)
             stopping = true; // 停车等待标志
             if (!waitTimerActive)
             {
-                waitStartedAt = now;
+                state.waitStartedAt = now;
                 waitTimerActive = true;
             }
-            if (now - waitStartedAt >= std::chrono::seconds(7))
+            if (now - state.waitStartedAt >= std::chrono::seconds(7))
             {
                 waiting = false;
                 waitTimerActive = false;
@@ -108,7 +109,15 @@ void FsmPark::run(Mat &img)
         }
     }
 
-    switch (step)
+    dispatchStage(observation, now);
+
+}
+
+
+void FsmPark::dispatchStage(const ParkObservation &observation,
+                           std::chrono::steady_clock::time_point now)
+{
+    switch (state.stage)
     {
     case Step::NONE: // AI未识别
     {
@@ -126,21 +135,21 @@ void FsmPark::run(Mat &img)
             }
         }
         if (parkDetectedThisFrame)
-            countRes++;
+            state.aiEvidenceFrames++;
 
-        if (countRes >= 3)
+        if (state.aiEvidenceFrames >= 3)
         {
             setStep(Step::ENABLE); // 设置停车场新步骤
             std::cout << "[Park] Parking area confirmed" << std::endl;
         }
 
-        if (countRes > 0) // 识别AI标志后开始场次计数
+        if (state.aiEvidenceFrames > 0) // 识别AI标志后开始场次计数
         {
-            countSes++;
-            if (countSes >= 5)
+            state.aiMissingFrames++;
+            if (state.aiMissingFrames >= 5)
             {
-                countSes = 0;
-                countRes = 0;
+                state.aiMissingFrames = 0;
+                state.aiEvidenceFrames = 0;
             }
         }
         break;
@@ -149,26 +158,26 @@ void FsmPark::run(Mat &img)
     case Step::ENABLE: // 停车场使能
     {
         if (!params->ctrl.stop) // 停车等待
-            timeout++;
-        if (timeout > 80) // 超时退出停车状态
+            state.stageControlFrames++;
+        if (state.stageControlFrames > 80) // 超时退出停车状态
             reset();      // 停车场数据复位
 
         if (params->aiResultFresh)
         {
-            countSes++;
+            state.aiMissingFrames++;
             if (!observation.parkMarkers.empty())
-                countSes = 0;
+                state.aiMissingFrames = 0;
 
             const PredictResult &fork = observation.bestChoice;
             if (fork.score > 0)
             {
-                countSes = 0;
+                state.aiMissingFrames = 0;
                 if ((fork.y + fork.height / 2) > ROWSIMAGE * 0.35)
-                    countRes++;
+                    state.aiEvidenceFrames++;
             }
         }
 
-        if (countSes > 30 || countRes > 1)
+        if (state.aiMissingFrames > 30 || state.aiEvidenceFrames > 1)
             setStep(Step::FORKIN);
 
         // parkSpot为0时穿过停车场不停车（不提前回退，让流程走到FORKIN）
@@ -177,11 +186,11 @@ void FsmPark::run(Mat &img)
 
     case Step::FORKIN: // 入库岔路转向
     {
-        timeout++;
+        state.stageControlFrames++;
         replanTracking();                             // 车道线重绘（岔路左转）
         if (observation.hasGate)
-            countRes++;
-        if (countRes > 2 || timeout > 24) // 转向超时：
+            state.aiEvidenceFrames++;
+        if (state.aiEvidenceFrames > 2 || state.stageControlFrames > 24) // 转向超时：
         {
             spots.reset(); // 车位信息复位
 
@@ -196,18 +205,18 @@ void FsmPark::run(Mat &img)
             setStep(Step::TRACKIN); // 设置停车场新步骤
         }
 
-        if (params->aiResultFresh && timeout > 20)
+        if (params->aiResultFresh && state.stageControlFrames > 20)
         {
             if (!observation.forkMarkers.empty()) // 搜索AI标志：岔路箭头
-                countRes++;
+                state.aiEvidenceFrames++;
         }
         break;
     }
 
     case Step::TRACKIN: // 入库巡线中
     {
-        timeout++;  // 超时计数
-        countSes++; // 控制周期计数（仅用于超时，不作为AI证据）
+        state.stageControlFrames++;  // 超时计数
+        state.aiMissingFrames++; // 控制周期计数（仅用于超时，不作为AI证据）
 
         //[01] 道闸检测
         if (observation.hasGate)
@@ -234,8 +243,8 @@ void FsmPark::run(Mat &img)
                 }
                 if (params->aiResultFresh)
                 {
-                    timeout = 0;
-                    countRes = 0;
+                    state.stageControlFrames = 0;
+                    state.aiEvidenceFrames = 0;
                 }
             }
         }
@@ -284,15 +293,10 @@ void FsmPark::run(Mat &img)
                 }
                 countIn++;
             }
-            int sideBias = rightSide ? 40 : -40;                                            // 侧向偏置（解决左偏/右偏）
-            PointX end = PointX(direction.y, direction.x + direction.width / 2 + sideBias); // 补线终点：AI标志
-            PointX mid = PointX((start.x + end.x) / 2, (start.y + end.y) / 2);              // 补线中点
-            vector<PointX> repairPoints = {start, mid, end};
-            params->pathOverride.setCenterLine(
-                PathSource::PARK, Bezier(0.02, repairPoints),
-                0.65f, params->config.velPark, 2);
-            timeout = 0;                                          // 超时计数
-            countRes = 0;
+            params->pathOverride = ParkPathPlanner::buildTrackGuide(
+                start, direction, rightSide, params->config);
+            state.stageControlFrames = 0;                                          // 超时计数
+            state.aiEvidenceFrames = 0;
 
             // 出停车场检测
             if (params->aiResultFresh && resLeft.score > 0 &&
@@ -375,15 +379,15 @@ void FsmPark::run(Mat &img)
         }
 
         // 出库状态切换
-        if (countSes > 100 && timeout > 23)
+        if (state.aiMissingFrames > 100 && state.stageControlFrames > 23)
             setStep(Step::FORKOUT); // 纯控制周期超时，不混入AI证据计数器
         break;
     }
 
     case Step::ENTER: // 驶入停车位
     {
-        timeout++;
-        if (timeout < 18) // 入库转向
+        state.stageControlFrames++;
+        if (state.stageControlFrames < 18) // 入库转向
         {
             if (spots.spotEnable[0] || spots.spotEnable[1])      // 1/2号车位（左侧）
                 replanTracking(true);                            // 入库车道线重绘（左转）
@@ -416,21 +420,8 @@ void FsmPark::run(Mat &img)
 
             // 入库直行
             // 左车道线
-            PointX startPoint = PointX(ROWSIMAGE - 30, COLSIMAGE * 0.2);                                    // 入库补线起点:固定左下角
-            PointX endPoint = PointX(50, COLSIMAGE * 0.35);                                                 // 入库补线终点
-            PointX midPoint = PointX((startPoint.x + endPoint.x) * 0.5, (startPoint.y + endPoint.y) * 0.5); // 入库补线中点
-            vector<PointX> repairPoints = {startPoint, midPoint, endPoint};
-            vector<PointX> leftEdge = Bezier(0.02, repairPoints);
-
-            // 右车道
-            startPoint = PointX(ROWSIMAGE - 30, COLSIMAGE * 0.8);                                    // 入库补线起点:固定左下角
-            endPoint = PointX(50, COLSIMAGE * 0.65);                                                 // 入库补线终点
-            midPoint = PointX((startPoint.x + endPoint.x) * 0.5, (startPoint.y + endPoint.y) * 0.5); // 入库补线中点
-            repairPoints = {startPoint, midPoint, endPoint};
-            vector<PointX> rightEdge = Bezier(0.02, repairPoints);
-            params->pathOverride.setEdges(
-                PathSource::PARK, std::move(leftEdge), std::move(rightEdge),
-                0.65f, params->config.velPark, 2);
+            params->pathOverride =
+                ParkPathPlanner::buildInSpotStraight(params->config);
         }
 
         if (params->pathOverride.validFor(PathSource::PARK) &&
@@ -441,7 +432,7 @@ void FsmPark::run(Mat &img)
             pointsEdgeRightPast.push_back(params->pathOverride.rightEdge);
         }
 
-        if (timeout > 30)           // 转向超时
+        if (state.stageControlFrames > 30)           // 转向超时
             setStep(Step::PARKING); // 停车完成
         break;
     }
@@ -449,7 +440,7 @@ void FsmPark::run(Mat &img)
     case Step::PARKING: // 停车
     {
         params->setStopReason(control_algorithms::StopReason::PARK, true);
-        if (now - stepStartedAt >= std::chrono::milliseconds(700))
+        if (now - state.stageStartedAt >= std::chrono::milliseconds(700))
             setStep(Step::WAIT_PICKUP);
 
         break;
@@ -458,7 +449,7 @@ void FsmPark::run(Mat &img)
     case Step::WAIT_PICKUP: // 等待乘客上车
     {
         params->setStopReason(control_algorithms::StopReason::PARK, true);
-        if (now - stepStartedAt >= std::chrono::seconds(3))
+        if (now - state.stageStartedAt >= std::chrono::seconds(3))
         {
             printf("[Park] Pickup wait complete, exiting parking spot\n");
             setStep(Step::EXIT);
@@ -477,9 +468,9 @@ void FsmPark::run(Mat &img)
         else
         {
             // 出库轨迹复现
-            params->pathOverride.setEdges(
-                PathSource::PARK, pointsEdgeLeftPast.back(), pointsEdgeRightPast.back(),
-                0.65f, params->config.velPark, 2);
+            params->pathOverride = ParkPathPlanner::buildReplay(
+                pointsEdgeLeftPast.back(), pointsEdgeRightPast.back(),
+                params->config);
             pointsEdgeLeftPast.pop_back(); // 删除最后一组路径
             pointsEdgeRightPast.pop_back();
         }
@@ -489,7 +480,7 @@ void FsmPark::run(Mat &img)
 
     case Step::TRACKOUT: // 出库巡线
     {
-        timeout++; // 超时计数
+        state.stageControlFrames++; // 超时计数
         //[01] 道闸检测
         if (observation.hasGate)
         {
@@ -498,8 +489,8 @@ void FsmPark::run(Mat &img)
             {
                 if (params->aiResultFresh)
                 {
-                    timeout = 0;
-                    countRes = 0;
+                    state.stageControlFrames = 0;
+                    state.aiEvidenceFrames = 0;
                 }
                 if ((gate.y + gate.height) > ROWSIMAGE * 0.4) // 停车距离计算
                 {
@@ -521,24 +512,22 @@ void FsmPark::run(Mat &img)
             else
                 direction = spots.forks[0];
             PointX start = PointX(ROWSIMAGE - 20, COLSIMAGE / 2);                // 补线起点：车头
-            PointX end = PointX(direction.y, direction.x + direction.width / 2); // 补线终点：AI标志
-            PointX mid = PointX((start.x + end.x) / 2, (start.y + end.y) / 2);   // 补线中点
-            vector<PointX> repairPoints = {start, mid, end};
-            params->pathOverride.setCenterLine(
-                PathSource::PARK, Bezier(0.02, repairPoints),
-                0.65f, params->config.velPark, 2);
+            const int targetSpot = params->config.currentLapConfig->parkSpot;
+            const bool rightSide = targetSpot == 3 || targetSpot == 4;
+            params->pathOverride = ParkPathPlanner::buildTrackGuide(
+                start, direction, rightSide, params->config);
             if (params->aiResultFresh && spots.forks.size() > 0)
-                timeout = 0; // 定时入库关闭 | 仅依靠AI标志转向
+                state.stageControlFrames = 0; // 定时入库关闭 | 仅依靠AI标志转向
 
             if (params->aiResultFresh && resLeft.score > 0 &&
                 (resLeft.y + resLeft.height / 2) > ROWSIMAGE * 0.35)
             {
-                countRes++;
+                state.aiEvidenceFrames++;
             }
         }
 
         // 出库状态切换
-        if (timeout > 48 || countRes > 2)
+        if (state.stageControlFrames > 48 || state.aiEvidenceFrames > 2)
             setStep(Step::FORKOUT); // 设置停车场新步骤
 
         break;
@@ -546,7 +535,7 @@ void FsmPark::run(Mat &img)
 
     case Step::FORKOUT: // 出库岔路转向
     {
-        timeout++;
+        state.stageControlFrames++;
         replanTracking(); // 车道线重绘（岔路左转）
 
         // 搜索左转标志
@@ -555,17 +544,17 @@ void FsmPark::run(Mat &img)
         if (params->aiResultFresh)
         {
             if (leftSign) // 标志未丢失
-                countRes = 0;
+                state.aiEvidenceFrames = 0;
             else
-                countRes++;
+                state.aiEvidenceFrames++;
         }
 
         const bool exitTimedOut =
             std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - forkOutStartedAt).count() >= 2000;
-        if (exitTimedOut || countRes > 2) // 转向超时
+                std::chrono::steady_clock::now() - state.forkOutStartedAt).count() >= 2000;
+        if (exitTimedOut || state.aiEvidenceFrames > 2) // 转向超时
         {
-            const bool exitConfirmed = countRes > 2;
+            const bool exitConfirmed = state.aiEvidenceFrames > 2;
             params->ctrl.countAcc = params->config.startupRampFrames;        // 跳过缓加速，直接恢复速度
             params->ctrl.yforkReset = true;    // 通知yfork复位，防止残留forkSeen误触发
             if (exitConfirmed)
@@ -604,15 +593,11 @@ void FsmPark::show(Mat &img)
                Scalar(0, 255, 255), -1); // 黄色点
     }
 
-    // 绘制中心点集
-    if (params->ctrl.fitting)
-    {
-        for (int i = 0; i < params->ctrl.centerEdge.size(); i++)
-            circle(img, Point(params->ctrl.centerEdge[i].y, params->ctrl.centerEdge[i].x), 1, Scalar(0, 0, 255), -1);
-    }
+    for (int i = 0; i < params->ctrl.centerEdge.size(); i++)
+        circle(img, Point(params->ctrl.centerEdge[i].y, params->ctrl.centerEdge[i].x), 1, Scalar(0, 0, 255), -1);
 
     string str = "Enable";
-    switch (step)
+    switch (state.stage)
     {
     case Step::FORKIN:
         str = "Forkin";
@@ -630,12 +615,6 @@ void FsmPark::show(Mat &img)
 
         // 透视变换视角
         Mat imgIpm = Mat::zeros(Size(COLSIMAGEIPM, ROWSIMAGEIPM), CV_8UC3); // 创建全黑图像
-        for (int i = 0; i < spots.carsIpm.size(); i++)
-            circle(imgIpm, Point(spots.carsIpm[i].x, spots.carsIpm[i].y), 3, Scalar(0, 0, 255), -1);
-
-        for (int i = 0; i < spots.forksIpm.size(); i++)
-            circle(imgIpm, Point(spots.forksIpm[i].x, spots.forksIpm[i].y), 3, Scalar(0, 255, 0), -1);
-
         // 绘制所有4个车位标签（实际布局：左前=1，左后=2，右后=3，右前=4）
         // 绿色=空闲(spotEnable=true)，红色=占用(spotEnable=false)
         if (spots.forks.size() > 0)
@@ -694,41 +673,60 @@ void FsmPark::reset()
 {
     params->clearPathOverride(PathSource::PARK);
     params->releasePlannerSafety(PathSource::PARK);
-    countSes = 0;      // AI场景识别计数器
-    timeout = 0;       // 超时计数器
-    step = Step::NONE; // 停车步骤
+    state.aiMissingFrames = 0;      // AI场景识别计数器
+    state.stageControlFrames = 0;       // 超时计数器
+    state.stage = Step::NONE; // 停车步骤
     waiting = false;   // 停车等待使能
     waitTimerActive = false;
     countOut = 0;      // 出库检测计数
     countIn = 0;       // 入库矫正计数器
     params->ctrl.back = false;
     params->ctrl.parking = false;
-    params->ctrl.fitting = false;
 }
 
 /**
  * @brief 设置下阶段
  *
- * @param step
+ * @param state.stage
  */
 void FsmPark::setStep(Step st)
 {
     params->clearPathOverride(PathSource::PARK);
-    countRes = 0; // AI场景识别计数器
-    countSes = 0; // 场次计数器
-    timeout = 0;  // 超时计数器
-    step = st;    // 停车步骤
-    stepStartedAt = std::chrono::steady_clock::now();
-    params->ctrl.fitting = false;
+    state.aiEvidenceFrames = 0; // AI场景识别计数器
+    state.aiMissingFrames = 0; // 场次计数器
+    state.stageControlFrames = 0;  // 超时计数器
+    state.stage = st;    // 停车步骤
+    state.stageStartedAt = std::chrono::steady_clock::now();
     params->setStopReason(control_algorithms::StopReason::PARK,
         st == Step::PARKING || st == Step::WAIT_PICKUP);
     if (st == Step::NONE || st == Step::ENABLE ||
         st == Step::PARKING || st == Step::WAIT_PICKUP)
         params->releasePlannerSafety(PathSource::PARK);
     if (st == Step::FORKOUT)
-        forkOutStartedAt = std::chrono::steady_clock::now();
+        state.forkOutStartedAt = std::chrono::steady_clock::now();
     countIn = 0;  // 入库矫正计数器
     params->ctrl.back = false; // 倒车失能
+    updateGeometryPolicy();
+}
+
+void FsmPark::updateGeometryPolicy()
+{
+    switch (state.stage)
+    {
+    case Step::FORKIN:
+    case Step::ENTER:
+    case Step::EXIT:
+    case Step::FORKOUT:
+        params->geometryPolicy = GeometryPolicy::PLANNED_REQUIRED;
+        break;
+    case Step::PARKING:
+    case Step::WAIT_PICKUP:
+        params->geometryPolicy = GeometryPolicy::STOPPED;
+        break;
+    default:
+        params->geometryPolicy = GeometryPolicy::PERCEPTION_ALLOWED;
+        break;
+    }
 }
 
 /**
@@ -737,23 +735,9 @@ void FsmPark::setStep(Step st)
  */
 void FsmPark::replanTracking()
 {
-    // 左车道线
-    PointX startPoint = PointX(ROWSIMAGE - 10, 1);                                                // 入库补线起点:固定左下角
-    PointX endPoint = PointX(ROWSIMAGE / 3, 1);                                                   // 入库补线终点
-    PointX midPoint = PointX((startPoint.x + endPoint.x) * 0.3, (startPoint.y + endPoint.y) / 2); // 入库补线中点
-    vector<PointX> repairPoints = {startPoint, midPoint, endPoint};
-    vector<PointX> modifyEdge = Bezier(0.02, repairPoints); // 三阶贝塞尔曲线拟合
-    const vector<PointX> leftEdge = modifyEdge;
-
-    // 右车道线
-    startPoint = PointX(ROWSIMAGE - 10, COLSIMAGE * 0.8);                                     // 入库补线起点:固定左下角
-    endPoint = PointX(ROWSIMAGE / 3, 30);                                                     // 入库补线终点
-    midPoint = PointX((startPoint.x + endPoint.x) * 0.5, (startPoint.y + endPoint.y) * 0.35); // 入库补线中点（更靠下，左转更早）
-    repairPoints = {startPoint, midPoint, endPoint};
-    modifyEdge = Bezier(0.02, repairPoints); // 三阶贝塞尔曲线拟合
-    params->pathOverride.setEdges(
-        PathSource::PARK, std::move(leftEdge), std::move(modifyEdge),
-        0.65f, params->config.velPark, 2);
+    params->pathOverride = state.stage == Step::FORKIN
+        ? ParkPathPlanner::buildForkIn(params->config)
+        : ParkPathPlanner::buildForkOut(params->config);
 }
 /**
  * @brief 停车入库车道线重绘
@@ -762,91 +746,7 @@ void FsmPark::replanTracking()
  */
 void FsmPark::replanTracking(bool left)
 {
-    vector<PointX> leftEdge;
-    vector<PointX> rightEdge;
-    if (left)
-    {
-        // 左车道线
-        PointX startPoint = PointX(ROWSIMAGE - 10, 1);                                                // 入库补线起点:固定左下角
-        PointX endPoint = PointX(ROWSIMAGE / 3, 1);                                                   // 入库补线终点
-        PointX midPoint = PointX((startPoint.x + endPoint.x) * 0.3, (startPoint.y + endPoint.y) / 2); // 入库补线中点
-        vector<PointX> repairPoints = {startPoint, midPoint, endPoint};
-        vector<PointX> modifyEdge = Bezier(0.02, repairPoints); // 三阶贝塞尔曲线拟合
-        leftEdge = modifyEdge;
-        // 右车道线
-        startPoint = PointX(ROWSIMAGE - 10, COLSIMAGE * 0.8);                                  // 入库补线起点:固定左下角
-        endPoint = PointX(ROWSIMAGE / 3, 1);                                                   // 入库补线终点
-        midPoint = PointX((startPoint.x + endPoint.x) * 0.3, (startPoint.y + endPoint.y) / 2); // 入库补线中点
-        repairPoints = {startPoint, midPoint, endPoint};
-        modifyEdge = Bezier(0.02, repairPoints); // 三阶贝塞尔曲线拟合
-        rightEdge = modifyEdge;
-    }
-    else
-    {
-        // 左车道线
-        PointX startPoint = PointX(ROWSIMAGE - 10, COLSIMAGE * 0.2);                                  // 入库补线起点:固定左下角
-        PointX endPoint = PointX(ROWSIMAGE / 8, COLSIMAGE - 1);                                       // 入库补线终点
-        PointX midPoint = PointX((startPoint.x + endPoint.x) * 0.3, (startPoint.y + endPoint.y) / 2); // 入库补线中点
-        vector<PointX> repairPoints = {startPoint, midPoint, endPoint};
-        vector<PointX> modifyEdge = Bezier(0.02, repairPoints); // 三阶贝塞尔曲线拟合
-        leftEdge = modifyEdge;
-        // 右车道线
-        startPoint = PointX(ROWSIMAGE - 10, COLSIMAGE - 1);                                    // 入库补线起点:固定左下角
-        endPoint = PointX(ROWSIMAGE / 8, COLSIMAGE - 1);                                       // 入库补线终点
-        midPoint = PointX((startPoint.x + endPoint.x) * 0.3, (startPoint.y + endPoint.y) / 2); // 入库补线中点
-        repairPoints = {startPoint, midPoint, endPoint};
-        modifyEdge = Bezier(0.02, repairPoints); // 三阶贝塞尔曲线拟合
-        rightEdge = modifyEdge;
-    }
-    params->pathOverride.setEdges(
-        PathSource::PARK, std::move(leftEdge), std::move(rightEdge),
-        0.65f, params->config.velPark, 2);
-}
-
-/**
- * @brief 搜索AI标志
- *
- * @param label
- * @return true
- * @return false
- */
-bool FsmPark::findSymbols(const vector<PredictResult> &results, int label) const
-{
-    for (int i = 0; i < results.size(); i++)
-    {
-        if (results[i].type == label) // AI标志
-            return true;
-    }
-
-    return false;
-}
-
-/**
- * @brief 搜索AI标志（最顶上的一个）
- *
- * @param label
- * @param target 目标标志信息
- * @return true
- * @return false
- */
-bool FsmPark::findSymbols(const vector<PredictResult> &results, int label,
-                          PredictResult &target) const
-{
-    bool res = false;
-    target.y = ROWSIMAGE - 1;
-    for (int i = 0; i < results.size(); i++)
-    {
-        if (results[i].type == label) // AI标志
-        {
-            if (results[i].y < target.y && results[i].width < 120 && results[i].height < 120)
-            {
-                target = results[i];
-                res = true; // 搜索到目标AI
-            }
-        }
-    }
-
-    return res;
+    params->pathOverride = ParkPathPlanner::buildParkingTurn(left, params->config);
 }
 
 /**
@@ -859,31 +759,6 @@ vector<PredictResult> FsmPark::findParkStation(const vector<PredictResult> &resu
     return selectParkStations(results);
 }
 
-/**
- * @brief 获取AI检测目标的质心坐标
- *
- * @param res
- * @return PointX
- */
-PointX FsmPark::getResultCenter(const PredictResult &res) const
-{
-    PointX center;
-    center.x = res.x + res.width / 2;
-    center.y = res.y + res.height / 2;
-
-    if (center.x < 0)
-        center.x = 0;
-    else if (center.x >= COLSIMAGE)
-        center.x = COLSIMAGE - 1;
-
-    if (center.y < 0)
-        center.y = 0;
-    else if (center.y >= ROWSIMAGE)
-        center.y = ROWSIMAGE - 1;
-
-    return center;
-}
-
 void FsmPark::resetLap()
 {
     params->setStopReason(control_algorithms::StopReason::PARK, false);
@@ -892,6 +767,5 @@ void FsmPark::resetLap()
     pointsEdgeLeftPast.clear();
     pointsEdgeRightPast.clear();
     stopping = false;
-    fitting = false;
-    countRes = 0;
+    state.aiEvidenceFrames = 0;
 }

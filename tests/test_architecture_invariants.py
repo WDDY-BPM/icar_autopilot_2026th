@@ -48,7 +48,7 @@ class ArchitectureInvariantTests(unittest.TestCase):
         self.assertNotIn("params->ctrl.fitting = true", park)
         set_step = park[park.index("void FsmPark::setStep"):]
         self.assertLess(set_step.index("clearPathOverride(PathSource::PARK)"),
-                        set_step.index("step = st"))
+                        set_step.index("state.stage = st"))
         self.assertIn("controlValid = candidateValid", center)
         self.assertNotIn("controlValid = !params->ctrl.centerEdge.empty()", center)
 

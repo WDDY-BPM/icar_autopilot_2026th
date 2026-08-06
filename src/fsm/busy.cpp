@@ -21,6 +21,7 @@ FsmMode FsmBusy::getMode()
 void FsmBusy::run(Mat &img)
 {
     (void)img;
+    updateGeometryPolicy();
     if (!params->featureEnabled(Feature::BUSY))
     {
         params->clearPathOverride(PathSource::BUSY);
@@ -49,6 +50,7 @@ void FsmBusy::run(Mat &img)
             stationRequired, params->stationStopCompleted,
             params->aiResultFresh, leftVisible,
             std::chrono::steady_clock::now());
+        updateGeometryPolicy();
         if (event == BusyExitEvent::EXIT_STARTED)
             printf("[Busy] Left sign detected, starting exit turn\n");
 
@@ -167,6 +169,22 @@ void FsmBusy::run(Mat &img)
         enable = true;
         if (timeout > 10)
             slowing = false;
+    }
+}
+
+void FsmBusy::updateGeometryPolicy()
+{
+    switch (exitState.phase)
+    {
+    case BusyTraversalPhase::EXIT_GUIDANCE:
+        params->geometryPolicy = GeometryPolicy::PLANNED_REQUIRED;
+        break;
+    case BusyTraversalPhase::STOPPED:
+        params->geometryPolicy = GeometryPolicy::STOPPED;
+        break;
+    default:
+        params->geometryPolicy = GeometryPolicy::PERCEPTION_ALLOWED;
+        break;
     }
 }
 

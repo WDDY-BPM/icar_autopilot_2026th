@@ -16,7 +16,7 @@ inline RuntimeControlDecision evaluateRuntimeControl(
 {
     const bool usableGeometry = geometry.updated && geometry.valid &&
         geometry.source != ControlGeometrySource::NONE &&
-        !geometry.centerLine.empty();
+        geometry.pointCount > 0;
     return {automaticEnabled && usableGeometry && !stopReasons.mustStop(),
             automaticEnabled && (!usableGeometry || stopReasons.mustStop())};
 }

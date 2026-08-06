@@ -37,6 +37,7 @@
 #include "runtime/fsm_mode.hpp"
 #include "runtime/path_override.hpp"
 #include "runtime/planner_safety.hpp"
+#include "runtime/yfork_phase.hpp"
 #include "utils/config_validation.hpp"
 
 using namespace std;
@@ -53,7 +54,6 @@ struct Control
     float laneHeadingCorrection = 0.0f;
     vector<PointX> centerEdge;
     int lineArea = 0;
-    bool fitting = false;
     bool parking = false;
     int countAcc = 500;
     int startupSteeringCount = 500;
@@ -133,6 +133,7 @@ public:
     shared_ptr<Track> track;            // 赛道识别类
     PathOverride pathOverride;
     PlannerSafetyState plannerSafety;
+    GeometryPolicy geometryPolicy{GeometryPolicy::PERCEPTION_ALLOWED};
     uint64_t pathFrameId{0};
     std::vector<PredictResult> results; // AI推理结果
     bool aiResultFresh = false;         // 本控制帧是否收到了一组新的AI结果
@@ -141,13 +142,12 @@ public:
     std::atomic<bool> manualTakeover{false}; // 手动接管模式（跨 AI/主线程共享）
     bool stationStopCompleted = false;  // station已完成一次停车
     bool stationStarted = false;        // station已触发检测（pressTimer启动）
-    bool yforkGuiding = false;          // yfork正在强制引导转弯（期间station不检测）
+    YforkRuntimePhase yforkPhase{YforkRuntimePhase::INACTIVE};
     int yforkBranch = 0;                // yfork分支：0=无, 1=左, 2=右
     bool busyZone = false;              // 施工区标志（station据此调整检测参数）
     bool takeoverJustEnded = false;     // 手动接管刚结束
     int autoRecoveryFrames = 0;         // Automatic-control recovery hold
     bool laneSafetyStop = false;        // Latch FSM while lane recovery is incomplete
-    bool yforkPerceptionRecovery = false;
     int alertCountdown = 0;             // 蜂鸣器报警倒计时（帧数）
     int alertDecelCount = 0;            // 报警目标减速倒计时（帧数）
     int busyAlertCountdown = 0;         // 施工区蜂鸣器倒计时（帧数）
@@ -175,6 +175,15 @@ public:
     void releasePlannerSafety(PathSource source)
     {
         plannerSafety.clear(source);
+        setStopReason(control_algorithms::StopReason::PLANNER,
+                      plannerSafety.latched);
+    }
+
+    void reconcilePlannerSafetyWithMode()
+    {
+        if (plannerSafety.latched && !pathSourceAllowed(
+                plannerSafety.rejectedSource, mode))
+            plannerSafety.clear();
         setStopReason(control_algorithms::StopReason::PLANNER,
                       plannerSafety.latched);
     }

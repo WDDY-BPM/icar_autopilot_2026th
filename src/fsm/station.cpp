@@ -118,7 +118,7 @@ void FsmStation::run(Mat &img)
         if (params->yforkBranch == 1)
         {
             // 引导期间不检测
-            if (params->yforkGuiding)
+            if (params->yforkPhase == YforkRuntimePhase::GUIDE_ACTIVE)
                 break;
 
             for (int i = 0; i < params->results.size(); i++)
@@ -140,7 +140,7 @@ void FsmStation::run(Mat &img)
         else
         {
             // yfork引导期间不检测station框，避免干扰岔路导航
-            if (params->yforkGuiding)
+            if (params->yforkPhase == YforkRuntimePhase::GUIDE_ACTIVE)
                 break;
 
             if (params->busyZone)

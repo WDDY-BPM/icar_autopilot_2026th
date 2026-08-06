@@ -2,6 +2,7 @@
 
 void Icar::runFsm(Mat &img)
     {
+        params->geometryPolicy = GeometryPolicy::PERCEPTION_ALLOWED;
         // 圈数变更时复位所有FSM状态
         if (lastLap != params->currentLap)
         {

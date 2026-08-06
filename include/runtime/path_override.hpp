@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -8,6 +9,12 @@
 #include "utils/point.hpp"
 
 enum class PathSource { NONE, PARK, BUSY, FORK, YFORK, OBSTACLE };
+
+enum class PathFreshnessMode
+{
+    CONTROL_FRAME_TTL,
+    TIME_TTL
+};
 
 inline const char *pathSourceName(PathSource source)
 {
@@ -53,12 +60,25 @@ struct PathOverride
     float speedLimit{-1.0f};
     int ttlFrames{0};
     uint64_t generatedFrameId{0};
+    PathFreshnessMode freshnessMode{PathFreshnessMode::CONTROL_FRAME_TTL};
+    std::chrono::steady_clock::time_point generatedAt{};
+    std::chrono::milliseconds validForTime{0};
 
     void setEdges(PathSource owner, std::vector<PointX> left,
                   std::vector<PointX> right,
                   float newHeadingConfidence = 0.0f,
                   float newSpeedLimit = -1.0f,
                   int newTtlFrames = 1)
+    {
+        setEdgesForFrames(owner, std::move(left), std::move(right),
+                          newHeadingConfidence, newSpeedLimit, newTtlFrames);
+    }
+
+    void setEdgesForFrames(PathSource owner, std::vector<PointX> left,
+                           std::vector<PointX> right,
+                           float newHeadingConfidence = 0.0f,
+                           float newSpeedLimit = -1.0f,
+                           int newTtlFrames = 1)
     {
         resetPayload();
         source = owner;
@@ -68,12 +88,36 @@ struct PathOverride
         speedLimit = newSpeedLimit;
         ttlFrames = std::max(1, newTtlFrames);
         generatedFrameId = observedFrameId;
+        freshnessMode = PathFreshnessMode::CONTROL_FRAME_TTL;
+        generatedAt = std::chrono::steady_clock::now();
+    }
+
+    void setEdgesForTime(PathSource owner, std::vector<PointX> left,
+                         std::vector<PointX> right,
+                         std::chrono::milliseconds ttl,
+                         float newHeadingConfidence = 0.0f,
+                         float newSpeedLimit = -1.0f)
+    {
+        setEdgesForFrames(owner, std::move(left), std::move(right),
+                          newHeadingConfidence, newSpeedLimit, 1);
+        freshnessMode = PathFreshnessMode::TIME_TTL;
+        validForTime = std::max(ttl, std::chrono::milliseconds(1));
+        generatedAt = std::chrono::steady_clock::now();
     }
 
     void setCenterLine(PathSource owner, std::vector<PointX> center,
                        float newHeadingConfidence = 0.0f,
                        float newSpeedLimit = -1.0f,
                        int newTtlFrames = 1)
+    {
+        setCenterLineForFrames(owner, std::move(center), newHeadingConfidence,
+                               newSpeedLimit, newTtlFrames);
+    }
+
+    void setCenterLineForFrames(PathSource owner, std::vector<PointX> center,
+                                float newHeadingConfidence = 0.0f,
+                                float newSpeedLimit = -1.0f,
+                                int newTtlFrames = 1)
     {
         resetPayload();
         source = owner;
@@ -82,6 +126,20 @@ struct PathOverride
         speedLimit = newSpeedLimit;
         ttlFrames = std::max(1, newTtlFrames);
         generatedFrameId = observedFrameId;
+        freshnessMode = PathFreshnessMode::CONTROL_FRAME_TTL;
+        generatedAt = std::chrono::steady_clock::now();
+    }
+
+    void setCenterLineForTime(PathSource owner, std::vector<PointX> center,
+                              std::chrono::milliseconds ttl,
+                              float newHeadingConfidence = 0.0f,
+                              float newSpeedLimit = -1.0f)
+    {
+        setCenterLineForFrames(owner, std::move(center), newHeadingConfidence,
+                               newSpeedLimit, 1);
+        freshnessMode = PathFreshnessMode::TIME_TTL;
+        validForTime = std::max(ttl, std::chrono::milliseconds(1));
+        generatedAt = std::chrono::steady_clock::now();
     }
 
     void clear() { resetPayload(); }
@@ -97,6 +155,12 @@ struct PathOverride
     void tick(uint64_t currentFrameId)
     {
         observedFrameId = currentFrameId;
+        if (freshnessMode == PathFreshnessMode::TIME_TTL &&
+            std::chrono::steady_clock::now() - generatedAt >= validForTime)
+        {
+            clear();
+            return;
+        }
         if (!active())
             return;
         if (generatedFrameId == 0)
@@ -116,13 +180,31 @@ struct PathOverride
     bool hasGeometry() const { return hasLeft() || hasRight() || hasCenter(); }
     bool hasValidGeometry() const
     {
-        return source != PathSource::NONE && ttlFrames > 0 && hasGeometry();
+        const bool timeValid = freshnessMode != PathFreshnessMode::TIME_TTL ||
+            (std::chrono::steady_clock::now() - generatedAt < validForTime);
+        return source != PathSource::NONE && ttlFrames > 0 && hasGeometry() &&
+               timeValid;
     }
     bool active() const { return hasValidGeometry(); }
 
     bool validFor(PathSource expectedSource) const
     {
         return hasValidGeometry() && source == expectedSource;
+    }
+
+    std::int64_t ageMs() const
+    {
+        if (generatedAt.time_since_epoch().count() == 0)
+            return 0;
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - generatedAt).count();
+    }
+
+    std::int64_t remainingMs() const
+    {
+        if (freshnessMode != PathFreshnessMode::TIME_TTL)
+            return -1;
+        return std::max<std::int64_t>(0, validForTime.count() - ageMs());
     }
 
 private:
@@ -138,6 +220,9 @@ private:
         speedLimit = -1.0f;
         ttlFrames = 0;
         generatedFrameId = 0;
+        freshnessMode = PathFreshnessMode::CONTROL_FRAME_TTL;
+        generatedAt = {};
+        validForTime = std::chrono::milliseconds(0);
     }
 };
 

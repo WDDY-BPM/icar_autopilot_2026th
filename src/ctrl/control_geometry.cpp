@@ -32,6 +32,6 @@ void Center::applyControlGeometry(Params &params, bool plannedPath,
         (perceptionPath ? ControlGeometrySource::PERCEPTION :
                           ControlGeometrySource::NONE);
     geometry.pathSource = plannedPath ? pathSource : PathSource::NONE;
-    geometry.centerLine = params.ctrl.centerEdge;
     geometry.valid = controlValid;
+    geometry.pointCount = params.ctrl.centerEdge.size();
 }

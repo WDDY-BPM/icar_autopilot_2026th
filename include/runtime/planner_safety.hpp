@@ -15,19 +15,24 @@ struct PlannerSafetyState
         validRecoveryFrames = 0;
     }
 
-    bool observe(PathSource source, bool valid)
+    bool observeFrame(bool matchingValidPlan)
     {
-        if (!latched || source != rejectedSource)
+        if (!latched)
             return false;
-        if (!valid)
+        if (!matchingValidPlan)
         {
             validRecoveryFrames = 0;
             return false;
         }
         if (++validRecoveryFrames < 2)
             return false;
-        clear(source);
+        clear();
         return true;
+    }
+
+    bool observe(PathSource source, bool valid)
+    {
+        return latched && source == rejectedSource && observeFrame(valid);
     }
 
     void clear(PathSource source = PathSource::NONE)

@@ -43,7 +43,7 @@ void Icar::preprocessFrame(FrameCycle &frame)
             params->track->allowOuterEnvelope = !forkMarkerActive;
             params->track->handle(frame.binary);
             const bool widthLearningMode = params->track->quality.valid &&
-                !params->manualTakeover && !params->ctrl.fitting &&
+                !params->manualTakeover &&
                 !forkMarkerActive &&
                 params->mode == FsmMode::NORMAL;
             center->observeLaneWidth(params->track->pointsEdgeLeft,

@@ -34,7 +34,7 @@ if(ICAR_BUILD_LOGIC_TESTS OR ICAR_LOGIC_TESTS_ONLY)
   add_test(NAME control_algorithms_test COMMAND control_algorithms_test)
   add_executable(runtime_behavior_test tests/runtime_behavior_test.cpp
     src/config/config_loader.cpp src/fsm/park/park_observation.cpp
-    src/fsm/park/park_path_planner.cpp)
+    src/fsm/park/park_path_planner.cpp src/ctrl/planned_geometry_builder.cpp)
   target_include_directories(runtime_behavior_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   icar_target_defaults(runtime_behavior_test)
   add_test(NAME runtime_behavior_test COMMAND runtime_behavior_test)
@@ -143,6 +143,9 @@ set(ICAR_SOURCES
   src/icar.cpp
   src/ctrl/center.cpp
   src/ctrl/control_geometry.cpp
+  src/ctrl/control_geometry_validator.cpp
+  src/ctrl/perception_geometry_builder.cpp
+  src/ctrl/planned_geometry_builder.cpp
   src/ctrl/predeal.cpp
   src/ctrl/track.cpp
   src/fsm/busy.cpp

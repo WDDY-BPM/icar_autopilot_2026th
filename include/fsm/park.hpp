@@ -36,8 +36,8 @@
  */
 
 #include "fsm/fsm.hpp"
-#include "fsm/park_observation.hpp"
-#include "fsm/park_path_planner.hpp"
+#include "fsm/park/park_observation.hpp"
+#include "fsm/park/park_path_planner.hpp"
 #include "fsm/park/park_debug_renderer.hpp"
 
 /**
@@ -55,7 +55,6 @@ public:
   void resetLap();
 
   bool stopping = false; // 停车等待标志
-  bool fitting = false;  // 控制中心拟合标志
   float spotUp = 0.49;    // 上停车位距离像素百分比[0,1]
   float spotDown = 0.35;  // 下停车位距离像素百分比[0,1]
 
@@ -66,20 +65,13 @@ private:
    */
   class Spots
   {
-  private:
-    PredictResult carNone;
-
   public:
     vector<PredictResult> forks; // 停车位箭头信息（size=0:无停车位，size=1:停车位1/2，size=2:停车位1/2/3/4）
-    vector<Point2d> forksIpm;    // 停车标志IPM坐标
-    vector<Point2d> carsIpm;     // 车辆IPM坐标
     int counter[4] = {0};        // 车位检测计数器
     bool spotEnable[4] = {true}; // 停车位使能标志
     int countRes = 0;            // 车位检测计数器
     bool checked = false;        // 已确定停车位编号标志
     int times = 0;               // 临时计数器
-
-    vector<PredictResult> carPark = {carNone, carNone, carNone, carNone}; // 1/2/3/4号停车位检测车辆信息
 
     void reset()
     {
@@ -124,13 +116,6 @@ private:
     std::chrono::steady_clock::time_point waitStartedAt;
   } state;
   Spots spots;
-  Step &step = state.stage;
-  uint16_t &countRes = state.aiEvidenceFrames;
-  uint16_t &countSes = state.aiMissingFrames;
-  uint16_t &timeout = state.stageControlFrames;
-  std::chrono::steady_clock::time_point &forkOutStartedAt = state.forkOutStartedAt;
-  std::chrono::steady_clock::time_point &stepStartedAt = state.stageStartedAt;
-  std::chrono::steady_clock::time_point &waitStartedAt = state.waitStartedAt;
   bool waitTimerActive = false;
   int countOut = 0;                                               // 出库检测计数
   bool waiting = false;                                           // 停车等待使能
@@ -139,12 +124,11 @@ private:
   ParkDebugRenderer debugRenderer;
 
   void setStep(Step st);
+  void dispatchStage(const ParkObservation &observation,
+                     std::chrono::steady_clock::time_point now);
+  void updateGeometryPolicy();
   void reset();
   void replanTracking();
   void replanTracking(bool left);
-  bool findSymbols(const vector<PredictResult> &results, int label) const;
-  bool findSymbols(const vector<PredictResult> &results, int label,
-                   PredictResult &target) const;
   vector<PredictResult> findParkStation(const vector<PredictResult> &results) const;
-  PointX getResultCenter(const PredictResult &res) const;
 };

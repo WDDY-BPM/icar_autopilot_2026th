@@ -46,6 +46,7 @@ public:
     bool isInManualTakeover() { return manualTakeover; }
 
 private:
+    void updateGeometryPolicy();
     bool enable = false;            // 场景检测使能标志
     bool manualTakeover = false;    // 手动接管标志
     bool waitingForTakeover = true; // 等待手动接管标志

@@ -60,10 +60,15 @@ FsmMode FsmFork::getMode()
  */
 void FsmFork::run(Mat &img)
 {
+    params->geometryPolicy = step == Step::NONE
+        ? GeometryPolicy::PERCEPTION_ALLOWED
+        : GeometryPolicy::PLANNED_REQUIRED;
     if (!params->featureEnabled(Feature::FORK)) // 该模式未启用
         return;
 
     enable = handle(img, 0); // 处理T形岔路口
+    if (step != Step::NONE)
+        params->geometryPolicy = GeometryPolicy::PLANNED_REQUIRED;
     if (!enable && step == Step::NONE)
         params->clearPathOverride(PathSource::FORK);
 }

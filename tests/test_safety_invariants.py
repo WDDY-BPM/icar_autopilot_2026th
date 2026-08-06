@@ -40,7 +40,6 @@ class SafetyInvariantTests(unittest.TestCase):
         body = match.group("body")
         self.assertIn("params->ctrl.back = false;", body)
         self.assertIn("params->ctrl.parking = false;", body)
-        self.assertIn("params->ctrl.fitting = false;", body)
 
     def test_legacy_uart_key_does_not_stop_receiver(self):
         source = (ROOT / "include" / "com" / "uart.hpp").read_text(

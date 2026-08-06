@@ -6,6 +6,7 @@ void Icar::calculateControl(FrameCycle &frame)
         //[06] Calculate the lane control center in autonomous mode.
         frame.centerUpdated = false;
         center->geometry.reset();
+        params->reconcilePlannerSafetyWithMode();
         if (frame.cameraReady && frame.startupGateReleased && !frame.emergencyStopRequested &&
             !params->manualTakeover && params->autoRecoveryFrames <= 0 && !frame.aiStale)
         {
@@ -13,9 +14,15 @@ void Icar::calculateControl(FrameCycle &frame)
             frame.centerUpdated = true;
             if (center->rejectedPathSource != PathSource::NONE)
                 params->plannerSafety.reject(center->rejectedPathSource);
-            else if (center->geometry.source == ControlGeometrySource::PLANNED)
-                params->plannerSafety.observe(center->geometry.pathSource,
-                                               center->geometry.valid);
+            if (params->plannerSafety.latched)
+            {
+                const bool matchingValidPlan = center->geometry.updated &&
+                    center->geometry.source == ControlGeometrySource::PLANNED &&
+                    center->geometry.pathSource ==
+                        params->plannerSafety.rejectedSource &&
+                    center->geometry.valid;
+                params->plannerSafety.observeFrame(matchingValidPlan);
+            }
             params->setStopReason(control_algorithms::StopReason::PLANNER,
                                   params->plannerSafety.latched);
 
@@ -81,7 +88,7 @@ void Icar::calculateControl(FrameCycle &frame)
             else if (center->recoveryMode == LaneRecoveryMode::RELAXED_DUAL)
                 params->ctrl.speed = std::min(params->ctrl.speed,
                     std::min(params->config.velCurve, 0.20f));
-            if (params->yforkPerceptionRecovery)
+            if (params->yforkPhase == YforkRuntimePhase::PERCEPTION_RECOVERY)
                 params->ctrl.speed = std::min(params->ctrl.speed,
                                               params->config.velYfork);
 

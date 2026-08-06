@@ -113,7 +113,7 @@ class RouteTaskInvariantTests(unittest.TestCase):
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
         yfork = (ROOT / "src" / "fsm" / "yfork.cpp").read_text(encoding="utf-8")
-        self.assertIn('const bool exitConfirmed = countRes > 2;', park)
+        self.assertIn('const bool exitConfirmed = state.aiEvidenceFrames > 2;', park)
         self.assertIn('params->completeLapTask("park-exit")', park)
         busy_state = (ROOT / "include" / "fsm" / "busy_exit_state.hpp").read_text(
             encoding="utf-8")
@@ -128,9 +128,9 @@ class RouteTaskInvariantTests(unittest.TestCase):
 
     def test_yfork_exit_uses_camera_edge_before_bezier_replan(self):
         source = (ROOT / "src" / "fsm" / "yfork.cpp").read_text(encoding="utf-8")
-        capture = source.index("exitEdgeColumn = params->track->pointsEdgeLeft.back().y")
+        capture = source.index("const YforkExitObservation exitObservation = observeRawExitEdge()")
         replan = source.index("replanTracking(selectLeft, img)", capture)
-        exit_check = source.index("int cur = exitEdgeColumn", replan)
+        exit_check = source.index("detectConfirmedExit(exitObservation)", replan)
         self.assertLess(capture, replan)
         self.assertLess(replan, exit_check)
 
@@ -314,7 +314,7 @@ class RouteTaskInvariantTests(unittest.TestCase):
         park = (ROOT / "src" / "fsm" / "park.cpp").read_text(encoding="utf-8")
         busy = (ROOT / "src" / "fsm" / "busy.cpp").read_text(encoding="utf-8")
         self.assertIn("bool parkDetectedThisFrame = false;", park)
-        self.assertIn("if (parkDetectedThisFrame)\n            countRes++;", park)
+        self.assertIn("if (parkDetectedThisFrame)\n            state.aiEvidenceFrames++;", park)
         self.assertIn("std::any_of(params->results.begin(), params->results.end()", busy)
         self.assertIn("updateBusyConfirmation", busy)
 

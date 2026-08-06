@@ -62,6 +62,11 @@ void Icar::publishTelemetry(const FrameCycle &frame)
             overlay["path_source"] = pathSourceName(params->pathOverride.source);
             overlay["path_ttl_frames"] = params->pathOverride.ttlFrames;
             overlay["path_generated_frame_id"] = params->pathOverride.generatedFrameId;
+            overlay["path_age_ms"] = params->pathOverride.ageMs();
+            overlay["path_validity_mode"] =
+                params->pathOverride.freshnessMode == PathFreshnessMode::TIME_TTL
+                    ? "TIME_TTL" : "CONTROL_FRAME_TTL";
+            overlay["path_remaining_ms"] = params->pathOverride.remainingMs();
             overlay["path_speed_limit"] = params->pathOverride.speedLimit;
             overlay["perception_left_count"] = params->track->pointsEdgeLeft.size();
             overlay["perception_right_count"] = params->track->pointsEdgeRight.size();

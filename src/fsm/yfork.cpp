@@ -59,11 +59,12 @@ FsmMode FsmYfork::getMode()
  */
 void FsmYfork::run(Mat &img)
 {
+    updateGeometryPolicy();
     if (!params->featureEnabled(Feature::YFORK)) // 该模式未启用
     {
         params->clearPathOverride(PathSource::YFORK);
         params->releasePlannerSafety(PathSource::YFORK);
-        params->yforkPerceptionRecovery = false;
+        params->yforkPhase = YforkRuntimePhase::INACTIVE;
         completed = false; // 失能时复位，确保下次使能时能重新检测
         return;
     }
@@ -138,6 +139,7 @@ void FsmYfork::reset(void)
     step = Step::NONE;
     enable = false;
     previousExitEdgeColumn = 0;
+    exitJumpConfirmations = 0;
     selectLeft = false;
     forkSeen = false;
     vloss = false;
@@ -148,9 +150,8 @@ void FsmYfork::reset(void)
     holdCol = 0;
     params->stationStopCompleted = false;
     params->stationStarted = false;
-    params->yforkGuiding = false;
+    params->yforkPhase = YforkRuntimePhase::INACTIVE;
     params->yforkBranch = 0;
-    params->yforkPerceptionRecovery = false;
     params->releasePlannerSafety(PathSource::YFORK);
 }
 
@@ -179,7 +180,7 @@ bool FsmYfork::handle(Mat &img)
         if (detectYfork(img))
         {
             forkSeen = true;
-            params->yforkGuiding = true; // 检测到fork，阻止station
+            params->yforkPhase = YforkRuntimePhase::GUIDE_ACTIVE;
         }
         else if (forkSeen)
         {
@@ -197,77 +198,51 @@ bool FsmYfork::handle(Mat &img)
     {
         selectLeft = params->config.currentLapConfig->yforkLeft;
         params->yforkBranch = selectLeft ? 1 : 2;
-        params->yforkGuiding = true; // 进入引导前阻止station
+        params->yforkPhase = YforkRuntimePhase::GUIDE_ACTIVE;
 
         step = Step::ENTER;
+        updateGeometryPolicy();
         guidanceStartedAt = std::chrono::steady_clock::now();
         return true;
     }
 
     case Step::ENTER:
     {
-        // Preserve the camera-derived exit edge before replanTracking replaces
-        // the selected branch with a Bezier guide.
-        bool exitEdgeAvailable = false;
-        int exitEdgeColumn = 0;
-        if (selectLeft && params->track->pointsEdgeLeft.size() > 4)
-        {
-            exitEdgeColumn = params->track->pointsEdgeLeft.back().y;
-            exitEdgeAvailable = true;
-        }
-        else if (!selectLeft && params->track->pointsEdgeRight.size() > 4)
-        {
-            exitEdgeColumn = params->track->pointsEdgeRight.back().y;
-            exitEdgeAvailable = true;
-        }
+        const YforkExitObservation exitObservation = observeRawExitEdge();
 
         if (!replanTracking(selectLeft, img))
         {
             step = Step::PERCEPTION_RECOVERY;
-            params->yforkPerceptionRecovery = true;
+            updateGeometryPolicy();
+            params->clearPathOverride(PathSource::YFORK);
+            params->yforkPhase = YforkRuntimePhase::PERCEPTION_RECOVERY;
             params->releasePlannerSafety(PathSource::YFORK);
+            if (detectConfirmedExit(exitObservation))
+            {
+                if (selectLeft)
+                    params->completeLapTask("yfork-left-exit");
+                else
+                    params->completeLapTask("yfork-right-exit");
+                reset();
+                completed = true;
+            }
             return true;
         }
 
-        // 引导期间屏蔽station检测，但V尖消失后放开让station能检测停车框
         const auto now = std::chrono::steady_clock::now();
-        const bool stationReleaseDelay = guideHold.recentlyLost(
-            now, std::chrono::milliseconds(170));
-        params->yforkGuiding = (holdRow > 0) && (!vloss || stationReleaseDelay);
+        params->yforkPhase = YforkRuntimePhase::GUIDE_ACTIVE;
 
-        // 左岔路：V尖消失后左边线突变 → 已右拐驶出岔路
-        //   - 当前圈启用了station时：阻止突变退出，等先停好车
-        bool stationEnabled = params->config.currentLapConfig->station;
-        bool stationBusy = stationEnabled && !params->stationStopCompleted;
-        if (!stationBusy && selectLeft && tipRow == 0 && exitEdgeAvailable)
+        const bool stationEnabled = params->config.currentLapConfig->station;
+        if (tipRow == 0 && detectConfirmedExit(exitObservation))
         {
-            int cur = exitEdgeColumn;
-            if (previousExitEdgeColumn > 0 &&
-                abs(cur - previousExitEdgeColumn) > 25)
-            {
+            if (selectLeft)
                 params->completeLapTask("yfork-left-exit");
-                reset();
-                completed = true;
-                printf("[Yfork] 驶出岔路 (left edge)\n");
-                return true;
-            }
-            previousExitEdgeColumn = cur;
-        }
-
-        // 右岔路：右边缘突变 → 已左拐驶出岔路
-        if (!stationBusy && !selectLeft && tipRow == 0 && exitEdgeAvailable)
-        {
-            int cur = exitEdgeColumn;
-            if (previousExitEdgeColumn > 0 &&
-                abs(cur - previousExitEdgeColumn) > 25)
-            {
+            else
                 params->completeLapTask("yfork-right-exit");
-                reset();
-                completed = true;
-                printf("[Yfork] 驶出岔路 (right edge)\n");
-                return true;
-            }
-            previousExitEdgeColumn = cur;
+            reset();
+            completed = true;
+            printf("[Yfork] Confirmed perception exit\n");
+            return true;
         }
 
         // 超时退出（启用了station等多等帧等停车+突变）
@@ -279,7 +254,9 @@ bool FsmYfork::handle(Mat &img)
             holdRow = 0;
             holdCol = 0;
             guideHold.reset();
+            params->yforkPhase = YforkRuntimePhase::INACTIVE;
             step = Step::EXIT;
+            updateGeometryPolicy();
         }
         return true;
     }
@@ -287,24 +264,37 @@ bool FsmYfork::handle(Mat &img)
     case Step::PERCEPTION_RECOVERY:
     {
         params->clearPathOverride(PathSource::YFORK);
-        params->yforkPerceptionRecovery = true;
+        params->yforkPhase = YforkRuntimePhase::PERCEPTION_RECOVERY;
         const auto now = std::chrono::steady_clock::now();
         const bool stationEnabled = params->config.currentLapConfig->station;
+        if (detectConfirmedExit(observeRawExitEdge()))
+        {
+            if (selectLeft)
+                params->completeLapTask("yfork-left-exit");
+            else
+                params->completeLapTask("yfork-right-exit");
+            reset();
+            completed = true;
+            printf("[Yfork] Confirmed perception recovery exit\n");
+            return true;
+        }
         const auto guidanceTimeout = stationEnabled
             ? std::chrono::seconds(7) : std::chrono::seconds(4);
         if (now - guidanceStartedAt >= guidanceTimeout)
         {
-            params->yforkPerceptionRecovery = false;
+            params->yforkPhase = YforkRuntimePhase::INACTIVE;
             step = Step::EXIT;
+            updateGeometryPolicy();
         }
         return true;
     }
 
     case Step::EXIT:
     {
-        params->yforkPerceptionRecovery = false;
+        params->yforkPhase = YforkRuntimePhase::INACTIVE;
         params->releasePlannerSafety(PathSource::YFORK);
         step = Step::END;
+        updateGeometryPolicy();
         return true;
     }
 
@@ -318,6 +308,40 @@ bool FsmYfork::handle(Mat &img)
     }
 
     return false;
+}
+
+FsmYfork::YforkExitObservation FsmYfork::observeRawExitEdge() const
+{
+    const auto &edge = selectLeft ? params->track->pointsEdgeLeft
+                                  : params->track->pointsEdgeRight;
+    if (edge.size() <= 4)
+        return {};
+    return {true, edge.back().y};
+}
+
+bool FsmYfork::detectConfirmedExit(
+    const YforkExitObservation &observation)
+{
+    if (!observation.edgeAvailable)
+    {
+        exitJumpConfirmations = 0;
+        return false;
+    }
+    const bool stationBusy = params->config.currentLapConfig->station &&
+        !params->stationStopCompleted;
+    if (previousExitEdgeColumn <= 0 || stationBusy)
+    {
+        previousExitEdgeColumn = observation.edgeColumn;
+        exitJumpConfirmations = 0;
+        return false;
+    }
+    if (std::abs(observation.edgeColumn - previousExitEdgeColumn) <= 25)
+    {
+        previousExitEdgeColumn = observation.edgeColumn;
+        exitJumpConfirmations = 0;
+        return false;
+    }
+    return ++exitJumpConfirmations >= 2;
 }
 
 /**
@@ -534,6 +558,22 @@ bool FsmYfork::replanTracking(bool left, const Mat &img)
     }
     printf("[Yfork] replan dir=%s tip=(%d,%d)\n", left ? "L" : "R", tipRow, tipCol);
     return true;
+}
+
+void FsmYfork::updateGeometryPolicy()
+{
+    switch (step)
+    {
+    case Step::ENTER:
+        params->geometryPolicy = GeometryPolicy::PLANNED_REQUIRED;
+        break;
+    case Step::END:
+        params->geometryPolicy = GeometryPolicy::STOPPED;
+        break;
+    default:
+        params->geometryPolicy = GeometryPolicy::PERCEPTION_ALLOWED;
+        break;
+    }
 }
 
 void FsmYfork::drawTip(Mat &img)

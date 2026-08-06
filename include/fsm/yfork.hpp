@@ -41,6 +41,11 @@ public:
     void resetLap();
 
 private:
+    struct YforkExitObservation
+    {
+        bool edgeAvailable{false};
+        int edgeColumn{0};
+    };
     /**
      * @brief 场景状态
      *
@@ -59,6 +64,7 @@ private:
     bool selectLeft = false;     // 选择左侧路径
     bool forkSeen = false;       // 已看到fork标志（消失后开始找V尖）
     int previousExitEdgeColumn = 0;
+    int exitJumpConfirmations = 0;
     int tipRow = 0;             // V尖行位置
     int tipCol = 0;             // V尖列位置
     bool vloss = false;         // V尖已确认消失（不再接受新红点）
@@ -71,6 +77,9 @@ private:
     void reset(void);
     bool handle(Mat &img);
     bool detectYfork(Mat &img);
+    YforkExitObservation observeRawExitEdge() const;
+    bool detectConfirmedExit(const YforkExitObservation &observation);
+    void updateGeometryPolicy();
     bool findVTip(const Mat &img);  // 在二值图中扫描V尖
     bool replanTracking(bool left, const Mat &img);  // 车道线重绘（V尖屏障引导）
 };
