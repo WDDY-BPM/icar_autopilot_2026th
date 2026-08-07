@@ -1,4 +1,101 @@
 #include "icar.hpp"
+#include <fstream>
+#include <iomanip>
+#include <string>
+
+namespace
+{
+std::ofstream &driveLogFile()
+{
+    // Run ./icar from build/. A fresh file is created for each program start.
+    static std::ofstream file("drive_log.csv",
+                              std::ios::out | std::ios::trunc);
+    static bool headerWritten = false;
+
+    if (!headerWritten && file.is_open())
+    {
+        file
+            << "timestamp_ms,"
+            << "frame_id,"
+            << "mode,"
+            << "speed,"
+            << "servo,"
+            << "servo_offset,"
+            << "center,"
+            << "center_error,"
+            << "lane_mode,"
+            << "near_error,"
+            << "far_error,"
+            << "heading_rad,"
+            << "heading_deg,"
+            << "heading_correction,"
+            << "heading_confidence,"
+            << "lane_confidence,"
+            << "common_rows,"
+            << "left_count,"
+            << "right_count,"
+            << "left_reliable,"
+            << "right_reliable,"
+            << "left_single_usable,"
+            << "right_single_usable,"
+            << "left_border_ratio,"
+            << "right_border_ratio,"
+            << "lane_width_ready,"
+            << "raw_center_jump,"
+            << "applied_center_step,"
+            << "control_valid,"
+            << "path_active,"
+            << "path_source,"
+            << "path_age_ms,"
+            << "path_remaining_ms,"
+            << "path_speed_limit,"
+            << "must_stop,"
+            << "stop_reasons,"
+            << "detections"
+            << '\n';
+        headerWritten = true;
+    }
+
+    return file;
+}
+
+std::string csvEscape(const std::string &value)
+{
+    std::string escaped;
+    escaped.reserve(value.size() + 2);
+    escaped.push_back('"');
+    for (char ch : value)
+    {
+        if (ch == '"')
+            escaped += "\"\"";
+        else if (ch == '\r' || ch == '\n')
+            escaped.push_back(' ');
+        else
+            escaped.push_back(ch);
+    }
+    escaped.push_back('"');
+    return escaped;
+}
+
+nlohmann::json detectionSummary(const std::vector<PredictResult> &results)
+{
+    nlohmann::json detections = nlohmann::json::array();
+    for (const auto &result : results)
+    {
+        detections.push_back({
+            {"type", result.type},
+            {"label", result.label},
+            {"score", result.score},
+            {"x", result.x},
+            {"y", result.y},
+            {"w", result.width},
+            {"h", result.height}
+        });
+    }
+    return detections;
+}
+} // namespace
+
 
 void Icar::publishTelemetry(const FrameCycle &frame)
 {
@@ -6,6 +103,87 @@ void Icar::publishTelemetry(const FrameCycle &frame)
         // emergency/startup overrides, so telemetry is not one frame stale.
         fsmFactory.manual->updateVehicleState(
             params->ctrl.speed, params->ctrl.servo, params->manualTakeover);
+
+        // Persistent drive diagnostics at 10 Hz. This is intentionally outside
+        // the remote-overlay connection check, so the file is recorded even
+        // when no manual/telemetry client is connected.
+        static auto lastDriveLogAt = std::chrono::steady_clock::time_point{};
+        static int driveLogFlushCounter = 0;
+        const auto driveLogNow = std::chrono::steady_clock::now();
+
+        if (frame.frameId != 0 &&
+            driveLogNow - lastDriveLogAt >= std::chrono::milliseconds(100))
+        {
+            lastDriveLogAt = driveLogNow;
+            auto &log = driveLogFile();
+
+            if (log.is_open())
+            {
+                const int64_t timestampMs =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        driveLogNow.time_since_epoch()).count();
+
+                constexpr double kRadToDeg = 57.29577951308232;
+                const int nearError = center->nearCenterValid
+                    ? center->nearCenter - COLSIMAGE / 2 : 0;
+                const int farError = center->farCenterValid
+                    ? center->farCenter - COLSIMAGE / 2 : 0;
+
+                const std::string detections =
+                    detectionSummary(params->results).dump();
+
+                log
+                    << timestampMs << ','
+                    << frame.frameId << ','
+                    << static_cast<int>(params->mode) << ','
+                    << std::fixed << std::setprecision(3)
+                    << params->ctrl.speed << ','
+                    << params->ctrl.servo << ','
+                    << (static_cast<int>(params->ctrl.servo) - PWMSERVOMID) << ','
+                    << params->ctrl.center << ','
+                    << (params->ctrl.center - COLSIMAGE / 2) << ','
+                    << laneRecoveryModeName(center->recoveryMode) << ','
+                    << nearError << ','
+                    << farError << ','
+                    << std::setprecision(6)
+                    << center->headingError << ','
+                    << std::setprecision(2)
+                    << (static_cast<double>(center->headingError) * kRadToDeg) << ','
+                    << center->headingCorrection << ','
+                    << center->headingConfidence << ','
+                    << params->track->quality.confidence << ','
+                    << params->track->quality.commonRows << ','
+                    << params->track->pointsEdgeLeft.size() << ','
+                    << params->track->pointsEdgeRight.size() << ','
+                    << params->track->quality.leftReliable << ','
+                    << params->track->quality.rightReliable << ','
+                    << params->track->quality.leftSingleUsable << ','
+                    << params->track->quality.rightSingleUsable << ','
+                    << params->track->quality.leftBorderRatio << ','
+                    << params->track->quality.rightBorderRatio << ','
+                    << center->laneWidthProfileReady() << ','
+                    << center->rawCenterJump << ','
+                    << center->appliedCenterStep << ','
+                    << center->controlValid << ','
+                    << params->pathOverride.active() << ','
+                    << pathSourceName(params->pathOverride.source) << ','
+                    << params->pathOverride.ageMs() << ','
+                    << params->pathOverride.remainingMs() << ','
+                    << params->pathOverride.speedLimit << ','
+                    << params->mustStop() << ','
+                    << csvEscape(params->stopReasonString()) << ','
+                    << csvEscape(detections)
+                    << '\n';
+
+                // Flush about once per second instead of on every row.
+                ++driveLogFlushCounter;
+                if (driveLogFlushCounter >= 10)
+                {
+                    log.flush();
+                    driveLogFlushCounter = 0;
+                }
+            }
+        }
         // Construct and publish overlays at no more than 12.5 Hz. This avoids
         // allocating and serializing JSON on every 30 Hz control iteration.
         const auto overlayNow = std::chrono::steady_clock::now();
