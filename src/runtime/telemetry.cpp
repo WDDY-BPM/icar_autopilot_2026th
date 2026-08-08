@@ -158,7 +158,7 @@ void Icar::publishTelemetry(const FrameCycle &frame)
                     << (static_cast<double>(center->headingError) * kRadToDeg) << ','
                     << center->headingCorrection << ','
                     << params->ctrl.lateralRaw << ','
-                    << params->ctrl.lateralScale << ','
+                    << params->ctrl.laneLateralScale << ','
                     << params->ctrl.lateralApplied << ','
                     << params->ctrl.headingApplied << ','
                     << params->ctrl.pwmDiff << ','
