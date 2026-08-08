@@ -28,23 +28,82 @@ std::vector<PointX> straddleCenterline()
 
 int main()
 {
-    // 1. lateralScaleForMode：单边缩放，其余模式不缩放。
+    // 1. 动态 singleLaneLateralScale：非单边 full；单边按阶段变化。
     {
         auto params = makeTestParams();
-        CHECK(lateralScaleForMode(LaneRecoveryMode::STRICT_DUAL,
-                                  params->config) == 1.0f);
-        CHECK(lateralScaleForMode(LaneRecoveryMode::RELAXED_DUAL,
-                                  params->config) == 1.0f);
-        CHECK(lateralScaleForMode(LaneRecoveryMode::WEAK_HYBRID,
-                                  params->config) == 1.0f);
-        CHECK(lateralScaleForMode(LaneRecoveryMode::INVALID,
-                                  params->config) == 1.0f);
-        CHECK(lateralScaleForMode(LaneRecoveryMode::LEFT_SINGLE,
-                                  params->config) ==
-              params->config.singleLaneHeadingConfidence);
-        CHECK(lateralScaleForMode(LaneRecoveryMode::RIGHT_SINGLE,
-                                  params->config) ==
-              params->config.singleLaneHeadingConfidence);
+        const auto dual = singleLaneLateralScale(
+            LaneRecoveryMode::STRICT_DUAL, true, true, 5.0f, -40.0f, 1.0f,
+            params->config);
+        CHECK(closeTo(dual.scale, 1.0f));
+        CHECK(dual.reason == LateralScaleReason::FULL_DUAL);
+        const auto relaxed = singleLaneLateralScale(
+            LaneRecoveryMode::RELAXED_DUAL, true, true, 5.0f, -40.0f, 1.0f,
+            params->config);
+        CHECK(closeTo(relaxed.scale, 1.0f));
+        const auto hybrid = singleLaneLateralScale(
+            LaneRecoveryMode::WEAK_HYBRID, true, true, 5.0f, -40.0f, 1.0f,
+            params->config);
+        CHECK(closeTo(hybrid.scale, 1.0f));
+        const auto invalid = singleLaneLateralScale(
+            LaneRecoveryMode::INVALID, true, true, 5.0f, -40.0f, 1.0f,
+            params->config);
+        CHECK(closeTo(invalid.scale, 1.0f));
+
+        // RIGHT_SINGLE 左弯预瞄：near=+5 / far=-40 -> 0.45。
+        const auto rightPreview = singleLaneLateralScale(
+            LaneRecoveryMode::RIGHT_SINGLE, true, true, 5.0f, -40.0f, 1.0f,
+            params->config);
+        CHECK(closeTo(rightPreview.scale,
+                      params->config.singleLaneHeadingConfidence));
+        CHECK(rightPreview.reason == LateralScaleReason::SINGLE_PREVIEW);
+
+        // RIGHT_SINGLE 左弯恢复：near=-5 -> scale>0.45。
+        const auto rightRecovery5 = singleLaneLateralScale(
+            LaneRecoveryMode::RIGHT_SINGLE, true, true, -5.0f, -50.0f, 1.0f,
+            params->config);
+        const float expected5 = 0.45f + 0.55f * (5.0f / 30.0f);
+        CHECK(closeTo(rightRecovery5.scale, expected5));
+        CHECK(rightRecovery5.reason == LateralScaleReason::SINGLE_RECOVERY);
+
+        // near=-15 -> scale 进一步增大。
+        const auto rightRecovery15 = singleLaneLateralScale(
+            LaneRecoveryMode::RIGHT_SINGLE, true, true, -15.0f, -70.0f, 1.0f,
+            params->config);
+        CHECK(closeTo(rightRecovery15.scale, 0.45f + 0.55f * 0.5f));
+        CHECK(rightRecovery15.scale > rightRecovery5.scale);
+
+        // near<=-30 -> full。
+        const auto rightFull = singleLaneLateralScale(
+            LaneRecoveryMode::RIGHT_SINGLE, true, true, -30.0f, -80.0f, 1.0f,
+            params->config);
+        CHECK(closeTo(rightFull.scale, 1.0f));
+
+        // LEFT_SINGLE 右弯镜像：scale 与 reason 完全一致。
+        const auto leftPreview = singleLaneLateralScale(
+            LaneRecoveryMode::LEFT_SINGLE, true, true, -5.0f, 40.0f, 1.0f,
+            params->config);
+        CHECK(closeTo(leftPreview.scale, rightPreview.scale));
+        CHECK(leftPreview.reason == rightPreview.reason);
+        const auto leftRecovery5 = singleLaneLateralScale(
+            LaneRecoveryMode::LEFT_SINGLE, true, true, 5.0f, 50.0f, 1.0f,
+            params->config);
+        CHECK(closeTo(leftRecovery5.scale, rightRecovery5.scale));
+        CHECK(leftRecovery5.reason == rightRecovery5.reason);
+
+        // far invalid + headingConfidence=0 + near valid -> full lateral。
+        const auto noHeading = singleLaneLateralScale(
+            LaneRecoveryMode::RIGHT_SINGLE, true, false, -20.0f, 0.0f,
+            0.0f, params->config);
+        CHECK(closeTo(noHeading.scale, 1.0f));
+        CHECK(noHeading.reason == LateralScaleReason::SINGLE_NO_HEADING);
+
+        // near invalid -> 不允许异常 full-scale（保持 base）。
+        const auto nearInvalid = singleLaneLateralScale(
+            LaneRecoveryMode::RIGHT_SINGLE, false, false, 0.0f, 0.0f,
+            0.0f, params->config);
+        CHECK(closeTo(nearInvalid.scale,
+                      params->config.singleLaneHeadingConfidence));
+        CHECK(nearInvalid.scale < 1.0f);
     }
     // 2. recovery damping 开关：仅真实双边模式启用 0.25。
     {
@@ -99,6 +158,37 @@ int main()
         CHECK(closeTo(params->ctrl.headingApplied, 20.0f));
         CHECK(params->ctrl.pwmDiff == 10);
         CHECK(params->ctrl.servo == 1490);
+    }
+    // 5b. 动态恢复 scale 应用于 Motion：lateralApplied = raw × scale，
+    //     pwmDiff 左右镜像。
+    {
+        auto params = makeTestParams();
+        const auto recoveryScale = singleLaneLateralScale(
+            LaneRecoveryMode::RIGHT_SINGLE, true, true, -15.0f, -70.0f,
+            1.0f, params->config);
+        params->ctrl.center = 145; // error=-15（RIGHT_SINGLE 左弯恢复）
+        params->ctrl.laneHeadingCorrection = -31.5f;
+        params->ctrl.laneLateralScale = recoveryScale.scale;
+        Motion motion;
+        motion.reset();
+        motion.poseControl(params, 0.03f);
+        const float raw = -15.0f * (15.0f * params->config.runP2 +
+                                    params->config.runP1);
+        CHECK(closeTo(params->ctrl.lateralRaw, raw, 1e-2f));
+        CHECK(closeTo(params->ctrl.lateralApplied,
+                      raw * recoveryScale.scale, 1e-2f));
+        CHECK(closeTo(params->ctrl.headingApplied, -31.5f));
+        const int rightPwmDiff = params->ctrl.pwmDiff;
+
+        params->ctrl.center = 175; // error=+15（LEFT_SINGLE 右弯镜像）
+        params->ctrl.laneHeadingCorrection = 31.5f;
+        params->ctrl.laneLateralScale = recoveryScale.scale;
+        Motion mirrorMotion;
+        mirrorMotion.reset();
+        mirrorMotion.poseControl(params, 0.03f);
+        CHECK(closeTo(params->ctrl.lateralApplied,
+                      -raw * recoveryScale.scale, 1e-2f));
+        CHECK(params->ctrl.pwmDiff == -rightPwmDiff);
     }
     // 6. WEAK_HYBRID：跨中心几何不再被 0.25 额外削弱。
     {

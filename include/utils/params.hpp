@@ -55,6 +55,7 @@ struct Control
     float laneHeadingCorrection = 0.0f;
     // 单边模式下横向P/D权重（Center按LaneRecoveryMode写入；非单边=1.0）。
     float laneLateralScale = 1.0f;
+    int laneLateralScaleReason = 0; // LateralScaleReason 枚举值（遥测诊断）
     // 姿态控制诊断：lateral/heading拆分后的实际作用量（Motion写入）。
     float lateralRaw = 0.0f;
     float lateralApplied = 0.0f;

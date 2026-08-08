@@ -12,6 +12,8 @@ void Center::resetControlGeometry(Params &params)
     oppositeSideRecovery = false;
     recoveryDamping = 1.0f;
     params.ctrl.laneHeadingCorrection = 0.0f;
+    params.ctrl.laneLateralScale = 1.0f;
+    params.ctrl.laneLateralScaleReason = 0;
     params.ctrl.centerEdge.clear();
     style.clear();
     controlValid = false;

@@ -31,6 +31,7 @@ std::ofstream &driveLogFile()
             << "heading_correction,"
             << "lateral_raw,"
             << "lateral_scale,"
+            << "lateral_scale_reason,"
             << "lateral_applied,"
             << "heading_applied,"
             << "pwm_diff,"
@@ -159,6 +160,7 @@ void Icar::publishTelemetry(const FrameCycle &frame)
                     << center->headingCorrection << ','
                     << params->ctrl.lateralRaw << ','
                     << params->ctrl.laneLateralScale << ','
+                    << params->ctrl.laneLateralScaleReason << ','
                     << params->ctrl.lateralApplied << ','
                     << params->ctrl.headingApplied << ','
                     << params->ctrl.pwmDiff << ','
@@ -234,6 +236,8 @@ void Icar::publishTelemetry(const FrameCycle &frame)
                 laneRecoveryModeName(center->recoveryMode);
             overlay["lateral_raw"] = params->ctrl.lateralRaw;
             overlay["lateral_scale"] = params->ctrl.laneLateralScale;
+            overlay["lateral_scale_reason"] =
+                params->ctrl.laneLateralScaleReason;
             overlay["lateral_applied"] = params->ctrl.lateralApplied;
             overlay["heading_applied"] = params->ctrl.headingApplied;
             overlay["pwm_diff"] = params->ctrl.pwmDiff;

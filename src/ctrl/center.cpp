@@ -137,9 +137,6 @@ void Center::fitting(shared_ptr<Params> &params)
                                      : LaneRecoveryMode::INVALID;
         style = pathSourceName(planned.source);
     }
-    // 单边模式下 Motion 对重建中心线的横向P/D使用缩放权重。
-    params->ctrl.laneLateralScale =
-        lateralScaleForMode(recoveryMode, params->config);
     usableCenterRows = static_cast<int>(params->ctrl.centerEdge.size());
 
     bool controlWindowValid = true;
@@ -189,6 +186,16 @@ void Center::fitting(shared_ptr<Params> &params)
             nearCenter = static_cast<int>(std::lround(centers.nearCenter));
         if (farCenterValid)
             farCenter = static_cast<int>(std::lround(centers.farCenter));
+        // 单边模式下 Motion 对重建中心线的横向P/D使用动态权重：
+        // 预瞄阶段保持 low，真正跟弯后随 nearError 恢复，heading 失效则 full。
+        const auto lateralScaleResult = singleLaneLateralScale(
+            recoveryMode, nearCenterValid, farCenterValid,
+            centers.nearCenter - COLSIMAGE / 2.0f,
+            centers.farCenter - COLSIMAGE / 2.0f,
+            centers.headingConfidence, params->config);
+        params->ctrl.laneLateralScale = lateralScaleResult.scale;
+        params->ctrl.laneLateralScaleReason =
+            static_cast<int>(lateralScaleResult.reason);
 
         controlWindowValid = nearCenterValid;
         if (controlWindowValid)

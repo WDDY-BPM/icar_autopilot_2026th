@@ -56,15 +56,66 @@ inline LaneRecoveryMode selectSingleLaneMode(
     return LaneRecoveryMode::INVALID;
 }
 
-// 单边重建中心线不能与真实双边中心同等信任：横向P/D按
-// singleLaneHeadingConfidence缩放，航向保持原强度；其余模式不缩放。
-inline float lateralScaleForMode(LaneRecoveryMode mode,
-                                 const Config &config)
+// 单边模式下横向P/D的动态权重及原因（用于遥测诊断）。
+enum class LateralScaleReason
 {
-    if (mode == LaneRecoveryMode::LEFT_SINGLE ||
-        mode == LaneRecoveryMode::RIGHT_SINGLE)
-        return config.singleLaneHeadingConfidence;
-    return 1.0f;
+    FULL_DUAL = 0,
+    SINGLE_PREVIEW = 1,
+    SINGLE_RECOVERY = 2,
+    SINGLE_NO_HEADING = 3
+};
+
+struct LateralScaleResult
+{
+    float scale{1.0f};
+    LateralScaleReason reason{LateralScaleReason::FULL_DUAL};
+};
+
+// 单边重建中心线在预瞄阶段（near/far 跨图像中心）保持低横向权重，
+// 真正进入弯道（near/far 同侧）后随 |nearError| 恢复到 1.0；
+// heading 失效时直接恢复 full lateral。仅影响 LEFT/RIGHT_SINGLE。
+inline constexpr float kSingleLaneFullLateralError = 30.0f;
+
+inline LateralScaleResult singleLaneLateralScale(
+    LaneRecoveryMode mode, bool nearValid, bool farValid,
+    float nearError, float farError, float headingConfidence,
+    const Config &config)
+{
+    LateralScaleResult result;
+    const bool singleMode =
+        mode == LaneRecoveryMode::LEFT_SINGLE ||
+        mode == LaneRecoveryMode::RIGHT_SINGLE;
+    if (!singleMode)
+        return result; // FULL_DUAL：lateral 不缩放
+    const float baseScale = config.singleLaneHeadingConfidence;
+    if (!nearValid)
+    {
+        // near 无效时不允许恢复逻辑产生异常 full-scale 控制。
+        result.scale = baseScale;
+        result.reason = LateralScaleReason::SINGLE_PREVIEW;
+        return result;
+    }
+    if (!farValid || headingConfidence <= 0.0f)
+    {
+        // heading 已失效，唯一剩余恢复控制不能再被削弱。
+        result.scale = 1.0f;
+        result.reason = LateralScaleReason::SINGLE_NO_HEADING;
+        return result;
+    }
+    const bool straddle =
+        (nearError >= 0.0f && farError <= 0.0f) ||
+        (nearError <= 0.0f && farError >= 0.0f);
+    if (straddle)
+    {
+        result.scale = baseScale;
+        result.reason = LateralScaleReason::SINGLE_PREVIEW;
+        return result;
+    }
+    const float recoveryRatio = std::clamp(
+        std::abs(nearError) / kSingleLaneFullLateralError, 0.0f, 1.0f);
+    result.scale = baseScale + (1.0f - baseScale) * recoveryRatio;
+    result.reason = LateralScaleReason::SINGLE_RECOVERY;
+    return result;
 }
 
 // oppositeSideRecovery 的 0.25 额外衰减只用于真实双边几何
