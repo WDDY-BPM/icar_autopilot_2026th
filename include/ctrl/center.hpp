@@ -52,6 +52,8 @@ public:
     float headingError = 0.0f;
     float headingCorrection = 0.0f;
     float headingConfidence = 0.0f;
+    bool oppositeSideRecovery = false;
+    float recoveryDamping = 1.0f;
     int nearCenterSamples = 0;
     int farCenterSamples = 0;
     bool nearCenterValid = false;

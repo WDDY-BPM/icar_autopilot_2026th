@@ -225,6 +225,100 @@ int main()
                     300.0f * recoveryHeading * 0.375f * 0.25f) < 0.001f);
     CHECK(std::abs(oppositeSideRecovery.controlCenter - 164.0f) < 0.001f);
 
+    // RIGHT_SINGLE 大左弯（nearError=+10, farError=-30）：跨中心是正常单边
+    // 几何，不得再被 oppositeSideRecovery 额外乘 0.25；headingCorrection
+    // 方向应为左转（负值）。
+    std::vector<TestPoint> bigLeftCurve;
+    for (int row = 120; row <= 175; ++row)
+        bigLeftCurve.emplace_back(row, 130);
+    for (int row = 180; row <= 220; ++row)
+        bigLeftCurve.emplace_back(row, 170);
+    const float bigLeftHeading = std::atan2(-40.0f, 85.0f);
+    const auto rightSingleBigLeft =
+        control_algorithms::calculateLaneControlCenters(
+            bigLeftCurve, 160.0f, 0.65f, 8, true,
+            300.0f, 60.0f, 40.0f, 0.45f, false);
+    CHECK(rightSingleBigLeft.oppositeSideRecovery);
+    CHECK(std::abs(rightSingleBigLeft.recoveryDamping - 1.0f) < 0.001f);
+    CHECK(rightSingleBigLeft.headingCorrection < 0.0f);
+    CHECK(std::abs(rightSingleBigLeft.headingCorrection -
+                    300.0f * bigLeftHeading * 0.75f * 0.45f) < 0.001f);
+    CHECK(std::abs(rightSingleBigLeft.controlCenter - 156.0f) < 0.001f);
+
+    // LEFT_SINGLE 大右弯镜像（nearError=-10, farError=+30）：heading 修正
+    // 必须与 RIGHT_SINGLE 大左弯完全镜像；controlCenter 因 0.65/0.35 非对称
+    // 混合，镜像关系为关于 defaultCenter 对称（156 <-> 164）。
+    std::vector<TestPoint> bigRightCurve;
+    for (int row = 120; row <= 175; ++row)
+        bigRightCurve.emplace_back(row, 190);
+    for (int row = 180; row <= 220; ++row)
+        bigRightCurve.emplace_back(row, 150);
+    const auto leftSingleBigRight =
+        control_algorithms::calculateLaneControlCenters(
+            bigRightCurve, 160.0f, 0.65f, 8, true,
+            300.0f, 60.0f, 40.0f, 0.45f, false);
+    CHECK(leftSingleBigRight.oppositeSideRecovery);
+    CHECK(std::abs(leftSingleBigRight.recoveryDamping - 1.0f) < 0.001f);
+    CHECK(leftSingleBigRight.headingCorrection > 0.0f);
+    CHECK(std::abs(leftSingleBigRight.headingCorrection +
+                    rightSingleBigLeft.headingCorrection) < 0.001f);
+    CHECK(std::abs(leftSingleBigRight.controlCenter -
+                    (320.0f - rightSingleBigLeft.controlCenter)) < 0.001f);
+
+    // STRICT_DUAL：相同跨中心几何仍保留 0.25 的 recovery damping。
+    const auto strictDualBigLeft =
+        control_algorithms::calculateLaneControlCenters(
+            bigLeftCurve, 160.0f, 0.65f, 8, true,
+            300.0f, 60.0f, 40.0f, 0.45f, true);
+    CHECK(strictDualBigLeft.oppositeSideRecovery);
+    CHECK(std::abs(strictDualBigLeft.recoveryDamping - 0.25f) < 0.001f);
+    CHECK(std::abs(strictDualBigLeft.headingCorrection -
+                    rightSingleBigLeft.headingCorrection * 0.25f) < 0.001f);
+
+    // near/far 同侧时不受 recovery-damping 开关影响。
+    std::vector<TestPoint> sameSideCurve;
+    for (int row = 120; row <= 175; ++row)
+        sameSideCurve.emplace_back(row, 165);
+    for (int row = 180; row <= 220; ++row)
+        sameSideCurve.emplace_back(row, 170);
+    const auto sameSideDamped =
+        control_algorithms::calculateLaneControlCenters(
+            sameSideCurve, 160.0f, 0.65f, 8, true,
+            300.0f, 60.0f, 40.0f, 0.45f, true);
+    const auto sameSideUndamped =
+        control_algorithms::calculateLaneControlCenters(
+            sameSideCurve, 160.0f, 0.65f, 8, true,
+            300.0f, 60.0f, 40.0f, 0.45f, false);
+    CHECK(!sameSideDamped.oppositeSideRecovery);
+    CHECK(std::abs(sameSideDamped.recoveryDamping - 1.0f) < 0.001f);
+    CHECK(std::abs(sameSideDamped.headingCorrection -
+                    sameSideUndamped.headingCorrection) < 0.001f);
+
+    // headingError 接近 0 时不能产生异常修正。
+    std::vector<TestPoint> straightHeading;
+    for (int row = 90; row <= 220; ++row)
+        straightHeading.emplace_back(row, 160);
+    const auto straightHeadingResult =
+        control_algorithms::calculateLaneControlCenters(
+            straightHeading, 160.0f, 0.65f, 8, true,
+            300.0f, 60.0f, 40.0f, 0.45f, false);
+    CHECK(std::abs(straightHeadingResult.headingError) < 0.001f);
+    CHECK(std::abs(straightHeadingResult.headingCorrection) < 0.001f);
+
+    // laneHeadingMaxCorrection 限幅在单边模式下仍然有效。
+    std::vector<TestPoint> extremeCrossing;
+    for (int row = 120; row <= 175; ++row)
+        extremeCrossing.emplace_back(row, 80);
+    for (int row = 180; row <= 220; ++row)
+        extremeCrossing.emplace_back(row, 240);
+    const auto cappedSingle =
+        control_algorithms::calculateLaneControlCenters(
+            extremeCrossing, 160.0f, 0.65f, 8, true,
+            300.0f, 60.0f, 40.0f, 1.0f, false);
+    CHECK(cappedSingle.oppositeSideRecovery);
+    CHECK(std::abs(cappedSingle.recoveryDamping - 1.0f) < 0.001f);
+    CHECK(std::abs(cappedSingle.headingCorrection + 60.0f) < 0.001f);
+
     std::vector<TestPoint> cappedHeading;
     for (int row = 120; row <= 175; ++row)
         cappedHeading.emplace_back(row, 200);

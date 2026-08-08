@@ -98,6 +98,8 @@ struct LaneControlCenters
     float headingError = 0.0f;
     float headingCorrection = 0.0f;
     float headingConfidence = 0.0f;
+    bool oppositeSideRecovery = false;
+    float recoveryDamping = 1.0f;
     int nearSamples = 0;
     int farSamples = 0;
     bool nearValid = false;

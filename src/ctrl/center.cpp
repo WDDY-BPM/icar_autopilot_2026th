@@ -147,6 +147,11 @@ void Center::fitting(shared_ptr<Params> &params)
     {
         const bool strictDualHeading = recoveryMode == LaneRecoveryMode::STRICT_DUAL;
         const bool relaxedDualHeading = recoveryMode == LaneRecoveryMode::RELAXED_DUAL;
+        // 单边车道在正常大弯中 near/far 跨图像中心是合法几何，不能当作
+        // opposite-side recovery，因此关闭 0.25 的额外衰减。
+        const bool singleLaneMode =
+            recoveryMode == LaneRecoveryMode::LEFT_SINGLE ||
+            recoveryMode == LaneRecoveryMode::RIGHT_SINGLE;
         const bool degradedHeading = visionLaneMode &&
             recoveryMode != LaneRecoveryMode::INVALID &&
             recoveryMode != LaneRecoveryMode::STRICT_DUAL &&
@@ -170,12 +175,15 @@ void Center::fitting(shared_ptr<Params> &params)
             params->ctrl.centerEdge, COLSIMAGE / 2.0f, 0.65f, minimumSamples,
             pathHeadingConfidence > 0.0f, params->config.laneHeadingGain,
             params->config.laneHeadingMaxCorrection,
-            params->config.laneHeadingFadeError, pathHeadingConfidence);
+            params->config.laneHeadingFadeError, pathHeadingConfidence,
+            !singleLaneMode);
         nearCenterSamples = centers.nearSamples;
         farCenterSamples = centers.farSamples;
         headingError = centers.headingError;
         headingCorrection = centers.headingCorrection;
         headingConfidence = centers.headingConfidence;
+        oppositeSideRecovery = centers.oppositeSideRecovery;
+        recoveryDamping = centers.recoveryDamping;
         params->ctrl.laneHeadingCorrection = centers.headingCorrection;
         nearCenterValid = centers.nearValid;
         farCenterValid = centers.farValid;

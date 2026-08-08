@@ -9,6 +9,8 @@ void Center::resetControlGeometry(Params &params)
     headingError = 0.0f;
     headingCorrection = 0.0f;
     headingConfidence = 0.0f;
+    oppositeSideRecovery = false;
+    recoveryDamping = 1.0f;
     params.ctrl.laneHeadingCorrection = 0.0f;
     params.ctrl.centerEdge.clear();
     style.clear();

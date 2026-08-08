@@ -46,7 +46,8 @@ inline LaneControlCenters calculateLaneControlCenters(
     float nearBlend = 0.65f, int minimumSamples = 8,
     bool enableHeadingCorrection = false, float headingGain = 300.0f,
     float maximumHeadingCorrection = 60.0f,
-    float headingFadeError = 40.0f, float headingConfidence = 1.0f)
+    float headingFadeError = 40.0f, float headingConfidence = 1.0f,
+    bool enableRecoveryDamping = true)
 {
     const auto near = calculateCenterWindow(
         centerline, defaultCenter, 176, 220, 205, 26, minimumSamples);
@@ -94,7 +95,15 @@ inline LaneControlCenters calculateLaneControlCenters(
                 std::abs(nearError) / fadeRange, 0.0f, 1.0f));
             const float correctionLimit =
                 std::max(0.0f, maximumHeadingCorrection);
-            const float recoveryDamping = oppositeSideRecovery ? 0.25f : 1.0f;
+            // 单边车道在正常大弯中 near/far 跨图像中心是合法几何，不是
+            // "反方向恢复"：调用方在 LEFT_SINGLE / RIGHT_SINGLE 下关闭
+            // 0.25 的额外衰减，STRICT_DUAL 等其余模式保持原行为。
+            const float recoveryDamping =
+                (enableRecoveryDamping && oppositeSideRecovery)
+                    ? 0.25f
+                    : 1.0f;
+            result.oppositeSideRecovery = oppositeSideRecovery;
+            result.recoveryDamping = recoveryDamping;
             result.headingCorrection = std::clamp(
                 std::max(0.0f, headingGain) * result.headingError *
                     headingWeight * result.headingConfidence * recoveryDamping,

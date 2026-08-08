@@ -30,6 +30,8 @@ std::ofstream &driveLogFile()
             << "heading_deg,"
             << "heading_correction,"
             << "heading_confidence,"
+            << "opposite_side_recovery,"
+            << "recovery_damping,"
             << "lane_confidence,"
             << "common_rows,"
             << "left_count,"
@@ -151,6 +153,8 @@ void Icar::publishTelemetry(const FrameCycle &frame)
                     << (static_cast<double>(center->headingError) * kRadToDeg) << ','
                     << center->headingCorrection << ','
                     << center->headingConfidence << ','
+                    << center->oppositeSideRecovery << ','
+                    << center->recoveryDamping << ','
                     << params->track->quality.confidence << ','
                     << params->track->quality.commonRows << ','
                     << params->track->pointsEdgeLeft.size() << ','
@@ -273,6 +277,8 @@ void Icar::publishTelemetry(const FrameCycle &frame)
                 {"heading_error", center->headingError},
                 {"heading_correction", center->headingCorrection},
                 {"heading_confidence", center->headingConfidence},
+                {"opposite_side_recovery", center->oppositeSideRecovery},
+                {"recovery_damping", center->recoveryDamping},
                 {"near_samples", center->nearCenterSamples},
                 {"far_samples", center->farCenterSamples},
                 {"lane_confidence", params->track->quality.confidence},
