@@ -56,6 +56,13 @@ struct Control
     // 单边模式下横向P/D权重（Center按LaneRecoveryMode写入；非单边=1.0）。
     float laneLateralScale = 1.0f;
     int laneLateralScaleReason = 0; // LateralScaleReason 枚举值（遥测诊断）
+    // WEAK_HYBRID 冲突仲裁所需的当前帧几何上下文（Center 写入，Motion 使用）。
+    int laneRecoveryMode = 0;       // LaneRecoveryMode 枚举值
+    bool laneNearValid = false;
+    bool laneFarValid = false;
+    float laneNearError = 0.0f;
+    float laneFarError = 0.0f;
+    float laneHeadingConfidence = 0.0f;
     // 姿态控制诊断：lateral/heading拆分后的实际作用量（Motion写入）。
     float lateralRaw = 0.0f;
     float lateralApplied = 0.0f;

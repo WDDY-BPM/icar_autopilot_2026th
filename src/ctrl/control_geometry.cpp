@@ -14,6 +14,16 @@ void Center::resetControlGeometry(Params &params)
     params.ctrl.laneHeadingCorrection = 0.0f;
     params.ctrl.laneLateralScale = 1.0f;
     params.ctrl.laneLateralScaleReason = 0;
+    params.ctrl.lateralRaw = 0.0f;
+    params.ctrl.lateralApplied = 0.0f;
+    params.ctrl.headingApplied = 0.0f;
+    params.ctrl.pwmDiff = 0;
+    params.ctrl.laneRecoveryMode = 0;
+    params.ctrl.laneNearValid = false;
+    params.ctrl.laneFarValid = false;
+    params.ctrl.laneNearError = 0.0f;
+    params.ctrl.laneFarError = 0.0f;
+    params.ctrl.laneHeadingConfidence = 0.0f;
     params.ctrl.centerEdge.clear();
     style.clear();
     controlValid = false;

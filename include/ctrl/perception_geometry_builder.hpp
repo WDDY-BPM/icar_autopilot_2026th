@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <vector>
 #include "config/config.hpp"
 #include "ctrl/track.hpp"
@@ -62,7 +63,8 @@ enum class LateralScaleReason
     FULL_DUAL = 0,
     SINGLE_PREVIEW = 1,
     SINGLE_RECOVERY = 2,
-    SINGLE_NO_HEADING = 3
+    SINGLE_NO_HEADING = 3,
+    WEAK_HYBRID_CONFLICT = 4
 };
 
 struct LateralScaleResult
@@ -75,6 +77,7 @@ struct LateralScaleResult
 // 真正进入弯道（near/far 同侧）后随 |nearError| 恢复到 1.0；
 // heading 失效时直接恢复 full lateral。仅影响 LEFT/RIGHT_SINGLE。
 inline constexpr float kSingleLaneFullLateralError = 30.0f;
+inline constexpr float kWeakHybridConflictScaleMin = 0.30f;
 
 inline LateralScaleResult singleLaneLateralScale(
     LaneRecoveryMode mode, bool nearValid, bool farValid,
@@ -115,6 +118,34 @@ inline LateralScaleResult singleLaneLateralScale(
         std::abs(nearError) / kSingleLaneFullLateralError, 0.0f, 1.0f);
     result.scale = baseScale + (1.0f - baseScale) * recoveryRatio;
     result.reason = LateralScaleReason::SINGLE_RECOVERY;
+    return result;
+}
+
+// WEAK_HYBRID 弯道预瞄仲裁：near/far 跨中心且 lateral 与 heading 方向冲突
+// 时，把控制权优先交给 heading（lateral 降为 headingConfidence 的钳制值）。
+// 只有明确冲突场景才生效；其余情况返回 FULL_DUAL（不覆盖）。
+inline LateralScaleResult weakHybridConflictLateralScale(
+    LaneRecoveryMode mode, bool nearValid, bool farValid,
+    float nearError, float farError, float headingConfidence,
+    float lateralRaw, float headingApplied, const Config &config)
+{
+    LateralScaleResult result;
+    if (mode != LaneRecoveryMode::WEAK_HYBRID)
+        return result;
+    if (!nearValid || !farValid || headingConfidence <= 0.0f)
+        return result;
+    const bool nearFarStraddle =
+        (nearError > 0.0f && farError < 0.0f) ||
+        (nearError < 0.0f && farError > 0.0f);
+    if (!nearFarStraddle)
+        return result;
+    const bool lateralHeadingConflict =
+        lateralRaw * headingApplied < 0.0f;
+    if (!lateralHeadingConflict)
+        return result;
+    result.scale = std::clamp(
+        headingConfidence, kWeakHybridConflictScaleMin, 1.0f);
+    result.reason = LateralScaleReason::WEAK_HYBRID_CONFLICT;
     return result;
 }
 

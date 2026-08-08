@@ -26,6 +26,7 @@
 #include "utils/tools.hpp"
 #include "utils/params.hpp"
 #include "ctrl/control_algorithms.hpp"
+#include "ctrl/perception_geometry_builder.hpp"
 
 using namespace std;
 
@@ -69,12 +70,27 @@ public:
         const float lateralRaw = error * currentP +
                                  derivative * params->config.turnD;
         const float headingApplied = params->ctrl.laneHeadingCorrection;
-        const float lateralScale = params->ctrl.laneLateralScale;
+        // WEAK_HYBRID 弯道预瞄：lateral 与 heading 方向冲突时优先 heading，
+        // 避免“已确认左弯却仍被 lateral 抵消继续右转”。
+        const auto conflictScale = weakHybridConflictLateralScale(
+            static_cast<LaneRecoveryMode>(params->ctrl.laneRecoveryMode),
+            params->ctrl.laneNearValid, params->ctrl.laneFarValid,
+            params->ctrl.laneNearError, params->ctrl.laneFarError,
+            params->ctrl.laneHeadingConfidence,
+            lateralRaw, headingApplied, params->config);
+        const bool weakHybridConflict =
+            conflictScale.reason == LateralScaleReason::WEAK_HYBRID_CONFLICT;
+        const float lateralScale = weakHybridConflict
+            ? conflictScale.scale : params->ctrl.laneLateralScale;
+        const int lateralScaleReason = weakHybridConflict
+            ? static_cast<int>(conflictScale.reason)
+            : params->ctrl.laneLateralScaleReason;
         const float lateralApplied = lateralRaw * lateralScale;
         const int pwmDiff = static_cast<int>(std::lround(
             lateralApplied + headingApplied));
         params->ctrl.lateralRaw = lateralRaw;
         params->ctrl.laneLateralScale = lateralScale;
+        params->ctrl.laneLateralScaleReason = lateralScaleReason;
         params->ctrl.lateralApplied = lateralApplied;
         params->ctrl.headingApplied = headingApplied;
         params->ctrl.pwmDiff = pwmDiff;

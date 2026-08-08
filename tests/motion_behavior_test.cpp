@@ -1,3 +1,4 @@
+#include "ctrl/center.hpp"
 #include "ctrl/lane_control.hpp"
 #include "ctrl/motion.hpp"
 #include "ctrl/perception_geometry_builder.hpp"
@@ -112,6 +113,51 @@ int main()
         CHECK(!recoveryDampingEnabledForMode(LaneRecoveryMode::WEAK_HYBRID));
         CHECK(!recoveryDampingEnabledForMode(LaneRecoveryMode::LEFT_SINGLE));
         CHECK(!recoveryDampingEnabledForMode(LaneRecoveryMode::RIGHT_SINGLE));
+    }
+    // 2b. WEAK_HYBRID 冲突仲裁纯函数（左右镜像）。
+    {
+        auto params = makeTestParams();
+        const auto conflictLeft = weakHybridConflictLateralScale(
+            LaneRecoveryMode::WEAK_HYBRID, true, true, 48.0f, -13.0f,
+            0.35f, 64.0f, -23.0f, params->config);
+        CHECK(conflictLeft.reason ==
+              LateralScaleReason::WEAK_HYBRID_CONFLICT);
+        CHECK(closeTo(conflictLeft.scale, 0.35f));
+        const auto conflictRight = weakHybridConflictLateralScale(
+            LaneRecoveryMode::WEAK_HYBRID, true, true, -48.0f, 13.0f,
+            0.35f, -64.0f, 23.0f, params->config);
+        CHECK(conflictRight.reason ==
+              LateralScaleReason::WEAK_HYBRID_CONFLICT);
+        CHECK(closeTo(conflictRight.scale, conflictLeft.scale));
+        // near/far 同侧：不冲突。
+        const auto sameSide = weakHybridConflictLateralScale(
+            LaneRecoveryMode::WEAK_HYBRID, true, true, -10.0f, -50.0f,
+            0.4f, -20.0f, -30.0f, params->config);
+        CHECK(sameSide.reason == LateralScaleReason::FULL_DUAL);
+        CHECK(closeTo(sameSide.scale, 1.0f));
+        // heading 无效：不冲突。
+        const auto noHeading = weakHybridConflictLateralScale(
+            LaneRecoveryMode::WEAK_HYBRID, true, true, 48.0f, -13.0f,
+            0.0f, 64.0f, 0.0f, params->config);
+        CHECK(noHeading.reason == LateralScaleReason::FULL_DUAL);
+        CHECK(closeTo(noHeading.scale, 1.0f));
+        // far invalid：不能错误削弱 lateral。
+        const auto farInvalid = weakHybridConflictLateralScale(
+            LaneRecoveryMode::WEAK_HYBRID, true, false, 48.0f, 0.0f,
+            0.4f, 64.0f, -23.0f, params->config);
+        CHECK(farInvalid.reason == LateralScaleReason::FULL_DUAL);
+        CHECK(closeTo(farInvalid.scale, 1.0f));
+        // lateral/heading 同方向：不冲突。
+        const auto sameDirection = weakHybridConflictLateralScale(
+            LaneRecoveryMode::WEAK_HYBRID, true, true, 48.0f, -13.0f,
+            0.4f, -64.0f, -23.0f, params->config);
+        CHECK(sameDirection.reason == LateralScaleReason::FULL_DUAL);
+        CHECK(closeTo(sameDirection.scale, 1.0f));
+        // 非 WEAK_HYBRID 不受影响。
+        const auto dualMode = weakHybridConflictLateralScale(
+            LaneRecoveryMode::STRICT_DUAL, true, true, 48.0f, -13.0f,
+            1.0f, 64.0f, -23.0f, params->config);
+        CHECK(dualMode.reason == LateralScaleReason::FULL_DUAL);
     }
     // 3. STRICT_DUAL：lateral 不缩放（scale=1.0），heading 原样叠加。
     {
@@ -260,6 +306,66 @@ int main()
         CHECK(motion.limitServoCommand(5000, 0.03f) == 1900);
         motion.syncServoCommand(1100);
         CHECK(motion.limitServoCommand(-5000, 0.03f) == 1100);
+    }
+    // 11. WEAK_HYBRID 冲突时 Motion 最终转向明显向左（不被 lateral 抵消）。
+    {
+        auto params = makeTestParams();
+        params->ctrl.center = 187; // error=+27 -> lateralRaw≈63.8
+        params->ctrl.laneHeadingCorrection = -23.0f;
+        params->ctrl.laneLateralScale = 1.0f; // Center 基础值
+        params->ctrl.laneLateralScaleReason = 0;
+        params->ctrl.laneRecoveryMode =
+            static_cast<int>(LaneRecoveryMode::WEAK_HYBRID);
+        params->ctrl.laneNearValid = true;
+        params->ctrl.laneFarValid = true;
+        params->ctrl.laneNearError = 48.0f;
+        params->ctrl.laneFarError = -13.0f;
+        params->ctrl.laneHeadingConfidence = 0.35f;
+        Motion motion;
+        motion.reset();
+        motion.poseControl(params, 0.03f);
+        CHECK(closeTo(params->ctrl.lateralRaw, 63.8f, 1e-1f));
+        CHECK(closeTo(params->ctrl.laneLateralScale, 0.35f));
+        CHECK(params->ctrl.laneLateralScaleReason ==
+              static_cast<int>(LateralScaleReason::WEAK_HYBRID_CONFLICT));
+        const int conflictPwmDiff = params->ctrl.pwmDiff;
+        CHECK(conflictPwmDiff < 0); // 提前左转
+        CHECK(params->ctrl.servo > 1500);
+
+        // 对照：heading 无效（不触发冲突）-> lateral 100% 仍右转。
+        params->ctrl.laneHeadingConfidence = 0.0f;
+        params->ctrl.laneLateralScale = 1.0f; // 恢复 Center 基础值
+        params->ctrl.laneLateralScaleReason = 0;
+        Motion noConflictMotion;
+        noConflictMotion.reset();
+        noConflictMotion.poseControl(params, 0.03f);
+        CHECK(params->ctrl.pwmDiff > 0);
+        CHECK(params->ctrl.servo < 1500);
+        CHECK(conflictPwmDiff < params->ctrl.pwmDiff);
+    }
+    // 12. INVALID/reset 后诊断字段清零，不残留上一有效帧。
+    {
+        auto params = makeTestParams();
+        params->ctrl.lateralRaw = 123.0f;
+        params->ctrl.lateralApplied = 50.0f;
+        params->ctrl.headingApplied = -20.0f;
+        params->ctrl.pwmDiff = 99;
+        params->ctrl.laneLateralScale = 0.45f;
+        params->ctrl.laneLateralScaleReason = 2;
+        params->ctrl.laneNearError = 48.0f;
+        params->ctrl.laneRecoveryMode =
+            static_cast<int>(LaneRecoveryMode::WEAK_HYBRID);
+        Center center;
+        center.fitting(params); // 空轨道 -> resetControlGeometry
+        CHECK(params->ctrl.lateralRaw == 0.0f);
+        CHECK(params->ctrl.lateralApplied == 0.0f);
+        CHECK(params->ctrl.headingApplied == 0.0f);
+        CHECK(params->ctrl.pwmDiff == 0);
+        CHECK(params->ctrl.laneLateralScale == 1.0f);
+        CHECK(params->ctrl.laneLateralScaleReason == 0);
+        CHECK(params->ctrl.laneNearError == 0.0f);
+        CHECK(params->ctrl.laneRecoveryMode ==
+              static_cast<int>(LaneRecoveryMode::INVALID));
     }
     return 0;
 }

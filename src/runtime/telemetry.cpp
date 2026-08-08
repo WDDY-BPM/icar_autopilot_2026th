@@ -46,6 +46,10 @@ std::ofstream &driveLogFile()
             << "right_reliable,"
             << "left_single_usable,"
             << "right_single_usable,"
+            << "left_clipped,"
+            << "right_clipped,"
+            << "left_longest_border_run,"
+            << "right_longest_border_run,"
             << "left_border_ratio,"
             << "right_border_ratio,"
             << "lane_width_ready,"
@@ -175,6 +179,10 @@ void Icar::publishTelemetry(const FrameCycle &frame)
                     << params->track->quality.rightReliable << ','
                     << params->track->quality.leftSingleUsable << ','
                     << params->track->quality.rightSingleUsable << ','
+                    << params->track->quality.leftClipped << ','
+                    << params->track->quality.rightClipped << ','
+                    << params->track->quality.leftLongestBorderRun << ','
+                    << params->track->quality.rightLongestBorderRun << ','
                     << params->track->quality.leftBorderRatio << ','
                     << params->track->quality.rightBorderRatio << ','
                     << center->laneWidthProfileReady() << ','
@@ -262,6 +270,12 @@ void Icar::publishTelemetry(const FrameCycle &frame)
             overlay["path_speed_limit"] = params->pathOverride.speedLimit;
             overlay["perception_left_count"] = params->track->pointsEdgeLeft.size();
             overlay["perception_right_count"] = params->track->pointsEdgeRight.size();
+            overlay["left_clipped"] = params->track->quality.leftClipped;
+            overlay["right_clipped"] = params->track->quality.rightClipped;
+            overlay["left_longest_border_run"] =
+                params->track->quality.leftLongestBorderRun;
+            overlay["right_longest_border_run"] =
+                params->track->quality.rightLongestBorderRun;
             overlay["planned_left_count"] = params->pathOverride.active()
                 ? params->pathOverride.leftEdge.size() : 0;
             overlay["planned_right_count"] = params->pathOverride.active()

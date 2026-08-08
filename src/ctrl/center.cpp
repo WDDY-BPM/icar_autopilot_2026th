@@ -196,6 +196,15 @@ void Center::fitting(shared_ptr<Params> &params)
         params->ctrl.laneLateralScale = lateralScaleResult.scale;
         params->ctrl.laneLateralScaleReason =
             static_cast<int>(lateralScaleResult.reason);
+        // Motion 侧 WEAK_HYBRID 冲突仲裁所需的当前帧几何上下文。
+        params->ctrl.laneRecoveryMode = static_cast<int>(recoveryMode);
+        params->ctrl.laneNearValid = nearCenterValid;
+        params->ctrl.laneFarValid = farCenterValid;
+        params->ctrl.laneNearError =
+            centers.nearCenter - COLSIMAGE / 2.0f;
+        params->ctrl.laneFarError =
+            centers.farCenter - COLSIMAGE / 2.0f;
+        params->ctrl.laneHeadingConfidence = centers.headingConfidence;
 
         controlWindowValid = nearCenterValid;
         if (controlWindowValid)
