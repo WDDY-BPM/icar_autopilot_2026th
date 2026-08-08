@@ -46,6 +46,10 @@ std::ofstream &driveLogFile()
             << "right_reliable,"
             << "left_single_usable,"
             << "right_single_usable,"
+            << "left_interior_points,"
+            << "right_interior_points,"
+            << "left_observed,"
+            << "right_observed,"
             << "left_clipped,"
             << "right_clipped,"
             << "left_longest_border_run,"
@@ -111,6 +115,14 @@ nlohmann::json detectionSummary(const std::vector<PredictResult> &results)
 
 void Icar::publishTelemetry(const FrameCycle &frame)
 {
+        const bool leftObserved =
+            params->track->quality.leftInteriorPoints >=
+                params->config.singleLaneInteriorPointsMin &&
+            !params->track->quality.leftClipped;
+        const bool rightObserved =
+            params->track->quality.rightInteriorPoints >=
+                params->config.singleLaneInteriorPointsMin &&
+            !params->track->quality.rightClipped;
         // Publish the final command after automatic/manual limiting and all
         // emergency/startup overrides, so telemetry is not one frame stale.
         fsmFactory.manual->updateVehicleState(
@@ -140,7 +152,6 @@ void Icar::publishTelemetry(const FrameCycle &frame)
                     ? center->nearCenter - COLSIMAGE / 2 : 0;
                 const int farError = center->farCenterValid
                     ? center->farCenter - COLSIMAGE / 2 : 0;
-
                 const std::string detections =
                     detectionSummary(params->results).dump();
 
@@ -179,6 +190,10 @@ void Icar::publishTelemetry(const FrameCycle &frame)
                     << params->track->quality.rightReliable << ','
                     << params->track->quality.leftSingleUsable << ','
                     << params->track->quality.rightSingleUsable << ','
+                    << params->track->quality.leftInteriorPoints << ','
+                    << params->track->quality.rightInteriorPoints << ','
+                    << leftObserved << ','
+                    << rightObserved << ','
                     << params->track->quality.leftClipped << ','
                     << params->track->quality.rightClipped << ','
                     << params->track->quality.leftLongestBorderRun << ','
@@ -276,6 +291,12 @@ void Icar::publishTelemetry(const FrameCycle &frame)
                 params->track->quality.leftLongestBorderRun;
             overlay["right_longest_border_run"] =
                 params->track->quality.rightLongestBorderRun;
+            overlay["left_interior_points"] =
+                params->track->quality.leftInteriorPoints;
+            overlay["right_interior_points"] =
+                params->track->quality.rightInteriorPoints;
+            overlay["left_observed"] = leftObserved;
+            overlay["right_observed"] = rightObserved;
             overlay["planned_left_count"] = params->pathOverride.active()
                 ? params->pathOverride.leftEdge.size() : 0;
             overlay["planned_right_count"] = params->pathOverride.active()

@@ -12,6 +12,20 @@ inline constexpr int kClippedBorderRun = 20;        // 边缘贴边的最长连�
 inline constexpr int kStartupCommonRows = 20;       // 启动严格双边最小公共行数
 inline constexpr int kStartupBottomTolerance = 6;   // 启动近场覆盖容差（行）
 inline constexpr int kEdgeBottomTolerance = 4;      // 质量评估近场覆盖容差（行）
+inline constexpr int kImageBorderMargin = 2;        // 图像边框判定裕量（像素）
+inline constexpr int kWeakHybridMinCommonInteriorRows = 20; // 弱双边真实观测公共行下限
+
+// 图像边框坐标只能表示“这一侧车道线出视野/clipped”，不能作为真实边线。
+inline bool isImageBorderColumn(int column, int imageWidth)
+{
+    return column <= kImageBorderMargin ||
+           column >= imageWidth - 1 - kImageBorderMargin;
+}
+
+inline bool isInteriorLanePoint(int column, int imageWidth)
+{
+    return !isImageBorderColumn(column, imageWidth);
+}
 
 // 权威的近场覆盖判定：边缘是否延伸到图像底部（近场）。
 template <typename Point>
@@ -142,8 +156,9 @@ inline EdgeReliability assessEdgeReliability(const std::vector<Point> &edge,
             result.maximumJump = std::max(result.maximumJump,
                 static_cast<float>(std::abs(point.y - previousColumn)));
         previousColumn = point.y;
-        const bool onLeftBorder = point.y <= 2;
-        const bool onRightBorder = point.y >= imageWidth - 3;
+        const bool onLeftBorder = point.y <= kImageBorderMargin;
+        const bool onRightBorder =
+            point.y >= imageWidth - 1 - kImageBorderMargin;
         const bool onBorder = leftEdge ? onLeftBorder : onRightBorder;
         leftRun = onLeftBorder ? leftRun + 1 : 0;
         rightRun = onRightBorder ? rightRun + 1 : 0;

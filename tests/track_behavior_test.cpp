@@ -80,6 +80,13 @@ int main()
         CHECK(!(track.quality.leftReliable && track.quality.rightReliable));
         CHECK(selectSingleLaneMode(track.quality) ==
               LaneRecoveryMode::RIGHT_SINGLE);
+        // 图像边框不得进入双边中心：必须是 RIGHT_SINGLE，而不是 WEAK_HYBRID。
+        auto params = makeTestParams();
+        const auto geometry = buildPerceptionGeometry(
+            track, PlannedLaneWidthModel{}, params->config);
+        CHECK(geometry.recoveryMode == LaneRecoveryMode::RIGHT_SINGLE);
+        CHECK(geometry.recoveryMode != LaneRecoveryMode::WEAK_HYBRID);
+        CHECK(!geometry.centerLine.empty());
     }
     // 2. 右弯镜像：右边界贴边裁剪，左边缘可靠 -> LEFT_SINGLE 可用。
     {
@@ -93,6 +100,12 @@ int main()
         CHECK(!(track.quality.leftReliable && track.quality.rightReliable));
         CHECK(selectSingleLaneMode(track.quality) ==
               LaneRecoveryMode::LEFT_SINGLE);
+        auto params = makeTestParams();
+        const auto geometry = buildPerceptionGeometry(
+            track, PlannedLaneWidthModel{}, params->config);
+        CHECK(geometry.recoveryMode == LaneRecoveryMode::LEFT_SINGLE);
+        CHECK(geometry.recoveryMode != LaneRecoveryMode::WEAK_HYBRID);
+        CHECK(!geometry.centerLine.empty());
     }
     // 3. 两边都不足：窄道路不贴边 -> 单边不可用。
     {

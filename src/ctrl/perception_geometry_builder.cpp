@@ -72,13 +72,32 @@ PerceptionGeometryResult buildPerceptionGeometry(
     }
     else if (!track.pointsEdgeLeft.empty() && !track.pointsEdgeRight.empty())
     {
-        result.centerLine = buildDualCenterByRow(
-            track.pointsEdgeLeft, track.pointsEdgeRight,
-            options.rows, options.columns,
-            options.maximumInterpolationGap,
-            options.maximumAcceptedCenterGap,
-            options.nearFieldStartRow);
-        result.recoveryMode = LaneRecoveryMode::WEAK_HYBRID;
+        // 图像边框不是真实车道边线：只有两侧都存在足够真实内部点
+        // （公共行内左右都不是边框）才允许 WEAK_HYBRID 双边构造；
+        // 否则保持 INVALID，禁止用假边线拼凑中心线。
+        if (quality.commonInteriorRows >=
+            control_algorithms::kWeakHybridMinCommonInteriorRows)
+        {
+            std::vector<PointX> interiorLeft;
+            std::vector<PointX> interiorRight;
+            interiorLeft.reserve(track.pointsEdgeLeft.size());
+            interiorRight.reserve(track.pointsEdgeRight.size());
+            for (const auto &point : track.pointsEdgeLeft)
+                if (control_algorithms::isInteriorLanePoint(
+                        point.y, options.columns))
+                    interiorLeft.push_back(point);
+            for (const auto &point : track.pointsEdgeRight)
+                if (control_algorithms::isInteriorLanePoint(
+                        point.y, options.columns))
+                    interiorRight.push_back(point);
+            result.centerLine = buildDualCenterByRow(
+                interiorLeft, interiorRight,
+                options.rows, options.columns,
+                options.maximumInterpolationGap,
+                options.maximumAcceptedCenterGap,
+                options.nearFieldStartRow);
+            result.recoveryMode = LaneRecoveryMode::WEAK_HYBRID;
+        }
     }
     result.nearSamples = static_cast<int>(std::count_if(
         result.centerLine.begin(), result.centerLine.end(),

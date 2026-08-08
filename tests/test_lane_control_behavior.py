@@ -261,6 +261,24 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("right_longest_border_run", telemetry)
         self.assertIn("params.ctrl.lateralRaw = 0.0f", control_geometry)
         self.assertIn("params.ctrl.pwmDiff = 0", control_geometry)
+
+    def test_image_border_is_not_lane_edge(self):
+        lane_quality = (ROOT / "include/ctrl/lane_quality.hpp").read_text(
+            encoding="utf-8")
+        track = (ROOT / "src/ctrl/track.cpp").read_text(encoding="utf-8")
+        builder = (ROOT / "src/ctrl/perception_geometry_builder.cpp").read_text(
+            encoding="utf-8")
+        telemetry = (ROOT / "src/runtime/telemetry.cpp").read_text(encoding="utf-8")
+        self.assertIn("isImageBorderColumn", lane_quality)
+        self.assertIn("isInteriorLanePoint", lane_quality)
+        self.assertIn("kImageBorderMargin", lane_quality)
+        self.assertIn("commonInteriorRows", track)
+        self.assertIn("kWeakHybridMinCommonInteriorRows", builder)
+        self.assertIn("isInteriorLanePoint", builder)
+        self.assertIn("left_interior_points", telemetry)
+        self.assertIn("right_interior_points", telemetry)
+        self.assertIn("left_observed", telemetry)
+        self.assertIn("right_observed", telemetry)
         self.assertIn("lateral_raw", telemetry)
         self.assertIn("lateral_applied", telemetry)
         self.assertIn("pwm_diff", telemetry)

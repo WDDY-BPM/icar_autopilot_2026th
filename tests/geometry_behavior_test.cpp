@@ -270,5 +270,72 @@ int main()
         CHECK(inRange);
         CHECK(result.candidateValid);
     }
+    // 15. 图像边框不是真实边线：一侧边框+一侧真实 -> RIGHT_SINGLE；
+    //     两侧都是边框 -> INVALID（禁止伪造 WEAK_HYBRID）。
+    {
+        auto params = makeTestParams();
+        Track borderLeft;
+        borderLeft.quality = Track::LaneQuality{};
+        borderLeft.quality.leftClipped = true;
+        borderLeft.quality.rightSingleUsable = true;
+        borderLeft.quality.rightReliable = true;
+        borderLeft.quality.rightInteriorPoints = 40;
+        for (int row = 220; row >= 40; --row)
+        {
+            borderLeft.pointsEdgeLeft.emplace_back(row, 0);
+            borderLeft.pointsEdgeRight.emplace_back(row, 240);
+        }
+        const auto single = buildPerceptionGeometry(
+            borderLeft, PlannedLaneWidthModel{}, params->config);
+        CHECK(single.recoveryMode == LaneRecoveryMode::RIGHT_SINGLE);
+        CHECK(single.recoveryMode != LaneRecoveryMode::WEAK_HYBRID);
+
+        Track bothBorder;
+        bothBorder.quality = Track::LaneQuality{};
+        bothBorder.quality.leftClipped = true;
+        bothBorder.quality.rightClipped = true;
+        for (int row = 220; row >= 40; --row)
+        {
+            bothBorder.pointsEdgeLeft.emplace_back(row, 0);
+            bothBorder.pointsEdgeRight.emplace_back(row, COLSIMAGE - 1);
+        }
+        const auto invalid = buildPerceptionGeometry(
+            bothBorder, PlannedLaneWidthModel{}, params->config);
+        CHECK(invalid.recoveryMode == LaneRecoveryMode::INVALID);
+        CHECK(invalid.centerLine.empty());
+        CHECK(!invalid.candidateValid);
+    }
+    // 16. WEAK_HYBRID 准入：两侧真实内部公共行足够才允许双边构造。
+    {
+        auto params = makeTestParams();
+        Track weak;
+        weak.quality = Track::LaneQuality{};
+        weak.quality.commonInteriorRows = 30;
+        weak.pointsEdgeLeft = straightEdge(220, 40, 80);
+        weak.pointsEdgeRight = straightEdge(220, 40, 240);
+        const auto allowed = buildPerceptionGeometry(
+            weak, PlannedLaneWidthModel{}, params->config);
+        CHECK(allowed.recoveryMode == LaneRecoveryMode::WEAK_HYBRID);
+
+        Track weakRejected;
+        weakRejected.quality = Track::LaneQuality{};
+        weakRejected.quality.commonInteriorRows = 10;
+        weakRejected.pointsEdgeLeft = straightEdge(220, 40, 80);
+        weakRejected.pointsEdgeRight = straightEdge(220, 40, 240);
+        const auto rejected = buildPerceptionGeometry(
+            weakRejected, PlannedLaneWidthModel{}, params->config);
+        CHECK(rejected.recoveryMode == LaneRecoveryMode::INVALID);
+        CHECK(rejected.centerLine.empty());
+    }
+    // 17. isImageBorderColumn / isInteriorLanePoint 共用判定。
+    {
+        CHECK(control_algorithms::isImageBorderColumn(0, COLSIMAGE));
+        CHECK(control_algorithms::isImageBorderColumn(2, COLSIMAGE));
+        CHECK(control_algorithms::isImageBorderColumn(COLSIMAGE - 3, COLSIMAGE));
+        CHECK(control_algorithms::isImageBorderColumn(COLSIMAGE - 1, COLSIMAGE));
+        CHECK(control_algorithms::isInteriorLanePoint(3, COLSIMAGE));
+        CHECK(control_algorithms::isInteriorLanePoint(COLSIMAGE - 4, COLSIMAGE));
+        CHECK(!control_algorithms::isInteriorLanePoint(2, COLSIMAGE));
+    }
     return 0;
 }

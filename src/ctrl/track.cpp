@@ -453,6 +453,13 @@ void Track::evaluateQuality()
         if (leftByRow[row] < 0 || rightByRow[row] < 0 ||
             rightByRow[row] <= leftByRow[row])
             continue;
+        // 图像边框点只算 clipped 证据，不能算真实边线：
+        // 只有两侧都为真实内部点的公共行才计入 WEAK_HYBRID 准入。
+        if (control_algorithms::isInteriorLanePoint(
+                leftByRow[row], COLSIMAGE) &&
+            control_algorithms::isInteriorLanePoint(
+                rightByRow[row], COLSIMAGE))
+            quality.commonInteriorRows++;
         const float width = rightByRow[row] - leftByRow[row];
         widths.push_back(width);
         centerSum += (leftByRow[row] + rightByRow[row]) * 0.5f;

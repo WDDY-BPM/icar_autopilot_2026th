@@ -36,6 +36,7 @@ public:
     {
         bool valid = false;
         int commonRows = 0;
+        int commonInteriorRows = 0; // 两侧都为真实内部点（非图像边框）的公共行数
         float widthMean = 0.0f;
         float widthVariation = 1.0f;
         float centerJump = 0.0f;
