@@ -56,6 +56,26 @@ inline LaneRecoveryMode selectSingleLaneMode(
     return LaneRecoveryMode::INVALID;
 }
 
+// 单边重建中心线不能与真实双边中心同等信任：横向P/D按
+// singleLaneHeadingConfidence缩放，航向保持原强度；其余模式不缩放。
+inline float lateralScaleForMode(LaneRecoveryMode mode,
+                                 const Config &config)
+{
+    if (mode == LaneRecoveryMode::LEFT_SINGLE ||
+        mode == LaneRecoveryMode::RIGHT_SINGLE)
+        return config.singleLaneHeadingConfidence;
+    return 1.0f;
+}
+
+// oppositeSideRecovery 的 0.25 额外衰减只用于真实双边几何
+// （STRICT_DUAL/RELAXED_DUAL）；单边与WEAK_HYBRID的跨中心是合法
+// 退化几何，不应再被额外削弱航向。
+inline bool recoveryDampingEnabledForMode(LaneRecoveryMode mode)
+{
+    return mode == LaneRecoveryMode::STRICT_DUAL ||
+           mode == LaneRecoveryMode::RELAXED_DUAL;
+}
+
 // 启动车道决策：严格双边或稳定单边都算有效（复用LaneRecoveryMode，
 // 不是FSM状态）。单边方向与Center共用selectSingleLaneMode。
 inline LaneRecoveryMode assessStartupLaneMode(

@@ -64,9 +64,20 @@ public:
         const float currentP = std::abs(error) * params->config.runP2 +
                                params->config.runP1;
         const float derivative = (error - errorLast) / dt;
+        // 横向P/D与航向项分开计算：单边重建中心线不可与真实双边中心
+        // 同等信任，横向按 laneLateralScale 缩放，航向保持原强度。
+        const float lateralRaw = error * currentP +
+                                 derivative * params->config.turnD;
+        const float headingApplied = params->ctrl.laneHeadingCorrection;
+        const float lateralScale = params->ctrl.laneLateralScale;
+        const float lateralApplied = lateralRaw * lateralScale;
         const int pwmDiff = static_cast<int>(std::lround(
-            error * currentP + derivative * params->config.turnD +
-            params->ctrl.laneHeadingCorrection));
+            lateralApplied + headingApplied));
+        params->ctrl.lateralRaw = lateralRaw;
+        params->ctrl.laneLateralScale = lateralScale;
+        params->ctrl.lateralApplied = lateralApplied;
+        params->ctrl.headingApplied = headingApplied;
+        params->ctrl.pwmDiff = pwmDiff;
 
         // Clamp in the signed domain before converting to uint16_t. Automatic
         // and manual steering share the same time-based actuator rate limiter.

@@ -53,6 +53,13 @@ struct Control
     float speed = 0.0f;
     int center = COLSIMAGE / 2;
     float laneHeadingCorrection = 0.0f;
+    // 单边模式下横向P/D权重（Center按LaneRecoveryMode写入；非单边=1.0）。
+    float laneLateralScale = 1.0f;
+    // 姿态控制诊断：lateral/heading拆分后的实际作用量（Motion写入）。
+    float lateralRaw = 0.0f;
+    float lateralApplied = 0.0f;
+    float headingApplied = 0.0f;
+    int pwmDiff = 0;
     vector<PointX> centerEdge;
     int lineArea = 0;
     bool parking = false;

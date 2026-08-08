@@ -230,6 +230,23 @@ class LaneControlBehaviorTests(unittest.TestCase):
         self.assertIn("overlay[\"left\"] = leftOverlayValid", core)
         self.assertIn("overlay[\"right\"] = rightOverlayValid", core)
 
+    def test_single_lane_lateral_scale_and_damping_wiring(self):
+        motion = (ROOT / "include/ctrl/motion.hpp").read_text(encoding="utf-8")
+        center = (ROOT / "src/ctrl/center.cpp").read_text(encoding="utf-8")
+        builder = (ROOT / "include/ctrl/perception_geometry_builder.hpp").read_text(
+            encoding="utf-8")
+        telemetry = (ROOT / "src/runtime/telemetry.cpp").read_text(encoding="utf-8")
+        self.assertIn("lateralApplied", motion)
+        self.assertIn("params->ctrl.laneLateralScale", motion)
+        self.assertIn("lateralScaleForMode(recoveryMode", center)
+        self.assertIn("recoveryDampingEnabledForMode(recoveryMode)", center)
+        self.assertIn("lateralScaleForMode", builder)
+        self.assertIn("recoveryDampingEnabledForMode", builder)
+        self.assertIn("lateral_scale", telemetry)
+        self.assertIn("lateral_raw", telemetry)
+        self.assertIn("lateral_applied", telemetry)
+        self.assertIn("pwm_diff", telemetry)
+
     def test_steering_json_fallbacks_match_tuned_defaults(self):
         loader = (ROOT / "src/config/config_loader.cpp").read_text(encoding="utf-8")
         self.assertIn('value("servoRate", 600.0f)', loader)

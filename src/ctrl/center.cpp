@@ -137,6 +137,9 @@ void Center::fitting(shared_ptr<Params> &params)
                                      : LaneRecoveryMode::INVALID;
         style = pathSourceName(planned.source);
     }
+    // 单边模式下 Motion 对重建中心线的横向P/D使用缩放权重。
+    params->ctrl.laneLateralScale =
+        lateralScaleForMode(recoveryMode, params->config);
     usableCenterRows = static_cast<int>(params->ctrl.centerEdge.size());
 
     bool controlWindowValid = true;
@@ -147,11 +150,6 @@ void Center::fitting(shared_ptr<Params> &params)
     {
         const bool strictDualHeading = recoveryMode == LaneRecoveryMode::STRICT_DUAL;
         const bool relaxedDualHeading = recoveryMode == LaneRecoveryMode::RELAXED_DUAL;
-        // 单边车道在正常大弯中 near/far 跨图像中心是合法几何，不能当作
-        // opposite-side recovery，因此关闭 0.25 的额外衰减。
-        const bool singleLaneMode =
-            recoveryMode == LaneRecoveryMode::LEFT_SINGLE ||
-            recoveryMode == LaneRecoveryMode::RIGHT_SINGLE;
         const bool degradedHeading = visionLaneMode &&
             recoveryMode != LaneRecoveryMode::INVALID &&
             recoveryMode != LaneRecoveryMode::STRICT_DUAL &&
@@ -176,7 +174,7 @@ void Center::fitting(shared_ptr<Params> &params)
             pathHeadingConfidence > 0.0f, params->config.laneHeadingGain,
             params->config.laneHeadingMaxCorrection,
             params->config.laneHeadingFadeError, pathHeadingConfidence,
-            !singleLaneMode);
+            recoveryDampingEnabledForMode(recoveryMode));
         nearCenterSamples = centers.nearSamples;
         farCenterSamples = centers.farSamples;
         headingError = centers.headingError;

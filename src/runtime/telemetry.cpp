@@ -29,6 +29,11 @@ std::ofstream &driveLogFile()
             << "heading_rad,"
             << "heading_deg,"
             << "heading_correction,"
+            << "lateral_raw,"
+            << "lateral_scale,"
+            << "lateral_applied,"
+            << "heading_applied,"
+            << "pwm_diff,"
             << "heading_confidence,"
             << "opposite_side_recovery,"
             << "recovery_damping,"
@@ -152,6 +157,11 @@ void Icar::publishTelemetry(const FrameCycle &frame)
                     << std::setprecision(2)
                     << (static_cast<double>(center->headingError) * kRadToDeg) << ','
                     << center->headingCorrection << ','
+                    << params->ctrl.lateralRaw << ','
+                    << params->ctrl.lateralScale << ','
+                    << params->ctrl.lateralApplied << ','
+                    << params->ctrl.headingApplied << ','
+                    << params->ctrl.pwmDiff << ','
                     << center->headingConfidence << ','
                     << center->oppositeSideRecovery << ','
                     << center->recoveryDamping << ','
@@ -222,6 +232,11 @@ void Icar::publishTelemetry(const FrameCycle &frame)
             overlay["center_error"] = params->ctrl.center - COLSIMAGE / 2;
             overlay["recovery_mode"] =
                 laneRecoveryModeName(center->recoveryMode);
+            overlay["lateral_raw"] = params->ctrl.lateralRaw;
+            overlay["lateral_scale"] = params->ctrl.laneLateralScale;
+            overlay["lateral_applied"] = params->ctrl.lateralApplied;
+            overlay["heading_applied"] = params->ctrl.headingApplied;
+            overlay["pwm_diff"] = params->ctrl.pwmDiff;
             overlay["ctrl_stop"] = params->ctrl.stop;
             overlay["must_stop"] = params->mustStop();
             overlay["stop_reasons"] = params->stopReasonString();
